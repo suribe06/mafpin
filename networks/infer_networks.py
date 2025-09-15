@@ -17,6 +17,7 @@ The inferred networks are stored in data/inferred_networks/ with subfolders for 
 """
 
 import os
+import glob
 import shutil
 import subprocess
 import numpy as np
@@ -31,11 +32,40 @@ def create_output_directories(base_path, model_name):
         model_name (str): Name of the model (exponential, powerlaw, rayleigh)
     
     Returns:
-        str: Path to the model-specific directory
+        tuple: (model_directory_path, edge_info_directory_path)
     """
     model_dir = os.path.join(base_path, model_name)
+    edge_info_dir = os.path.join(model_dir, 'edge_info')
     os.makedirs(model_dir, exist_ok=True)
-    return model_dir
+    os.makedirs(edge_info_dir, exist_ok=True)
+    return model_dir, edge_info_dir
+
+def cleanup_edge_info_files(model_suffix, edge_info_dir):
+    """
+    Clean up any remaining edge info files that might not have been moved during processing.
+    
+    Args:
+        model_suffix (str): Model suffix (expo, power, ray)
+        edge_info_dir (str): Path to the edge info directory
+    """
+    try:
+        # Look for any remaining edge info files in the current directory
+        pattern = f"*-{model_suffix}-*-edge.info"
+        remaining_files = glob.glob(pattern)
+        moved_count = 0
+        for file_path in remaining_files:
+            try:
+                destination = os.path.join(edge_info_dir, os.path.basename(file_path))
+                shutil.move(file_path, destination)
+                moved_count += 1
+            except Exception as e: # pylint: disable=broad-except
+                print(f"  Warning: Could not move {file_path}: {str(e)}")
+
+        if moved_count > 0:
+            print(f"  Cleanup: Moved {moved_count} remaining edge info files")
+
+    except Exception as e: # pylint: disable=broad-except
+        print(f"  Warning: Error during edge info cleanup: {str(e)}")
 
 def infer_networks(
         cascades_file="cascades.txt",
@@ -82,7 +112,7 @@ def infer_networks(
 
         # Create output directories
         base_output_dir = os.path.join('..', 'data', 'inferred_networks')
-        model_output_dir = create_output_directories(base_output_dir, model_name)
+        model_output_dir, edge_info_dir = create_output_directories(base_output_dir, model_name)
 
         print(f"Starting network inference with {n} alpha values...")
         print(f"Model: {model_name} ({model})")
@@ -166,6 +196,13 @@ def infer_networks(
                 destination = os.path.join(model_output_dir, output_file)
                 shutil.move(output_file, destination)
 
+                # Check for and move edge info file if it exists
+                edge_info_file = f"{output_filename}-edge.info"
+                if os.path.exists(edge_info_file):
+                    edge_info_destination = os.path.join(edge_info_dir, edge_info_file)
+                    shutil.move(edge_info_file, edge_info_destination)
+                    print(f"  Edge info file moved to: {edge_info_destination}")
+
                 successful_inferences += 1
 
             except Exception as e: # pylint: disable=broad-except
@@ -181,10 +218,14 @@ def infer_networks(
         results_file = os.path.join(model_output_dir, f'inferred_edges_{model_suffix}.csv')
         results_df.to_csv(results_file, sep='|', index=False)
 
+        # Clean up any remaining edge info files
+        cleanup_edge_info_files(model_suffix, edge_info_dir)
+
         print("\nInference completed!")
         print(f"Successful inferences: {successful_inferences}/{n}")
         print(f"Results saved to: {results_file}")
         print(f"Network files saved to: {model_output_dir}")
+        print(f"Edge info files saved to: {edge_info_dir}")
 
         return True
 
