@@ -126,19 +126,22 @@ def infer_networks(
 
         # Compute alpha centers for the specific model
         alpha_centers = alpha_centers_from_delta(delta_seconds)
+        alpha_center = None
+        alpha_values = None
 
-        # Select the appropriate alpha center based on model
+        # Select the appropriate alpha center based on model and generate alpha grid
         if model == 0:  # Exponential
             alpha_center = alpha_centers["exp_per_sec"]
+            alpha_values = log_alpha_grid(alpha_center, r=r, N=n)
             print(f"Using exponential model: α_center = {alpha_center:.6e} per second")
+        elif model == 1:  # Powerlaw
+            # alpha is dimensionless, so use a linear scale
+            alpha_values = np.linspace(1, 5, n)
         elif model == 2:  # Rayleigh
             alpha_center = alpha_centers["ray_per_sec2"]
+            alpha_values = log_alpha_grid(alpha_center, r=r, N=n)
             print(f"Using Rayleigh model: α_center = {alpha_center:.6e} per second²")
 
-        # Generate log-spaced alpha grid
-        alpha_values = log_alpha_grid(alpha_center, r=r, N=n)
-        if model == 1:  # Powerlaw
-            alpha_values = np.linspace(1, 5, n)
         alpha_min, alpha_max = alpha_values.min(), alpha_values.max()
         print(f"Generated log-spaced alpha grid: [{alpha_min:.2e}, {alpha_max:.2e}] with {n} points")
 
