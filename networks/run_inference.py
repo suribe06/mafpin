@@ -3,11 +3,12 @@
 Network Inference Runner Script
 
 This script provides a command-line interface to run network inference
-with custom parameters.
+with custom parameters. Alpha values are automatically computed from
+cascade data using log-spaced grids based on median time differences.
 
 Usage examples:
 - python run_inference.py --help
-- python run_inference.py --model 0 --N 50 --alpha-0 1e-6 --alpha-f 1e-2
+- python run_inference.py --model 0 --N 50 --r 50
 - python run_inference.py --all-models --N 20
 - python run_inference.py --cascades custom_cascades.txt --model 1 --max-iter 100000
 """
@@ -20,7 +21,7 @@ def main():
     """Main function to parse arguments and run inference."""
 
     parser = argparse.ArgumentParser(
-        description='Infer networks from cascade data using netinf executable',
+        description='Infer networks from cascade data using netinf executable with log-spaced alpha grids',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
@@ -32,24 +33,10 @@ def main():
     )
 
     parser.add_argument(
-        '--alpha-0', 
-        type=float,
-        default=1e-7,
-        help='Initial alpha value (transmission rate)'
-    )
-
-    parser.add_argument(
-        '--alpha-f', 
-        type=float,
-        default=1e-3,
-        help='Final alpha value (transmission rate)'
-    )
-
-    parser.add_argument(
         '--N', 
         type=int,
         default=100,
-        help='Number of different alpha values to generate'
+        help='Number of different alpha values to generate (log-spaced)'
     )
 
     parser.add_argument(
@@ -75,6 +62,13 @@ def main():
     )
 
     parser.add_argument(
+        '--r',
+        type=float,
+        default=100.0,
+        help='Multiplicative range factor for alpha grid (grid covers [α_center/r, α_center*r])'
+    )
+
+    parser.add_argument(
         '--all-models', 
         action='store_true',
         help='Run inference for all three models (ignores --model parameter)'
@@ -85,10 +79,11 @@ def main():
     # Print configuration
     print("Network Inference Configuration:")
     print(f"  Cascades file: {args.cascades}")
-    print(f"  Alpha range: {args.alpha_0:.2e} to {args.alpha_f:.2e}")
-    print(f"  Number of alphas: {args.N}")
+    print(f"  Number of alphas: {args.N} (log-spaced)")
+    print(f"  Range factor (r): {args.r}")
     print(f"  Max iterations: {args.max_iter}")
     print(f"  Output name: {args.name_output}")
+    print("  Alpha values: Computed automatically from cascade data")
 
     if args.all_models:
         print("  Models: All (exponential, powerlaw, rayleigh)")
@@ -96,11 +91,10 @@ def main():
 
         results = infer_networks_all_models(
             cascades_file=args.cascades,
-            alpha_0=args.alpha_0,
-            alpha_f=args.alpha_f,
             n=args.N,
             max_iter=args.max_iter,
-            name_output=args.name_output
+            name_output=args.name_output,
+            r=args.r
         )
 
         # Print final summary
@@ -119,12 +113,11 @@ def main():
 
         success = infer_networks(
             cascades_file=args.cascades,
-            alpha_0=args.alpha_0,
-            alpha_f=args.alpha_f,
             n=args.N,
             model=args.model,
             max_iter=args.max_iter,
-            name_output=args.name_output
+            name_output=args.name_output,
+            r=args.r
         )
 
         if success:
