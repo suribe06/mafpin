@@ -9,4 +9,5 @@ scipy==1.13.1
 six==1.17.0
 scikit-learn==1.6.1
 snap-stanford==6.0.0
+tqdm==4.67.1
 tzdata==2025.2
