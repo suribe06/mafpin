@@ -1,20 +1,48 @@
 #!/usr/bin/env python3
 """
-New CMF module combining the good RMSE results from old_cmf.py 
-with the clean function structure from cmf.py
+Collaborative Matrix Factorization (CMF) Implementation
+This module implements a Collaborative Matrix Factorization approach for recommendation systems,
+providing a complete workflow from data loading to model evaluation and recommendation generation.
+The module includes functionality for:
+- Loading and preprocessing rating datasets
+- Training CMF models with customizable parameters
+- Performing hyperparameter search with cross-validation
+- Evaluating model performance with multiple metrics
+- Generating recommendations for users
+- Visualizing results and model performance
+Key Features:
+- Efficient data preprocessing with label encoding
+- Cross-validation for robust parameter estimation
+- Randomized hyperparameter search
+- Multiple evaluation metrics (RMSE, MAE, R²)
+- Visualization tools for analysis
+Dependencies:
+    - numpy
+    - pandas
+    - scipy
+    - sklearn
+    - cmfrec
+    - model_plots (custom module for visualization)
+Note:
+    This implementation is designed to work with rating datasets in CSV format
+    with at least three columns: user IDs, item IDs, and ratings.
 """
 
 import os
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from scipy.stats import uniform, randint
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 from cmfrec import CMF
-
+from model_plots import (
+    plot_hyperparameter_search_results,
+    plot_parameter_heatmap,
+    plot_convergence_analysis,
+    plot_metrics_comparison
+)
 
 def load_dataset(filename):
     """
@@ -518,6 +546,31 @@ def run_complete_example(filename='ratings_small.csv'):
         print(f"Top 5 recommendations for user {sample_user}:")
         for i, (item_id, rating) in enumerate(recommendations, 1):
             print(f"  {i}. Item {item_id}: {rating:.4f}")
+
+    # 5. Generate visualizations
+    print("\n5. Generating visualizations...")
+    try:
+        # Comprehensive hyperparameter search visualization
+        print("   - Creating hyperparameter search results plot...")
+        plot_hyperparameter_search_results(search_results, save_path='hyperparameter_search.png')
+
+        # Parameter space heatmap
+        print("   - Creating parameter space heatmap...")
+        plot_parameter_heatmap(search_results, metric='rmse', save_path='parameter_heatmap.png')
+
+        # Convergence analysis
+        print("   - Creating convergence analysis plot...")
+        plot_convergence_analysis(search_results, save_path='convergence_analysis.png')
+
+        # Metrics comparison
+        print("   - Creating metrics comparison plot...")
+        plot_metrics_comparison(search_results, save_path='metrics_comparison.png')
+
+        print("   All visualizations generated successfully!")
+
+    except Exception as e: # pylint: disable=broad-except
+        print(f"   Warning: Error generating plots: {str(e)}")
+        print("   Continuing without visualizations...")
 
     print("\n" + "=" * 80)
     print("WORKFLOW COMPLETED SUCCESSFULLY!")
