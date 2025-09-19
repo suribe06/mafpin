@@ -103,7 +103,7 @@ The algorithm automatically computes model-specific α ranges using cascade temp
 We first compute the **median time difference** between user interactions within cascades:
 
 $$
-\tilde{\Delta} = \text{median}\lbrace\, t_i - t_j \mid t_i > t_j \,\rbrace
+\tilde{\Delta} = \text{median}\lbrace t_i - t_j \mid t_i > t_j \rbrace
 $$
 
 Timestamps are assumed to be in **Unix epoch seconds**, but they may be converted to **days** or **years** as long as the same unit system is used consistently for Δ, α, and cascade timestamps.
@@ -115,9 +115,13 @@ Timestamps are assumed to be in **Unix epoch seconds**, but they may be converte
 Each transmission model has a theoretical relationship between its **median** and **α**, which defines a natural center point:
 
 - **Exponential**
+<div align="center">
+
 $$
 m = \frac{\ln(2)}{\alpha} \quad \Rightarrow \quad \alpha_{\text{center}} = \frac{\ln(2)}{\tilde{\Delta}}
 $$
+
+</div>
 
 - **Rayleigh**
 $$
@@ -148,7 +152,7 @@ For Exponential and Rayleigh models, we explore α values around the center on a
 The grid formula is:
 
 $$
-\alpha_i = \alpha_{\text{center}} \cdot r^{\,\tfrac{2i}{N-1}-1}, 
+\alpha_i = \alpha_{\text{center}} \cdot r^{\left( \tfrac{2i}{N-1}-1 \right)}, 
 \quad i = 0, 1, \dots, N-1
 $$
 
