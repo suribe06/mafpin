@@ -103,7 +103,7 @@ The algorithm automatically computes model-specific α ranges using cascade temp
 We first compute the **median time difference** between user interactions within cascades:
 
 $$
-\tilde{\Delta} = \text{median}\{\, t_i - t_j \mid t_i > t_j \,\}
+\tilde{\Delta} = \text{median}\lbrace\, t_i - t_j \mid t_i > t_j \,\rbrace
 $$
 
 Timestamps are assumed to be in **Unix epoch seconds**, but they may be converted to **days** or **years** as long as the same unit system is used consistently for Δ, α, and cascade timestamps.
@@ -115,26 +115,26 @@ Timestamps are assumed to be in **Unix epoch seconds**, but they may be converte
 Each transmission model has a theoretical relationship between its **median** and **α**, which defines a natural center point:
 
 - **Exponential**
-  $$
-  m = \frac{\ln(2)}{\alpha} \quad \Rightarrow \quad \alpha_{\text{center}} = \frac{\ln(2)}{\tilde{\Delta}}
-  $$
+$$
+m = \frac{\ln(2)}{\alpha} \quad \Rightarrow \quad \alpha_{\text{center}} = \frac{\ln(2)}{\tilde{\Delta}}
+$$
 
 - **Rayleigh**
-  $$
-  m = \sqrt{\frac{2 \ln(2)}{\alpha}} \quad \Rightarrow \quad \alpha_{\text{center}} = \frac{2 \ln(2)}{\tilde{\Delta}^2}
-  $$
+$$
+m = \sqrt{\frac{2 \ln(2)}{\alpha}} \quad \Rightarrow \quad \alpha_{\text{center}} = \frac{2 \ln(2)}{\tilde{\Delta}^2}
+$$
 
 - **Power-law**
-  $$
-  m = 2^{1/\alpha}\Delta_{\min} \quad \Rightarrow \quad 
-  \alpha = \frac{\ln(2)}{\ln(\tilde{\Delta}/\Delta_{\min})}
-  $$
+$$
+m = 2^{1/\alpha}\Delta_{\min} \quad \Rightarrow \quad 
+\alpha = \frac{\ln(2)}{\ln(\tilde{\Delta}/\Delta_{\min})}
+$$
   However, for typical datasets this value falls **below 1**, while the inference algorithm only supports
-  $$\alpha \geq 1.$$  
+$$\alpha \geq 1.$$  
   Therefore, in practice we use a **fixed linear grid** in the range:
-  $$
-  \alpha \in [1, 3] \quad \text{or} \quad [1, 5].
-  $$
+$$
+\alpha \in [1, 3] \quad \text{or} \quad [1, 5].
+$$
 
 ---
 
