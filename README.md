@@ -124,21 +124,37 @@ $$
 </div>
 
 - **Rayleigh**
+<div align="center">
+
 $$
 m = \sqrt{\frac{2 \ln(2)}{\alpha}} \quad \Rightarrow \quad \alpha_{\text{center}} = \frac{2 \ln(2)}{\tilde{\Delta}^2}
 $$
 
+</div>
+
 - **Power-law**
+<div align="center">
+
 $$
 m = 2^{1/\alpha}\Delta_{\min} \quad \Rightarrow \quad 
 \alpha = \frac{\ln(2)}{\ln(\tilde{\Delta}/\Delta_{\min})}
 $$
-  However, for typical datasets this value falls **below 1**, while the inference algorithm only supports
-$$\alpha \geq 1.$$  
-  Therefore, in practice we use a **fixed linear grid** in the range:
+
+</div>
+However, for typical datasets this value falls below 1, while the inference algorithm only supports
+<div align="center">
+
+$$\alpha \geq 1.$$
+
+</div>
+Therefore, in practice we use a fixed linear grid in the range:
+<div align="center">
+
 $$
 \alpha \in [1, 3] \quad \text{or} \quad [1, 5].
 $$
+
+</div>
 
 ---
 
