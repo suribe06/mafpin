@@ -37,7 +37,7 @@ from tqdm import tqdm
 
 from utils import load_dataset, split_data_single, predict_ratings
 from cmf import search_best_params, evaluate_with_cv
-from model_plots import plot_alpha_rmse_analysis
+from model_plots import plot_alpha_rmse_analysis, plot_alpha_delta_rmse
 
 
 def load_centrality_metrics(model_name, network_index, transform='standardize'):
@@ -219,6 +219,29 @@ def evaluate_single_network(data, model_name, network_index, best_params):
     except Exception: # pylint: disable=broad-except
         return None
 
+def _save_rmses(model_name, rmse_scores):
+    """Save RMSE scores to the corresponding alpha values CSV file."""
+    model_shorts = {
+        'exponential': 'expo',
+        'powerlaw': 'power',
+        'rayleigh': 'ray'
+    }
+    try:
+        data_path = f"../data/inferred_networks/{model_name}"
+        filename = f"inferred_edges_{model_shorts.get(model_name)}.csv"
+        filepath = os.path.join(data_path, filename)
+
+        if not os.path.exists(filepath):
+            print(f"Error: Alpha values file not found: {filepath}")
+            return np.array([])
+
+        alpha_df = pd.read_csv(filepath, sep='|')
+        # store rmse_scores in alpha_df
+        alpha_df['rmse'] = rmse_scores
+        alpha_df.to_csv(filepath, index=False, sep='|')
+    except Exception as e: # pylint: disable=broad-except
+        print(f"Error saving RMSE scores: {str(e)}")
+
 def run_centrality_evaluation(sample_networks=5):
     """Run complete evaluation of centrality metrics across network models."""
     print("=" * 60)
@@ -264,16 +287,21 @@ def run_centrality_evaluation(sample_networks=5):
         print(f"\n--- Evaluating {model_name.upper()} networks ---")
         model_results = []
         rmse_scores = []
+        baselines_rmse = []
 
         for net_idx in tqdm(network_indices, desc=f"{model_name.capitalize()}"):
             result = evaluate_single_network(data, model_name, net_idx, best_params)
             if result is not None:
                 model_results.append(result)
                 rmse_scores.append(result['enhanced_rmse'])
+                baselines_rmse.append(result['baseline_rmse'])
                 print(f"  Network {net_idx}: {result['improvement']:+.3f}% improvement "
                       f"({result['users_with_attributes']} users)")
             else:
                 print(f"  Network {net_idx}: Failed")
+
+        # Save RMSE scores to the corresponding alpha values CSV file
+        _save_rmses(model_name, rmse_scores)
 
         if model_results:
             improvements = [r['improvement'] for r in model_results]
@@ -295,7 +323,9 @@ def run_centrality_evaluation(sample_networks=5):
             print(f"\n{model_name.upper()}: No successful evaluations")
             all_results['results'][model_name] = None
 
+        baseline_rmse = np.mean(baselines_rmse) if baselines_rmse else baseline_rmse
         plot_alpha_rmse_analysis(model_name, rmse_scores, baseline_rmse, save_plot=True)
+        plot_alpha_delta_rmse(model_name, rmse_scores, baseline_rmse, save_plot=True)
 
     # Final summary
     print("\n" + "=" * 60)
