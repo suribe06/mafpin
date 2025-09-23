@@ -37,6 +37,7 @@ from tqdm import tqdm
 
 from utils import load_dataset, split_data_single, predict_ratings
 from cmf import search_best_params, evaluate_with_cv
+from model_plots import plot_alpha_rmse_analysis
 
 
 def load_centrality_metrics(model_name, network_index, transform='standardize'):
@@ -262,11 +263,13 @@ def run_centrality_evaluation(sample_networks=5):
     for model_name in models:
         print(f"\n--- Evaluating {model_name.upper()} networks ---")
         model_results = []
+        rmse_scores = []
 
         for net_idx in tqdm(network_indices, desc=f"{model_name.capitalize()}"):
             result = evaluate_single_network(data, model_name, net_idx, best_params)
             if result is not None:
                 model_results.append(result)
+                rmse_scores.append(result['enhanced_rmse'])
                 print(f"  Network {net_idx}: {result['improvement']:+.3f}% improvement "
                       f"({result['users_with_attributes']} users)")
             else:
@@ -291,6 +294,8 @@ def run_centrality_evaluation(sample_networks=5):
         else:
             print(f"\n{model_name.upper()}: No successful evaluations")
             all_results['results'][model_name] = None
+
+        plot_alpha_rmse_analysis(model_name, rmse_scores, baseline_rmse, save_plot=True)
 
     # Final summary
     print("\n" + "=" * 60)

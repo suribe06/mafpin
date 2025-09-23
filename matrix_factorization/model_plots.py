@@ -362,7 +362,7 @@ def plot_metrics_comparison(search_results, save_path=None, figsize=(15, 5)):
 
 
 def plot_alpha_rmse_analysis(
-        model_name, rmse_values, baseline_rmse, save_path=None, figsize=(12, 8)
+        model_name, rmse_values, baseline_rmse, save_plot=True, figsize=(12, 8)
     ):
     """
     Plot alpha values vs RMSE with highlighted best alpha and baseline RMSE reference.
@@ -371,7 +371,7 @@ def plot_alpha_rmse_analysis(
         model_name (str): Name of the model ('exponential', 'powerlaw', or 'rayleigh')
         rmse_values (list): List of RMSE values corresponding to alpha values
         baseline_rmse (float): Baseline RMSE value to show as reference line
-        save_path (str, optional): Path to save the plot
+        save_plot (bool, optional): Whether to save the plot
         figsize (tuple): Figure size (width, height)
     """
     model_shorts = {
@@ -436,12 +436,11 @@ def plot_alpha_rmse_analysis(
         plt.tight_layout()
 
         # Save if requested
-        if save_path:
-            plots_dir = "../plots"
-            os.makedirs(plots_dir, exist_ok=True)
-            full_path = os.path.join(plots_dir, save_path)
-            plt.savefig(full_path, dpi=300, bbox_inches='tight')
-            print(f"Alpha vs RMSE plot saved to: {full_path}")
+        if save_plot:
+            plot_filename = f"alpha_rmse_{model_shorts.get(model_name)}.png"
+            plot_path = os.path.join("..", "plots", plot_filename)
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            print(f"Alpha vs RMSE plot saved to: {plot_path}")
 
         plt.show()
 
