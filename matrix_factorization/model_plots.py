@@ -359,3 +359,101 @@ def plot_metrics_comparison(search_results, save_path=None, figsize=(15, 5)):
 
     except Exception as e: # pylint: disable=broad-except
         print(f"Metrics comparison plotting error: {str(e)}")
+
+
+def plot_alpha_rmse_analysis(
+        model_name, rmse_values, baseline_rmse, save_path=None, figsize=(12, 8)
+    ):
+    """
+    Plot alpha values vs RMSE with highlighted best alpha and baseline RMSE reference.
+    
+    Args:
+        model_name (str): Name of the model ('exponential', 'powerlaw', or 'rayleigh')
+        rmse_values (list): List of RMSE values corresponding to alpha values
+        baseline_rmse (float): Baseline RMSE value to show as reference line
+        save_path (str, optional): Path to save the plot
+        figsize (tuple): Figure size (width, height)
+    """
+    model_shorts = {
+        'exponential': 'expo',
+        'powerlaw': 'power',
+        'rayleigh': 'ray'
+    }
+    try:
+        # Load alpha values from the inferred edges file
+        data_path = f"../data/inferred_networks/{model_name}"
+        filename = f"inferred_edges_{model_shorts.get(model_name)}.csv"
+        filepath = os.path.join(data_path, filename)
+
+        if not os.path.exists(filepath):
+            print(f"Error: Alpha values file not found: {filepath}")
+            return
+
+        # Load alpha values
+        alpha_df = pd.read_csv(filepath, sep='|')
+        alpha_values = alpha_df['alpha'].values
+
+        # Ensure we have matching number of alpha values and RMSE values
+        assert len(alpha_values) == len(rmse_values)
+        if len(alpha_values) == 0 or len(rmse_values) == 0:
+            print("Error: No data to plot")
+            return
+
+        # Find best alpha (lowest RMSE)
+        best_idx = np.argmin(rmse_values)
+        best_alpha = alpha_values[best_idx]
+        best_rmse = rmse_values[best_idx]
+
+        # Create the plot
+        plt.figure(figsize=figsize)
+
+        # Plot alpha vs RMSE
+        plt.plot(alpha_values, rmse_values, 'b-', linewidth=2, alpha=0.7, label='RMSE vs Alpha')
+        plt.scatter(alpha_values, rmse_values, c='blue', alpha=0.6, s=30)
+
+        # Highlight best alpha
+        plt.scatter(best_alpha, best_rmse, c='red', s=100, marker='*',
+                   label=f'Best α: {best_alpha:.2e}\nRMSE: {best_rmse:.4f}', zorder=5)
+
+        # Add baseline RMSE as horizontal dotted line
+        plt.axhline(y=baseline_rmse, color='green', linestyle='--', linewidth=2,
+                   label=f'Baseline RMSE: {baseline_rmse:.4f}')
+
+        # Formatting
+        plt.xlabel('Alpha Value', fontsize=12)
+        plt.ylabel('RMSE', fontsize=12)
+        plt.title(f'Alpha vs RMSE Analysis - {model_name.capitalize()} Model',
+                 fontsize=14, fontweight='bold')
+
+        # Use logarithmic scale for alpha if the range is very large
+        alpha_range = max(alpha_values) / min(alpha_values) if min(alpha_values) > 0 else 1
+        if alpha_range > 1000:  # Use log scale if range spans more than 3 orders of magnitude
+            plt.xscale('log')
+            plt.xlabel('Alpha Value (log scale)', fontsize=12)
+
+        plt.grid(True, alpha=0.3)
+        plt.legend(fontsize=10)
+        plt.tight_layout()
+
+        # Save if requested
+        if save_path:
+            plots_dir = "../plots"
+            os.makedirs(plots_dir, exist_ok=True)
+            full_path = os.path.join(plots_dir, save_path)
+            plt.savefig(full_path, dpi=300, bbox_inches='tight')
+            print(f"Alpha vs RMSE plot saved to: {full_path}")
+
+        plt.show()
+
+        # Print summary
+        improvement = ((baseline_rmse - best_rmse) / baseline_rmse) * 100
+        print(f"\n{model_name.capitalize()} Model Alpha Analysis:")
+        print("="*50)
+        print(f"Best Alpha: {best_alpha:.6e}")
+        print(f"Best RMSE: {best_rmse:.6f}")
+        print(f"Baseline RMSE: {baseline_rmse:.6f}")
+        print(f"Improvement: {improvement:+.3f}%")
+        print(f"Total alpha values tested: {len(alpha_values)}")
+
+    except Exception as e: # pylint: disable=broad-except
+        print(f"Alpha vs RMSE plotting error: {str(e)}")
