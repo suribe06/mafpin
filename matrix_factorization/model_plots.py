@@ -8,6 +8,7 @@ metrics comparison, and convergence analysis from CMF model training.
 import os
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
 
 
@@ -360,6 +361,39 @@ def plot_metrics_comparison(search_results, save_path=None, figsize=(15, 5)):
     except Exception as e: # pylint: disable=broad-except
         print(f"Metrics comparison plotting error: {str(e)}")
 
+def _extract_alphas(model_name):
+    """
+    Helper function to extract alpha values from the inferred edges file.
+    
+    Args:
+        model_name (str): Name of the model ('exponential', 'powerlaw', or 'rayleigh')
+    Returns:
+        np.ndarray: Array of alpha values
+    """
+    model_shorts = {
+        'exponential': 'expo',
+        'powerlaw': 'power',
+        'rayleigh': 'ray'
+    }
+    try:
+        data_path = f"../data/inferred_networks/{model_name}"
+        filename = f"inferred_edges_{model_shorts.get(model_name)}.csv"
+        filepath = os.path.join(data_path, filename)
+
+        if not os.path.exists(filepath):
+            print(f"Error: Alpha values file not found: {filepath}")
+            return np.array([])
+
+        alpha_df = pd.read_csv(filepath, sep='|')
+        if 'alpha' not in alpha_df.columns:
+            print("Error: 'alpha' column not found in the data")
+            return np.array([])
+
+        return alpha_df['alpha'].values
+
+    except Exception as e: # pylint: disable=broad-except
+        print(f"Error extracting alphas: {str(e)}")
+        return np.array([])
 
 def plot_alpha_rmse_analysis(
         model_name, rmse_values, baseline_rmse, save_plot=True, figsize=(12, 8)
@@ -374,24 +408,8 @@ def plot_alpha_rmse_analysis(
         save_plot (bool, optional): Whether to save the plot
         figsize (tuple): Figure size (width, height)
     """
-    model_shorts = {
-        'exponential': 'expo',
-        'powerlaw': 'power',
-        'rayleigh': 'ray'
-    }
     try:
-        # Load alpha values from the inferred edges file
-        data_path = f"../data/inferred_networks/{model_name}"
-        filename = f"inferred_edges_{model_shorts.get(model_name)}.csv"
-        filepath = os.path.join(data_path, filename)
-
-        if not os.path.exists(filepath):
-            print(f"Error: Alpha values file not found: {filepath}")
-            return
-
-        # Load alpha values
-        alpha_df = pd.read_csv(filepath, sep='|')
-        alpha_values = alpha_df['alpha'].values
+        alpha_values = _extract_alphas(model_name)
 
         # Ensure we have matching number of alpha values and RMSE values
         assert len(alpha_values) == len(rmse_values)
@@ -437,7 +455,7 @@ def plot_alpha_rmse_analysis(
 
         # Save if requested
         if save_plot:
-            plot_filename = f"alpha_rmse_{model_shorts.get(model_name)}.png"
+            plot_filename = f"alpha_rmse_{model_name}.png"
             plot_path = os.path.join("..", "plots", plot_filename)
             plt.savefig(plot_path, dpi=300, bbox_inches='tight')
             print(f"Alpha vs RMSE plot saved to: {plot_path}")
@@ -456,3 +474,30 @@ def plot_alpha_rmse_analysis(
 
     except Exception as e: # pylint: disable=broad-except
         print(f"Alpha vs RMSE plotting error: {str(e)}")
+
+def plot_alpha_delta_rmse(model_name, rmse_values, baseline_rmse, save_plot=True, figsize=(12, 8)):
+    """
+    Plot delta RMSE (enhanced - baseline) per alpha.
+    """
+    alpha_values = _extract_alphas(model_name)
+    assert len(alpha_values) == len(rmse_values)
+    deltas = np.array(rmse_values) - baseline_rmse
+
+    plt.figure(figsize=figsize)
+    plt.scatter(alpha_values, deltas, c=["red" if d > 0 else "blue" for d in deltas], s=40, alpha=0.7)
+
+    plt.axhline(y=0, color="black", linestyle="--", linewidth=2, label="Baseline Reference")
+    plt.xlabel("Alpha Value", fontsize=12)
+    plt.ylabel("Δ RMSE (Enhanced - Baseline)", fontsize=12)
+    plt.title(f"Delta RMSE per Alpha - {model_name.capitalize()} Model", fontsize=14, fontweight="bold")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    if save_plot:
+        plot_filename = f"alpha_delta_rmse_{model_name}.png"
+        plot_path = os.path.join("..", "plots", plot_filename)
+        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+        print(f"Delta RMSE plot saved to: {plot_path}")
+
+    plt.show()
