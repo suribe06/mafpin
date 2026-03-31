@@ -474,22 +474,22 @@ def plot_alpha_delta_rmse(
         print("Mismatch between alpha values and RMSE values — cannot plot.")
         return
 
-    deltas = np.array(rmse_values) - baseline_rmse
-    colours = ["tomato" if d > 0 else "steelblue" for d in deltas]
+    deltas_pct = (np.array(rmse_values) - baseline_rmse) / baseline_rmse * 100
+    colours = ["tomato" if d > 0 else "steelblue" for d in deltas_pct]
 
     plt.figure(figsize=figsize)
-    plt.scatter(alpha_values, deltas, c=colours, s=40, alpha=0.7)
+    plt.scatter(alpha_values, deltas_pct, c=colours, s=40, alpha=0.7)
     plt.axhline(
         0,
         color="black",
         linestyle="--",
         linewidth=2,
-        label="Baseline Reference (Δ = 0)",
+        label="Baseline Reference (Δ = 0%)",
     )
     plt.xlabel("Alpha", fontsize=12)
-    plt.ylabel("Δ RMSE (enhanced − baseline)", fontsize=12)
+    plt.ylabel("Δ RMSE % (enhanced − baseline) / baseline × 100", fontsize=12)
     plt.title(
-        f"Delta RMSE per Alpha — {model_name.capitalize()} Model",
+        f"Delta RMSE (%) per Alpha — {model_name.capitalize()} Model",
         fontsize=14,
         fontweight="bold",
     )
