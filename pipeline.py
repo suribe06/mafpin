@@ -116,7 +116,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
     from recommender.baseline import train_final_model
     from recommender.enhanced import run_network_evaluation
 
-    data = load_dataset("ratings_small.csv")
+    data = load_dataset()
 
     # Baseline
     baseline_model = train_final_model(data)
@@ -125,6 +125,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
     # Enhanced
     run_network_evaluation(
         include_communities=args.include_communities,
+        sample_networks=args.sample_networks,
     )
 
 
@@ -203,6 +204,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="include_communities",
         help="Include community membership features in the enhanced CMF.",
+    )
+    parser.add_argument(
+        "--sample-networks",
+        type=int,
+        default=5,
+        dest="sample_networks",
+        help="Number of networks to sample per model. Use a very large number (e.g. 9999) to run all.",
     )
     return parser
 
