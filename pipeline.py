@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from config import Defaults
 
 # ---------------------------------------------------------------------------
 # Step runners
@@ -228,7 +229,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-iter",
         type=int,
-        default=2000,
+        default=Defaults.MAX_ITER,
         dest="max_iter",
         help="Maximum NetInf iterations per alpha.",
     )

@@ -51,7 +51,7 @@ class Defaults:
     # Network inference
     N_ALPHAS = 100  # number of alpha values in the log-spaced grid
     RANGE_R = 100.0  # multiplicative range factor: grid spans [center/r, center*r]
-    MAX_ITER = 20000  # maximum NetInf iterations per network
+    MAX_ITER = 8000  # maximum NetInf iterations per network
 
     # Community detection
     EPSILON = 0.25  # Demon merge threshold (lower → more communities)
