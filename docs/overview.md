@@ -35,7 +35,13 @@ MAFPIN addresses this by:
 [community detection] ──→  communities_<model>_<id>.csv  (+LPH)
     │
     ▼
+[hypertune]           ──→  enhanced_search_results.json  (Optuna TPE)
+    │
+    ▼
 [recommendation]      ──→  RMSE / MAE / R²  (evaluated on global test set)
+    │
+    ▼
+[shap analysis]       ──→  shap_results.json  (per-model feature importance)
 ```
 
 Three diffusion models are supported: **exponential**, **power-law**, and **Rayleigh**.  
@@ -63,13 +69,16 @@ mafpin/
 ├── pipeline.py             # Unified CLI entry point
 ├── networks/               # Cascade generation, inference, centrality, communities
 ├── recommender/            # Dataset utilities, baseline CMF, enhanced CMF
+├── analysis/               # Post-hoc analyses (SHAP feature importance)
 ├── visualization/          # All plot functions (model, network, community)
 ├── data/                   # Raw data + generated artefacts
 │   ├── cascades.txt
 │   ├── ratings_small.csv
 │   ├── inferred_networks/
 │   ├── centrality_metrics/
-│   └── communities/
+│   ├── communities/
+│   ├── enhanced_search_results.json
+│   └── shap_results.json
 ├── plots/                  # Generated PNG figures
 └── docs/                   # This documentation
 ```
