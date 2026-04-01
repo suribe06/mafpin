@@ -127,27 +127,50 @@ def _run_communities(_args: argparse.Namespace) -> None:
 
 
 def _run_recommend(args: argparse.Namespace) -> None:
-    from recommender.data import load_and_split_dataset
-    from recommender.baseline import (
-        train_final_model,
-        save_search_results,
-        search_best_params,
+    from recommender.data import load_and_split_dataset, evaluate_single_split
+    from recommender.baseline import train_final_model
+    from recommender.enhanced import (
+        run_network_evaluation,
+        search_enhanced_params,
+        load_network_features,
     )
-    from recommender.enhanced import run_network_evaluation
-    from recommender.data import evaluate_single_split
+    from config import Paths, Models, Defaults
 
     _, train_df, test_df = load_and_split_dataset()
 
-    # Baseline: hyperparameter search on train, final model evaluated on test.
-    print("Searching best hyperparameters (baseline) …")
-    search_result = search_best_params(train_df, n_iter=50, n_splits=3)
-    if search_result is None:
-        best_k, best_lambda = 20, 1.0
-    else:
-        best_k = search_result["best_params"]["k"]
-        best_lambda = search_result["best_params"]["lambda_reg"]
-        save_search_results(search_result)
+    # Find first available feature file to represent the feature space.
+    sample_features = None
+    sample_model_name = None
+    for _mn in Models.ALL:
+        sample_features = load_network_features(
+            _mn, 0, include_communities=args.include_communities
+        )
+        if sample_features is not None:
+            sample_model_name = _mn
+            break
 
+    # Single Optuna search (k, lambda_reg, w_main, w_user).
+    if sample_features is not None:
+        print(
+            f"Searching best hyperparameters (Optuna TPE — k, lambda_reg, "
+            f"w_main, w_user) using first {sample_model_name} network …"
+        )
+        search = search_enhanced_params(
+            train_df, sample_features, n_trials=50, n_splits=3
+        )
+        best_k = search["best_params"]["k"]
+        best_lambda = search["best_params"]["lambda_reg"]
+        best_w_main = search["best_params"]["w_main"]
+        best_w_user = search["best_params"]["w_user"]
+    else:
+        print("No feature files found — using default params.")
+        best_k = Defaults.K
+        best_lambda = Defaults.LAMBDA_REG
+        best_w_main = Defaults.W_MAIN
+        best_w_user = Defaults.W_USER
+
+    # Train final baseline model with Optuna-found k/lambda, evaluate on global test.
+    print(f"Training final model: k={best_k}, lambda_reg={best_lambda:.4f}")
     baseline_model = train_final_model(train_df, k=best_k, lambda_reg=best_lambda)
     baseline_metrics = evaluate_single_split(baseline_model, test_df)
     print(
@@ -155,11 +178,15 @@ def _run_recommend(args: argparse.Namespace) -> None:
         f"MAE: {baseline_metrics['mae']:.4f}  R²: {baseline_metrics['r2']:.4f}"
     )
 
-    # Enhanced: all data passed is train_df — test is never seen during fitting.
+    # Enhanced evaluation — pass pre-tuned params so no further search is run.
     run_network_evaluation(
         data=train_df,
         include_communities=args.include_communities,
         sample_networks=args.sample_networks,
+        k=best_k,
+        lambda_reg=best_lambda,
+        w_main=best_w_main,
+        w_user=best_w_user,
     )
 
 
