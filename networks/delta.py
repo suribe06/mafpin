@@ -39,19 +39,24 @@ from config import Paths, Defaults
 
 def compute_median_delta(cascade_file: str | Path | None = None) -> float:
     """
-    Compute the median of all positive inter-event time differences across
-    cascades.
+    Compute the median of all positive consecutive inter-event time
+    differences across cascades.
 
     Each cascade line encodes ``user,timestamp,user,timestamp,...``.  Within
-    each cascade every pair of timestamps is compared; only positive
-    differences are retained.
+    each cascade only adjacent (consecutive) timestamp pairs are compared;
+    only positive differences are retained.
+
+    Timestamps in the cascade file are expected in **days** (as written by
+    ``generate_cascades_from_df``).  The returned delta is therefore in days,
+    and ``alpha_centers_from_delta`` will produce alpha values in days⁻¹,
+    which keeps NetInf's log-likelihood surface numerically well-conditioned.
 
     Args:
         cascade_file: Path to the cascades file.  Defaults to
             ``Paths.CASCADES``.
 
     Returns:
-        Median delta in seconds (float).
+        Median delta in days (float).
 
     Raises:
         FileNotFoundError: If the cascade file does not exist.
@@ -90,46 +95,36 @@ def compute_median_delta(cascade_file: str | Path | None = None) -> float:
         raise ValueError("No positive time deltas found in cascade file.")
 
     median = float(np.median(deltas))
-    print(f"Median delta: {median:.2f} seconds")
+    print(f"Median delta: {median:.4f} days")
     return median
 
 
-def alpha_centers_from_delta(delta_seconds: float) -> dict:
+def alpha_centers_from_delta(delta_days: float) -> dict:
     """
-    Derive alpha centre values for each diffusion model from a delta (seconds).
+    Derive alpha centre values for each diffusion model from a delta (days).
 
     Returns a nested dict with keys ``exponential`` and ``rayleigh``, each
-    containing sub-keys ``alpha0_seconds``, ``alpha0_days``,
-    ``alpha0_years``.
+    containing the sub-key ``alpha0`` (in days⁻¹ for exponential,
+    days⁻² for Rayleigh).
 
     Note: The power-law model uses a different parametrisation (exponent),
     so no alpha centre is derived for it here.
 
     Args:
-        delta_seconds: Median inter-event time in seconds.
+        delta_days: Median inter-event time in days (as returned by
+            ``compute_median_delta`` when cascades use day-scale timestamps).
 
     Returns:
-        Dict mapping model name → dict of alpha0 values in multiple time units.
+        Dict mapping model name → dict with key ``alpha0``.
     """
-    seconds_per_day = 86_400.0
-    seconds_per_year = 365.25 * seconds_per_day
-
-    # Exponential: median m = ln(2)/α  ⟹  α = ln(2)/m
-    alpha0_exp_sec = np.log(2.0) / delta_seconds
-    # Rayleigh: median m = sqrt(2·ln(2)/α)  ⟹  α = 2·ln(2)/m²
-    alpha0_ray_sec = 2.0 * np.log(2.0) / (delta_seconds**2)
+    # Exponential: median m = ln(2)/α  ⟹  α = ln(2)/m  [days⁻¹]
+    alpha0_exp = np.log(2.0) / delta_days
+    # Rayleigh: median m = sqrt(2·ln(2)/α)  ⟹  α = 2·ln(2)/m²  [days⁻²]
+    alpha0_ray = 2.0 * np.log(2.0) / (delta_days**2)
 
     return {
-        "exponential": {
-            "alpha0_seconds": alpha0_exp_sec,
-            "alpha0_days": alpha0_exp_sec * seconds_per_day,
-            "alpha0_years": alpha0_exp_sec * seconds_per_year,
-        },
-        "rayleigh": {
-            "alpha0_seconds": alpha0_ray_sec,
-            "alpha0_days": alpha0_ray_sec * (seconds_per_day**2),
-            "alpha0_years": alpha0_ray_sec * (seconds_per_year**2),
-        },
+        "exponential": {"alpha0": alpha0_exp},
+        "rayleigh": {"alpha0": alpha0_ray},
     }
 
 
@@ -197,13 +192,12 @@ def main() -> None:
 
     centers = alpha_centers_from_delta(delta)
     for model, vals in centers.items():
-        print(f"\n{model.capitalize()} model alpha centres:")
-        for unit, value in vals.items():
-            print(f"  {unit}: {value:.6e}")
+        print(f"\n{model.capitalize()} model alpha centre:")
+        print(f"  alpha0 = {vals['alpha0']:.6e} days⁻¹")
 
     print("\nSample log alpha grids (first 5 values):")
     for model in ("exponential", "rayleigh"):
-        alpha0 = centers[model]["alpha0_seconds"]
+        alpha0 = centers[model]["alpha0"]
         grid = log_alpha_grid(alpha0, r=args.range_r, n=args.n_alphas)
         print(f"  {model}: {grid[:5]} ...")
 

@@ -41,7 +41,7 @@ $$\tilde{\Delta} = \text{median}\lbrace t_{i+1} - t_i \rbrace$$
 
 Only adjacent pairs in time-sorted order are used. All-pairs computation would overestimate Δ by counting long-range differences that have no physical meaning under a Markov diffusion assumption.
 
-Timestamps are assumed to be in **Unix epoch seconds**, but may be converted to days or years as long as the same unit is used consistently for Δ, α, and cascade timestamps.
+In this implementation, Unix epoch seconds are divided by 86 400 at cascade-generation time so that all timestamps are stored in **days**. Consequently Δ is in days and α values are in days⁻¹ (exponential) or days⁻² (Rayleigh). This keeps the log-likelihood surface numerically well-conditioned for typical social-dataset inter-event times (hours to months). The unit chosen does not affect network topology — only the absolute scale of α; as long as cascades, Δ, and the α grid all use the **same unit**, the results are equivalent.
 
 ### 2.2 Model-Specific Alpha Centres
 
@@ -77,7 +77,7 @@ $$\alpha_i = \alpha_{\text{center}} \cdot r^{\left(\tfrac{2i}{N-1} - 1\right)}, 
 
 This ensures exactly half the values are smaller than the centre and half are larger, evenly spaced in log-space.
 
-> **Important:** Always use the same unit system for Δ, α, and cascade timestamps.
+> **Important:** Cascades, Δ, and the α grid must all use the **same time unit**. This implementation uses **days** throughout.
 
 ---
 

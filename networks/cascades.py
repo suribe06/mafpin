@@ -106,13 +106,18 @@ def generate_cascades_from_df(
         )
     )
 
-    # Build cascade dict: item_id → [(user_id, unix_timestamp), ...]
+    # Build cascade dict: item_id → [(user_id, timestamp_in_days), ...]
+    # Timestamps are converted from Unix seconds to days so that the resulting
+    # alpha values (α = ln(2)/Δ) are numerically in the range [1e-4, 1] rather
+    # than [1e-9, 1e-5].  NetInf only uses relative time differences, so the
+    # unit choice does not affect topology — only the numeric stability of the
+    # log-likelihood surface and therefore the quality of NetInf's grid search.
+    _SECONDS_PER_DAY = 86_400.0
     cascades: dict[int, list] = {item_id: [] for item_id in item_mapper.values()}
     for _, row in interactions.iterrows():
         item_id = item_mapper[row["ItemId"]]
         user_id = user_mapper[row["UserId"]]
-        # Store raw Unix float — no datetime conversion needed.
-        cascades[item_id].append([user_id, float(row["timestamp"])])
+        cascades[item_id].append([user_id, float(row["timestamp"]) / _SECONDS_PER_DAY])
 
     # Sort ascending by time (seed = earliest infected user comes first,
     # as required by NetInf's diffusion models) and flatten to
