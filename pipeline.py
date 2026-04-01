@@ -35,6 +35,17 @@ communities
     Detect overlapping communities (Demon / ASLPAw) and compute LPH.
 recommend
     Run baseline CMF + enhanced CMF with network side information.
+hypertune
+    Optuna TPE search for enhanced CMF hyperparameters only (k, lambda_reg,
+    w_main, w_user).  Saves best params to data/enhanced_search_results.json
+    without running the full network evaluation.  Run this before ``shap``
+    if you want to avoid re-running the recommendation evaluation.
+shap
+    SHAP feature importance analysis for the enhanced CMF.  Loads the best
+    enhanced hyperparameters from data/enhanced_search_results.json, samples
+    k networks per diffusion model, trains a GBT surrogate on CMF outputs,
+    and applies TreeSHAP.  Saves per-model importance rankings to
+    data/shap_results.json.
 """
 
 from __future__ import annotations
@@ -132,6 +143,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
     from recommender.enhanced import (
         run_network_evaluation,
         search_enhanced_params,
+        save_enhanced_search_results,
         load_network_features,
     )
     from config import Models, Defaults
@@ -170,6 +182,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
         enhanced_search = search_enhanced_params(
             train_df, sample_features, n_trials=50, n_splits=3
         )
+        save_enhanced_search_results(enhanced_search)
         best_k_e = enhanced_search["best_params"]["k"]
         best_lambda_e = enhanced_search["best_params"]["lambda_reg"]
         best_w_main = enhanced_search["best_params"]["w_main"]
@@ -204,6 +217,53 @@ def _run_recommend(args: argparse.Namespace) -> None:
     )
 
 
+def _run_hypertune(args: argparse.Namespace) -> None:
+    from recommender.data import load_and_split_dataset
+    from recommender.enhanced import (
+        search_enhanced_params,
+        save_enhanced_search_results,
+        load_network_features,
+    )
+    from config import Models
+
+    _, train_df, _ = load_and_split_dataset()
+
+    sample_features = None
+    sample_model_name = None
+    for _mn in Models.ALL:
+        sample_features = load_network_features(
+            _mn, 0, include_communities=args.include_communities
+        )
+        if sample_features is not None:
+            sample_model_name = _mn
+            break
+
+    if sample_features is None:
+        print("No feature files found. Run --steps centrality first.")
+        sys.exit(1)
+
+    print(
+        f"Searching best enhanced hyperparameters (Optuna TPE — k, "
+        f"lambda_reg, w_main, w_user) using first {sample_model_name} network …"
+    )
+    enhanced_search = search_enhanced_params(
+        train_df, sample_features, n_trials=50, n_splits=3
+    )
+    save_enhanced_search_results(enhanced_search)
+
+
+def _run_shap(args: argparse.Namespace) -> None:
+    from analysis.shap_analysis import run_shap_analysis, save_shap_results
+
+    results = run_shap_analysis(
+        k_networks=args.k_networks,
+        include_communities=args.include_communities,
+        seed=args.seed,
+        model_names=[args.model] if args.model else None,
+    )
+    save_shap_results(results)
+
+
 # ---------------------------------------------------------------------------
 # Step registry
 # ---------------------------------------------------------------------------
@@ -215,6 +275,8 @@ STEPS: dict[str, tuple[str, object]] = {
     "centrality": ("Compute SNAP centrality metrics", _run_centrality),
     "communities": ("Detect overlapping communities + LPH", _run_communities),
     "recommend": ("Train and evaluate CMF recommender", _run_recommend),
+    "hypertune": ("Optuna search for enhanced CMF hyperparameters", _run_hypertune),
+    "shap": ("SHAP feature importance for enhanced CMF", _run_shap),
 }
 
 ALL_STEPS = list(STEPS.keys())
@@ -286,6 +348,19 @@ def _build_parser() -> argparse.ArgumentParser:
         default=5,
         dest="sample_networks",
         help="Number of networks to sample per model. Use a very large number (e.g. 9999) to run all.",
+    )
+    parser.add_argument(
+        "--k-networks",
+        type=int,
+        default=5,
+        dest="k_networks",
+        help="Networks to sample per diffusion model for SHAP analysis.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for network sampling in SHAP analysis.",
     )
     return parser
 
