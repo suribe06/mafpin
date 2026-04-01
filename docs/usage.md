@@ -24,11 +24,12 @@ Convert the MovieLens ratings CSV into a cascades file for NetInf:
 python pipeline.py --steps cascade
 ```
 
-This reads `data/ratings_small.csv` and writes `data/cascades.txt`.  
+This reads `data/ratings_small.csv`, applies the **global 80/20 split** (seed from `config.Split.RANDOM_STATE`), and writes `data/cascades.txt` built from training interactions only. Held-out test ratings are never seen by NetInf.
+
 To use a different dataset:
 
 ```bash
-python pipeline.py --steps cascade --dataset my_ratings.csv
+python pipeline.py --steps cascade --dataset my_ratings
 ```
 
 ---
@@ -93,6 +94,12 @@ Baseline CMF + enhanced CMF with all three models:
 python pipeline.py --steps recommend
 ```
 
+This step:
+
+1. Loads the dataset and applies the **global split** (same seed as the cascade step).
+2. Runs hyperparameter search and trains the **baseline CMF** on the training partition, then reports RMSE/MAE/R² on the global test set.
+3. Evaluates the **enhanced CMF** (with network side-information) using repeated random sub-splits of the training partition, with a paired baseline per fold for fair comparison.
+
 Include community features (LPH + community count):
 
 ```bash
@@ -116,24 +123,28 @@ python pipeline.py --steps cascade inference centrality communities recommend
 Each module can also be used directly:
 
 ```python
-# Cascade generation
-from networks.cascades import generate_cascades
-generate_cascades("ratings_small.csv")
+# Global split (same partition as the pipeline)
+from recommender.data import load_and_split_dataset
+data, train_df, test_df = load_and_split_dataset()  # uses config.Split
+
+# Cascade generation from a pre-split DataFrame
+from networks.cascades import generate_cascades_from_df
+generate_cascades_from_df(train_df, all_user_ids=data["UserId"])
 
 # Centrality
 from networks.centrality import calculate_centrality_for_all_models
 calculate_centrality_for_all_models()
 
 # Baseline recommendation
-from recommender.data import load_dataset
 from recommender.baseline import search_best_params, train_final_model
-data = load_dataset("ratings_small.csv")
-results = search_best_params(data, n_iter=50)
-model = train_final_model(data, **results["best_params"])
+from recommender.data import evaluate_single_split
+results = search_best_params(train_df, n_iter=50)
+model = train_final_model(train_df, **results["best_params"])
+metrics = evaluate_single_split(model, test_df)  # RMSE on held-out test
 
 # Enhanced recommendation
 from recommender.enhanced import run_network_evaluation
-run_network_evaluation(sample_networks=5, include_communities=True)
+run_network_evaluation(data=train_df, sample_networks=5, include_communities=True)
 ```
 
 ---
