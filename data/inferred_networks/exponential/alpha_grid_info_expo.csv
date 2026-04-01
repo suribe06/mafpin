@@ -1,2 +1,2 @@
-median_delta_seconds,alpha_center,alpha_min,alpha_max,r_factor,model_type
-153064494.0,4.528464848026384e-09,4.5284648480263816e-11,4.528464848026382e-07,100.0,exponential
+median_delta_days,alpha_center,alpha_min,alpha_max,r_factor,model_type
+65.38191550925876,0.010601512286096734,0.00010601512286096734,1.0601512286096733,100.0,exponential
