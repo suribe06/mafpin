@@ -128,13 +128,13 @@ def _run_communities(_args: argparse.Namespace) -> None:
 
 def _run_recommend(args: argparse.Namespace) -> None:
     from recommender.data import load_and_split_dataset, evaluate_single_split
-    from recommender.baseline import train_final_model
+    from recommender.baseline import train_final_model, search_baseline_params
     from recommender.enhanced import (
         run_network_evaluation,
         search_enhanced_params,
         load_network_features,
     )
-    from config import Paths, Models, Defaults
+    from config import Models, Defaults
 
     _, train_df, test_df = load_and_split_dataset()
 
@@ -149,42 +149,57 @@ def _run_recommend(args: argparse.Namespace) -> None:
             sample_model_name = _mn
             break
 
-    # Single Optuna search (k, lambda_reg, w_main, w_user).
     if sample_features is not None:
+        # Independent Optuna search for the baseline (k, lambda_reg).
+        # lambda_reg here is calibrated for a plain CMF loss without any
+        # side-information term, so it is not biased toward the enhanced model.
         print(
-            f"Searching best hyperparameters (Optuna TPE — k, lambda_reg, "
-            f"w_main, w_user) using first {sample_model_name} network …"
+            "Searching best baseline hyperparameters "
+            "(Optuna TPE — k, lambda_reg) …"
         )
-        search = search_enhanced_params(
+        baseline_search = search_baseline_params(train_df, n_trials=50, n_splits=3)
+        best_k_b = baseline_search["best_params"]["k"]
+        best_lambda_b = baseline_search["best_params"]["lambda_reg"]
+
+        # Independent Optuna search for the enhanced model
+        # (k, lambda_reg, w_main, w_user).
+        print(
+            f"Searching best enhanced hyperparameters (Optuna TPE — k, "
+            f"lambda_reg, w_main, w_user) using first "
+            f"{sample_model_name} network …"
+        )
+        enhanced_search = search_enhanced_params(
             train_df, sample_features, n_trials=50, n_splits=3
         )
-        best_k = search["best_params"]["k"]
-        best_lambda = search["best_params"]["lambda_reg"]
-        best_w_main = search["best_params"]["w_main"]
-        best_w_user = search["best_params"]["w_user"]
+        best_k_e = enhanced_search["best_params"]["k"]
+        best_lambda_e = enhanced_search["best_params"]["lambda_reg"]
+        best_w_main = enhanced_search["best_params"]["w_main"]
+        best_w_user = enhanced_search["best_params"]["w_user"]
     else:
         print("No feature files found — using default params.")
-        best_k = Defaults.K
-        best_lambda = Defaults.LAMBDA_REG
+        best_k_b = Defaults.K
+        best_lambda_b = Defaults.LAMBDA_REG
+        best_k_e = Defaults.K
+        best_lambda_e = Defaults.LAMBDA_REG
         best_w_main = Defaults.W_MAIN
         best_w_user = Defaults.W_USER
 
-    # Train final baseline model with Optuna-found k/lambda, evaluate on global test.
-    print(f"Training final model: k={best_k}, lambda_reg={best_lambda:.4f}")
-    baseline_model = train_final_model(train_df, k=best_k, lambda_reg=best_lambda)
+    # Train final baseline model with its own independently tuned k/lambda.
+    print(f"Training final baseline: k={best_k_b}, lambda_reg={best_lambda_b:.4f}")
+    baseline_model = train_final_model(train_df, k=best_k_b, lambda_reg=best_lambda_b)
     baseline_metrics = evaluate_single_split(baseline_model, test_df)
     print(
         f"Baseline (global test) — RMSE: {baseline_metrics['rmse']:.4f}  "
         f"MAE: {baseline_metrics['mae']:.4f}  R²: {baseline_metrics['r2']:.4f}"
     )
 
-    # Enhanced evaluation — pass pre-tuned params so no further search is run.
+    # Enhanced evaluation — pass pre-tuned enhanced params.
     run_network_evaluation(
         data=train_df,
         include_communities=args.include_communities,
         sample_networks=args.sample_networks,
-        k=best_k,
-        lambda_reg=best_lambda,
+        k=best_k_e,
+        lambda_reg=best_lambda_e,
         w_main=best_w_main,
         w_user=best_w_user,
     )

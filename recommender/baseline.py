@@ -200,6 +200,54 @@ def search_best_params(
     return {"best_params": best_params, "all_results": all_results}
 
 
+def search_baseline_params(
+    data: pd.DataFrame,
+    n_trials: int = 50,
+    n_splits: int = 3,
+) -> dict:
+    """
+    Optuna TPE hyperparameter search over *k* and *lambda_reg*.
+
+    Uses the same TPE sampler as
+    :func:`recommender.enhanced.search_enhanced_params` so the two searches
+    are directly comparable.  Only the two parameters relevant to a plain CMF
+    (no side-information) are tuned; ``w_main`` and ``w_user`` are not
+    involved.
+
+    Args:
+        data:      Full ratings DataFrame.
+        n_trials:  Number of Optuna trials.
+        n_splits:  Number of CV splits per trial.
+
+    Returns:
+        Dict with keys ``best_params`` (``k``, ``lambda_reg``) and
+        ``all_results`` (one dict per trial).
+    """
+    import optuna
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    all_results: list[dict] = []
+
+    def _objective(trial: "optuna.Trial") -> float:
+        k_val = trial.suggest_int("k", 5, 50)
+        lambda_val = trial.suggest_float("lambda_reg", 0.01, 10.0, log=True)
+        metrics = evaluate_with_cv(
+            data, k=k_val, lambda_reg=lambda_val, n_splits=n_splits
+        )
+        all_results.append({"k": k_val, "lambda_reg": lambda_val, **metrics})
+        return metrics["rmse"]
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(_objective, n_trials=n_trials, show_progress_bar=False)
+
+    best_params = {
+        "k": study.best_params["k"],
+        "lambda_reg": study.best_params["lambda_reg"],
+    }
+    print(f"Best baseline params: {best_params}  RMSE={study.best_value:.4f}")
+    return {"best_params": best_params, "all_results": all_results}
+
+
 # ---------------------------------------------------------------------------
 # Final model
 # ---------------------------------------------------------------------------

@@ -143,24 +143,35 @@ smaller than the sensitivity to `lambda_reg` or `w_user`.
 ```
 pipeline.py _run_recommend()
 │
-├── search_enhanced_params(train_df, sample_features, n_trials=50)
-│         └── Optuna TPE → best: k, lambda_reg, w_main, w_user
+├── search_baseline_params(train_df, n_trials=50)           [2 params]
+│         └── Optuna TPE → best_k_b, best_lambda_b
 │
-├── train_final_model(train_df, k=best_k, lambda_reg=best_lambda)
-│         └── Plain CMF (no side info) evaluated on global test
+├── search_enhanced_params(train_df, sample_features, n_trials=50)  [4 params]
+│         └── Optuna TPE → best_k_e, best_lambda_e, best_w_main, best_w_user
 │
-└── run_network_evaluation(train_df, k=best_k, lambda_reg=best_lambda,
+├── train_final_model(train_df, k=best_k_b, lambda_reg=best_lambda_b)
+│         └── Plain CMF (no side info) evaluated on global test set
+│
+└── run_network_evaluation(train_df, k=best_k_e, lambda_reg=best_lambda_e,
                            w_main=best_w_main, w_user=best_w_user)
           └── For each sampled network:
                 evaluate_single_network(...)
                   └── evaluate_cmf_with_user_attributes(n_splits=5)
                         ├── Enhanced CMF with U=scaled_features
-                        └── Paired baseline CMF (same split, no side info)
+                        └── Paired baseline CMF (same split, same k/lambda_e)
 ```
 
-The Optuna search runs **once**. The winning parameters are reused for every
-network evaluated in `run_network_evaluation`. This is consistent with the
-assumption in Section 4 — if the features generalise, so do the optimal weights.
+Two independent Optuna searches run sequentially. The baseline search finds
+`(best_k_b, best_lambda_b)` optimised for plain CMF; the enhanced search finds
+`(best_k_e, best_lambda_e, best_w_main, best_w_user)` optimised for the
+combined loss. Each search runs for 50 TPE trials.
+
+Note that the **global test baseline** (middle branch) uses the baseline-tuned
+params, while the **per-network paired baseline** inside
+`evaluate_cmf_with_user_attributes` uses the enhanced model's `k`/`lambda_e`.
+This is intentional: the per-network paired comparison is a controlled
+experiment to isolate the effect of side information within the same
+hyperparameter configuration.
 
 ---
 
@@ -181,18 +192,37 @@ the features themselves are already leak-free.
 
 ---
 
-## 7. The Paired Baseline Comparison
+## 7. The Two Baseline Comparisons
 
-Inside `evaluate_cmf_with_user_attributes`, **every split also trains a plain
-CMF** with the same `k` and `lambda_reg` (no `U` matrix, no side info)
-on the same filtered subset of users. This is the *paired* baseline (audit
-bug M-3 fix).
+### 7a. Global test baseline (`pipeline.py`)
+
+The global baseline is a plain CMF trained on the full training split and
+evaluated on the global held-out test set (20%). It uses **independently
+tuned** `(best_k_b, best_lambda_b)` from `search_baseline_params` — a
+dedicated Optuna TPE search that optimises only `k` and `lambda_reg` for the
+plain-CMF loss:
+
+$$\mathcal{L}_{\text{baseline}} = \mathcal{L}_{\text{ratings}} + \lambda \cdot \|\Theta\|^2$$
+
+Using the enhanced model's `lambda_e` here would be unfair: Optuna finds high
+`lambda_e` values partly to counter the side-information term (`w_user ·
+L_side-info`). Applied to a model without that term, the same `lambda_e`
+over-regularises and inflates baseline RMSE.
+
+### 7b. Per-network paired baseline (`evaluate_cmf_with_user_attributes`)
+
+Inside each CV fold during network evaluation, **every split also trains a
+plain CMF** with the *same* `k` and `lambda_e` (no `U` matrix, no side
+information) on the same filtered subset of users. This is the *paired*
+baseline (audit bug M-3 fix).
 
 The improvement reported is:
 
 $$\text{improvement} = \text{RMSE}_{\text{baseline}} - \text{RMSE}_{\text{enhanced}}$$
 
-A positive value means the network features helped. Using the same
-`lambda_reg` for both models is intentional: we want to isolate the effect of
-side information, not of regularisation tuning.
+A positive value means the network features helped. Using the **same**
+`lambda_e` for both models in this comparison is intentional: we want to
+isolate the effect of side information, not of regularisation tuning. The
+variable being changed between the two models is the presence of `U`, not
+the regularisation level.
 
