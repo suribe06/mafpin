@@ -154,8 +154,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
         # lambda_reg here is calibrated for a plain CMF loss without any
         # side-information term, so it is not biased toward the enhanced model.
         print(
-            "Searching best baseline hyperparameters "
-            "(Optuna TPE — k, lambda_reg) …"
+            "Searching best baseline hyperparameters " "(Optuna TPE — k, lambda_reg) …"
         )
         baseline_search = search_baseline_params(train_df, n_trials=50, n_splits=3)
         best_k_b = baseline_search["best_params"]["k"]

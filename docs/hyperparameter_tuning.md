@@ -175,26 +175,9 @@ hyperparameter configuration.
 
 ---
 
-## 6. Feature Scaling: Why Fit on Training Users Only
+## 6. The Two Baseline Comparisons
 
-Inside each CV fold of `evaluate_cmf_with_user_attributes`:
-
-1. The scaler (`StandardScaler` by default) is **fitted on training users' features only**.
-2. The fitted scaler is then **applied to all users** (train + test) before
-   building the `U` matrix passed to `cmfrec.CMF`.
-
-This follows the *no-leakage* principle (audit bug M-2): if the scaler were
-fitted on all users including test users, the model would indirectly see test
-statistics at training time. The key point is that network features are
-derived from the training-only inferred network (audit bug C-3 fix), so
-applying the train-fitted scaler to test users does not constitute leakage —
-the features themselves are already leak-free.
-
----
-
-## 7. The Two Baseline Comparisons
-
-### 7a. Global test baseline (`pipeline.py`)
+### 6a. Global test baseline (`pipeline.py`)
 
 The global baseline is a plain CMF trained on the full training split and
 evaluated on the global held-out test set (20%). It uses **independently
@@ -209,7 +192,7 @@ Using the enhanced model's `lambda_e` here would be unfair: Optuna finds high
 L_side-info`). Applied to a model without that term, the same `lambda_e`
 over-regularises and inflates baseline RMSE.
 
-### 7b. Per-network paired baseline (`evaluate_cmf_with_user_attributes`)
+### 6b. Per-network paired baseline (`evaluate_cmf_with_user_attributes`)
 
 Inside each CV fold during network evaluation, **every split also trains a
 plain CMF** with the *same* `k` and `lambda_e` (no `U` matrix, no side
