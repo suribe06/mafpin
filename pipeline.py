@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from config import Defaults
 
 # ---------------------------------------------------------------------------
 # Step runners
@@ -49,7 +50,11 @@ import sys
 
 
 def _run_cascade(args: argparse.Namespace) -> None:
-    from networks.cascades import generate_cascades, list_available_datasets
+    import pandas as pd
+    from sklearn.model_selection import train_test_split
+
+    from networks.cascades import generate_cascades_from_df, list_available_datasets
+    from config import Paths, Split
 
     dataset = args.dataset
     if dataset is None:
@@ -59,17 +64,27 @@ def _run_cascade(args: argparse.Namespace) -> None:
             sys.exit(1)
         dataset = datasets[0]
         print(f"Using dataset: {dataset}")
-    generate_cascades(dataset)
+
+    csv_path = Paths.DATA / f"{dataset}.csv"
+    df = pd.read_csv(csv_path, usecols=["UserId", "ItemId", "Rating", "timestamp"])
+
+    # Apply the global split so NetInf learns from training interactions only.
+    # Pass all_user_ids=df["UserId"] so the cascade header declares the full
+    # user-ID space — keeping network compact IDs aligned with LabelEncoder.
+    train_df, _ = train_test_split(
+        df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
+    )
+    generate_cascades_from_df(train_df, all_user_ids=df["UserId"])
 
 
 def _run_delta(_args: argparse.Namespace) -> None:
     from networks.delta import compute_median_delta, alpha_centers_from_delta
 
     delta = compute_median_delta()
-    print(f"Median delta: {delta:.4f} seconds")
+    print(f"Median delta: {delta:.4f} days")
     centers = alpha_centers_from_delta(delta)
     for model, info in centers.items():
-        print(f"  {model}: alpha0 = {info['alpha0_seconds']:.4e} s")
+        print(f"  {model}: alpha0 = {info['alpha0']:.4e} days⁻¹")
 
 
 def _run_inference(args: argparse.Namespace) -> None:
@@ -112,19 +127,80 @@ def _run_communities(_args: argparse.Namespace) -> None:
 
 
 def _run_recommend(args: argparse.Namespace) -> None:
-    from recommender.data import load_dataset
-    from recommender.baseline import train_final_model
-    from recommender.enhanced import run_network_evaluation
+    from recommender.data import load_and_split_dataset, evaluate_single_split
+    from recommender.baseline import train_final_model, search_baseline_params
+    from recommender.enhanced import (
+        run_network_evaluation,
+        search_enhanced_params,
+        load_network_features,
+    )
+    from config import Models, Defaults
 
-    data = load_dataset("ratings_small.csv")
+    _, train_df, test_df = load_and_split_dataset()
 
-    # Baseline
-    baseline_model = train_final_model(data)
-    print(f"Baseline model trained — type: {type(baseline_model).__name__}")
+    # Find first available feature file to represent the feature space.
+    sample_features = None
+    sample_model_name = None
+    for _mn in Models.ALL:
+        sample_features = load_network_features(
+            _mn, 0, include_communities=args.include_communities
+        )
+        if sample_features is not None:
+            sample_model_name = _mn
+            break
 
-    # Enhanced
+    if sample_features is not None:
+        # Independent Optuna search for the baseline (k, lambda_reg).
+        # lambda_reg here is calibrated for a plain CMF loss without any
+        # side-information term, so it is not biased toward the enhanced model.
+        print(
+            "Searching best baseline hyperparameters " "(Optuna TPE — k, lambda_reg) …"
+        )
+        baseline_search = search_baseline_params(train_df, n_trials=50, n_splits=3)
+        best_k_b = baseline_search["best_params"]["k"]
+        best_lambda_b = baseline_search["best_params"]["lambda_reg"]
+
+        # Independent Optuna search for the enhanced model
+        # (k, lambda_reg, w_main, w_user).
+        print(
+            f"Searching best enhanced hyperparameters (Optuna TPE — k, "
+            f"lambda_reg, w_main, w_user) using first "
+            f"{sample_model_name} network …"
+        )
+        enhanced_search = search_enhanced_params(
+            train_df, sample_features, n_trials=50, n_splits=3
+        )
+        best_k_e = enhanced_search["best_params"]["k"]
+        best_lambda_e = enhanced_search["best_params"]["lambda_reg"]
+        best_w_main = enhanced_search["best_params"]["w_main"]
+        best_w_user = enhanced_search["best_params"]["w_user"]
+    else:
+        print("No feature files found — using default params.")
+        best_k_b = Defaults.K
+        best_lambda_b = Defaults.LAMBDA_REG
+        best_k_e = Defaults.K
+        best_lambda_e = Defaults.LAMBDA_REG
+        best_w_main = Defaults.W_MAIN
+        best_w_user = Defaults.W_USER
+
+    # Train final baseline model with its own independently tuned k/lambda.
+    print(f"Training final baseline: k={best_k_b}, lambda_reg={best_lambda_b:.4f}")
+    baseline_model = train_final_model(train_df, k=best_k_b, lambda_reg=best_lambda_b)
+    baseline_metrics = evaluate_single_split(baseline_model, test_df)
+    print(
+        f"Baseline (global test) — RMSE: {baseline_metrics['rmse']:.4f}  "
+        f"MAE: {baseline_metrics['mae']:.4f}  R²: {baseline_metrics['r2']:.4f}"
+    )
+
+    # Enhanced evaluation — pass pre-tuned enhanced params.
     run_network_evaluation(
+        data=train_df,
         include_communities=args.include_communities,
+        sample_networks=args.sample_networks,
+        k=best_k_e,
+        lambda_reg=best_lambda_e,
+        w_main=best_w_main,
+        w_user=best_w_user,
     )
 
 
@@ -194,7 +270,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-iter",
         type=int,
-        default=2000,
+        default=Defaults.MAX_ITER,
         dest="max_iter",
         help="Maximum NetInf iterations per alpha.",
     )
@@ -203,6 +279,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="include_communities",
         help="Include community membership features in the enhanced CMF.",
+    )
+    parser.add_argument(
+        "--sample-networks",
+        type=int,
+        default=5,
+        dest="sample_networks",
+        help="Number of networks to sample per model. Use a very large number (e.g. 9999) to run all.",
     )
     return parser
 

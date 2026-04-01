@@ -10,15 +10,20 @@ A **cascade** encodes how a single item propagates through a user population.
 
 Given the MovieLens ratings CSV (columns: `userId`, `movieId`, `rating`, `timestamp`):
 
-1. For each movie, collect all `(userId, timestamp)` pairs where a rating exists.
-2. Sort by timestamp to form an ordered adoption sequence.
-3. Write to `cascades.txt` in NetInf format: one line per cascade, values as comma-separated `userId,timestamp` pairs.
+1. The dataset is split into **train (80%) and test (20%)** using the global seed defined in `config.Split.RANDOM_STATE` (default: 42). Only training interactions are used to build cascades.
+2. For each movie, collect all `(userId, timestamp)` pairs present in the **training split**.
+3. Sort by timestamp **ascending** to form an ordered adoption sequence.
+4. Write to `cascades.txt` in NetInf format: one line per cascade, values as comma-separated `userId,timestamp` pairs.
 
 ```text
 userId_1,t1,userId_2,t2,...
 ```
 
-Source: `networks/cascades.py`
+The cascade **header** (self-loop lines that declare node existence) lists the full user-ID space — including users present only in the test set — so that NetInf compact node IDs remain aligned with the `LabelEncoder` mapping used by the CMF recommender.
+
+Cascades with only one user are skipped; they carry no diffusion signal.
+
+Source: `networks/cascades.py`, `config.Split`
 
 ---
 
@@ -30,11 +35,13 @@ Source: `networks/delta.py`
 
 ### 2.1 Median Delta (Δ)
 
-We first compute the **median time difference** between consecutive user interactions within cascades:
+We first compute the **median of consecutive inter-event time differences** within each cascade:
 
-$$\tilde{\Delta} = \text{median}\lbrace t_i - t_j \mid t_i > t_j \rbrace$$
+$$\tilde{\Delta} = \text{median}\lbrace t_{i+1} - t_i \rbrace$$
 
-Timestamps are assumed to be in **Unix epoch seconds**, but may be converted to days or years as long as the same unit is used consistently for Δ, α, and cascade timestamps.
+Only adjacent pairs in time-sorted order are used. All-pairs computation would overestimate Δ by counting long-range differences that have no physical meaning under a Markov diffusion assumption.
+
+In this implementation, Unix epoch seconds are divided by 86 400 at cascade-generation time so that all timestamps are stored in **days**. Consequently Δ is in days and α values are in days⁻¹ (exponential) or days⁻² (Rayleigh). This keeps the log-likelihood surface numerically well-conditioned for typical social-dataset inter-event times (hours to months). The unit chosen does not affect network topology — only the absolute scale of α; as long as cascades, Δ, and the α grid all use the **same unit**, the results are equivalent.
 
 ### 2.2 Model-Specific Alpha Centres
 
@@ -70,7 +77,7 @@ $$\alpha_i = \alpha_{\text{center}} \cdot r^{\left(\tfrac{2i}{N-1} - 1\right)}, 
 
 This ensures exactly half the values are smaller than the centre and half are larger, evenly spaced in log-space.
 
-> **Important:** Always use the same unit system for Δ, α, and cascade timestamps.
+> **Important:** Cascades, Δ, and the α grid must all use the **same time unit**. This implementation uses **days** throughout.
 
 ---
 
@@ -133,6 +140,16 @@ $$\min_{U, V}\ \|R - UV^\top\|_F^2 + \lambda(\|U\|_F^2 + \|V\|_F^2)$$
 
 Fitted with ALS using `cmfrec.CMF`.
 
+### Evaluation Protocol
+
+The pipeline applies a **single global train/test split** (80/20, seed from `config.Split`) before any step runs:
+
+- **Cascade generation** uses only training interactions (test ratings are never seen by NetInf).
+- **Hyperparameter search** and **CMF training** use only the training partition.
+- **Feature scaling** (StandardScaler / MinMaxScaler / Normalizer) is fitted on training users within each cross-validation fold and then applied to all users, preventing test-set leakage.
+- **Baseline comparison** is always a paired CMF (no side information) trained on the same training subset as the enhanced model, ensuring a fair comparison.
+- **Final metrics** (RMSE, MAE, R²) are reported on the held-out global test set.
+
 ### Enhanced CMF
 
 The baseline is augmented with a user side-information matrix **S** built from:
@@ -140,6 +157,6 @@ The baseline is augmented with a user side-information matrix **S** built from:
 - Seven centrality metrics (per network).
 - Optionally: community membership counts and LPH value.
 
-Features are optionally standardised or min–max normalised before being passed to CMF as `U=S`.
+Features are standardised (or min–max normalised / L2-normalised, configurable) and passed to CMF as `U=S`. Scaling is fitted on **training users only** within each fold.
 
-Source: `recommender/baseline.py`, `recommender/enhanced.py`
+Source: `recommender/baseline.py`, `recommender/enhanced.py`, `config.Split`

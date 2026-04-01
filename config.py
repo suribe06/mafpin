@@ -51,7 +51,7 @@ class Defaults:
     # Network inference
     N_ALPHAS = 100  # number of alpha values in the log-spaced grid
     RANGE_R = 100.0  # multiplicative range factor: grid spans [center/r, center*r]
-    MAX_ITER = 2000  # maximum NetInf iterations per network
+    MAX_ITER = 5000  # maximum NetInf iterations per network
 
     # Community detection
     EPSILON = 0.25  # Demon merge threshold (lower → more communities)
@@ -60,3 +60,26 @@ class Defaults:
     # Matrix factorization
     K = 20  # number of latent factors
     LAMBDA_REG = 1.0  # regularisation coefficient
+
+    # CMF side-information weights (enhanced model only)
+    W_MAIN = 1.0  # weight for main rating-matrix reconstruction loss
+    W_USER = 0.1  # weight for user side-information reconstruction loss
+
+
+# ---------------------------------------------------------------------------
+# Global train / test split
+# ---------------------------------------------------------------------------
+
+
+class Split:
+    """Parameters for the single global train/test split applied at the start
+    of the pipeline.
+
+    Using one fixed split ensures that:
+    * Cascade generation (NetInf input) sees only training interactions.
+    * CMF training and feature scaling never touch held-out ratings.
+    * Results are reproducible across pipeline re-runs.
+    """
+
+    TEST_SIZE = 0.2  # fraction of ratings held out for testing
+    RANDOM_STATE = 42  # seed for train_test_split — change to re-randomise

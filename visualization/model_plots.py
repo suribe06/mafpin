@@ -19,6 +19,8 @@ Available plots
     Alpha vs RMSE line plot with best-alpha marker and baseline reference.
 :func:`plot_alpha_delta_rmse`
     Signed delta RMSE (enhanced − baseline) scatter plot per alpha.
+:func:`plot_alpha_edges`
+    Three-subplot figure showing alpha vs inferred edge count for each model.
 """
 
 from __future__ import annotations
@@ -459,8 +461,8 @@ def plot_alpha_delta_rmse(
     figsize: tuple = (12, 8),
 ) -> None:
     """
-    Signed delta RMSE scatter: positive = worse than baseline (red), negative =
-    better (blue).
+    Signed delta RMSE scatter: positive = better than baseline (blue), negative =
+    worse (red).
 
     Args:
         model_name:     Diffusion model name.
@@ -474,22 +476,22 @@ def plot_alpha_delta_rmse(
         print("Mismatch between alpha values and RMSE values — cannot plot.")
         return
 
-    deltas = np.array(rmse_values) - baseline_rmse
-    colours = ["tomato" if d > 0 else "steelblue" for d in deltas]
+    deltas_pct = (baseline_rmse - np.array(rmse_values)) / baseline_rmse * 100
+    colours = ["steelblue" if d > 0 else "tomato" for d in deltas_pct]
 
     plt.figure(figsize=figsize)
-    plt.scatter(alpha_values, deltas, c=colours, s=40, alpha=0.7)
+    plt.scatter(alpha_values, deltas_pct, c=colours, s=40, alpha=0.7)
     plt.axhline(
         0,
         color="black",
         linestyle="--",
         linewidth=2,
-        label="Baseline Reference (Δ = 0)",
+        label="Baseline Reference (Δ = 0%)",
     )
     plt.xlabel("Alpha", fontsize=12)
-    plt.ylabel("Δ RMSE (enhanced − baseline)", fontsize=12)
+    plt.ylabel("Δ RMSE % (baseline − enhanced) / baseline × 100", fontsize=12)
     plt.title(
-        f"Delta RMSE per Alpha — {model_name.capitalize()} Model",
+        f"Delta RMSE (%) per Alpha — {model_name.capitalize()} Model",
         fontsize=14,
         fontweight="bold",
     )
@@ -499,6 +501,58 @@ def plot_alpha_delta_rmse(
 
     if save_plot:
         full_path = f"{_plots_dir()}/alpha_delta_rmse_{model_name}.png"
+        plt.savefig(full_path, dpi=300, bbox_inches="tight")
+        print(f"Saved: {full_path}")
+    plt.show()
+    plt.close()
+
+
+def plot_alpha_edges(
+    save_plot: bool = True,
+    figsize: tuple = (18, 5),
+) -> None:
+    """
+    Three-subplot figure: one subplot per diffusion model showing alpha (x-axis)
+    vs the number of inferred edges (y-axis).
+
+    Args:
+        save_plot: Write PNG to ``plots/models/``.
+        figsize:   Figure size.
+    """
+    _MODEL_CFG = [
+        ("exponential", "expo", "#E07B54"),
+        ("powerlaw", "power", "#5B8DB8"),
+        ("rayleigh", "ray", "#6DBF82"),
+    ]
+
+    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    fig.suptitle("Alpha vs Inferred Edge Count", fontsize=15, fontweight="bold", y=1.02)
+
+    for ax, (model_name, short, colour) in zip(axes, _MODEL_CFG):
+        csv = Paths.NETWORKS / model_name / f"inferred_edges_{short}.csv"
+        if not csv.exists():
+            ax.set_title(f"{model_name.capitalize()}\n(data not found)")
+            ax.axis("off")
+            continue
+
+        df = pd.read_csv(csv, sep="|")
+        edge_col = f"inferred_edges_{short}"
+        if edge_col not in df.columns or "alpha" not in df.columns:
+            ax.set_title(f"{model_name.capitalize()}\n(missing columns)")
+            ax.axis("off")
+            continue
+
+        ax.scatter(df["alpha"], df[edge_col], color=colour, s=30, alpha=0.75)
+        ax.set_xlabel("Alpha", fontsize=11)
+        ax.set_ylabel("Inferred Edges", fontsize=11)
+        ax.set_title(f"{model_name.capitalize()} Model", fontsize=12, fontweight="bold")
+        ax.grid(alpha=0.3)
+        ax.ticklabel_format(style="sci", axis="x", scilimits=(0, 0))
+
+    plt.tight_layout()
+
+    if save_plot:
+        full_path = f"{_plots_dir()}/alpha_edges.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
     plt.show()
@@ -518,6 +572,7 @@ if __name__ == "__main__":
     _PLOT_CHOICES = [
         "alpha-rmse",
         "delta-rmse",
+        "alpha-edges",
         "hyperparam",
         "heatmap",
         "metrics",
@@ -663,5 +718,9 @@ if __name__ == "__main__":
                     baseline_rmse=_baseline,
                     save_plot=_save,
                 )
+
+    if _do_all or "alpha-edges" in _plots:
+        print("\n--- Alpha vs Inferred Edges (all models) ---")
+        plot_alpha_edges(save_plot=_save)
 
     sys.exit(0)

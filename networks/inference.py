@@ -134,26 +134,26 @@ def infer_networks(
     # -- Compute alpha grid --------------------------------------------------
     print("Computing median delta from cascades …")
     try:
-        delta_seconds = compute_median_delta(cascades_file)
+        delta_days = compute_median_delta(cascades_file)
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return False
 
-    print(f"Median Δ = {delta_seconds:.2f} s ({delta_seconds / 86_400:.2f} days)")
+    print(f"Median Δ = {delta_days:.2f} days")
 
-    alpha_centers = alpha_centers_from_delta(delta_seconds)
+    alpha_centers = alpha_centers_from_delta(delta_days)
     alpha_center: float | None = None
 
     if model == 0:  # exponential
-        alpha_center = alpha_centers["exponential"]["alpha0_seconds"]
+        alpha_center = alpha_centers["exponential"]["alpha0"]
         alpha_values = log_alpha_grid(float(alpha_center), r=r, n=n)  # type: ignore[arg-type]
-        print(f"Exponential α_center = {alpha_center:.6e} s⁻¹")
+        print(f"Exponential α_center = {alpha_center:.6e} days⁻¹")
     elif model == 1:  # powerlaw — dimensionless exponent, linear sweep
         alpha_values = np.linspace(1.0, 5.0, n)
     else:  # rayleigh
-        alpha_center = alpha_centers["rayleigh"]["alpha0_seconds"]
+        alpha_center = alpha_centers["rayleigh"]["alpha0"]
         alpha_values = log_alpha_grid(float(alpha_center), r=r, n=n)  # type: ignore[arg-type]
-        print(f"Rayleigh α_center = {alpha_center:.6e} s⁻²")
+        print(f"Rayleigh α_center = {alpha_center:.6e} days⁻²")
 
     alpha_min, alpha_max = float(alpha_values.min()), float(alpha_values.max())
     print(f"Alpha grid: [{alpha_min:.2e}, {alpha_max:.2e}], {n} points")
@@ -246,7 +246,7 @@ def infer_networks(
 
     grid_info_df = pd.DataFrame(
         {
-            "median_delta_seconds": [delta_seconds],
+            "median_delta_days": [delta_days],
             "alpha_center": [alpha_center],
             "alpha_min": [alpha_min],
             "alpha_max": [alpha_max],

@@ -9,6 +9,8 @@ Functions
 ---------
 load_dataset
     Load a CSV ratings file and return an encoded DataFrame.
+load_and_split_dataset
+    Load a dataset and apply the global train/test split from :class:`config.Split`.
 split_data_single
     Perform a single random train/test split.
 predict_ratings
@@ -71,6 +73,38 @@ def load_dataset(filename: str | Path | None = None) -> pd.DataFrame:
         f"{data['ItemId'].nunique()} items"
     )
     return data
+
+
+def load_and_split_dataset(
+    filename: str | Path | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Load the dataset and apply the single global train/test split defined in
+    :class:`config.Split`.
+
+    Using the same seed and test fraction everywhere in the pipeline guarantees
+    that cascade generation, feature scaling, and model evaluation all operate
+    on the same held-out partition.
+
+    Args:
+        filename: Path to the CSV file.  Defaults to
+            ``Paths.DATA / "ratings_small.csv"``.
+
+    Returns:
+        Tuple of ``(full_df, train_df, test_df)`` with LabelEncoder-encoded
+        user and item IDs.
+    """
+    from config import Split  # local import to avoid circular dependency
+
+    data = load_dataset(filename)
+    train_df, test_df = split_data_single(
+        data, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
+    )
+    print(
+        f"Global split (seed={Split.RANDOM_STATE}): "
+        f"{len(train_df)} train / {len(test_df)} test ratings"
+    )
+    return data, train_df, test_df
 
 
 # ---------------------------------------------------------------------------

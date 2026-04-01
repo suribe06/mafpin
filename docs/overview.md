@@ -20,7 +20,10 @@ MAFPIN addresses this by:
 ```text
     │
     ▼
-[cascade generation]  ──→  cascades.txt
+[global split]        ──→  train (80%) / test (20%)  [config.Split]
+    │
+    ▼
+[cascade generation]  ──→  cascades.txt  (train interactions only)
     │
     ▼
 [network inference]   ──→  inferred_edges_<model>_<alpha>.csv   (per α)
@@ -32,7 +35,7 @@ MAFPIN addresses this by:
 [community detection] ──→  communities_<model>_<id>.csv  (+LPH)
     │
     ▼
-[recommendation]      ──→  RMSE / MAE / R²  results
+[recommendation]      ──→  RMSE / MAE / R²  (evaluated on global test set)
 ```
 
 Three diffusion models are supported: **exponential**, **power-law**, and **Rayleigh**.  
@@ -56,7 +59,7 @@ Each model is evaluated across a log-spaced grid of the alpha (transmission rate
 
 ```text
 mafpin/
-├── config.py               # Centralised paths and default parameters
+├── config.py               # Centralised paths, default parameters, and global split settings (Split class)
 ├── pipeline.py             # Unified CLI entry point
 ├── networks/               # Cascade generation, inference, centrality, communities
 ├── recommender/            # Dataset utilities, baseline CMF, enhanced CMF

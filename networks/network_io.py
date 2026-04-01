@@ -67,8 +67,8 @@ def parse_network_file(
 
 
 def _build_mapper(nodes: list[int]) -> dict[int, int]:
-    """Return a mapping from original IDs to compact 1-based integers."""
-    return {old: new for new, old in enumerate(sorted(set(nodes)), start=1)}
+    """Return a mapping from original IDs to compact 0-based integers."""
+    return {old: new for new, old in enumerate(sorted(set(nodes)), start=0)}
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +94,7 @@ def load_as_snap(
 
     G = snap.TUNGraph.New()  # type: ignore[attr-defined]
     user_ids = list(mapper.values())
+    # SNAP TUNGraph requires node IDs >= 0; 0-based mapper satisfies this.
     for u in user_ids:
         G.AddNode(u)
     for i, j in edges:
