@@ -63,10 +63,12 @@ def _snap_hash_to_dict(snap_hash) -> dict[int, float]:
 
 
 def calculate_degree(G) -> dict[int, float]:
-    """Degree centrality (raw degree count) for every node in *G*."""
+    """Normalised degree centrality (degree / (N-1)) for every node in *G*."""
+    n_nodes = G.GetNodes()
+    denom = max(n_nodes - 1, 1)
     deg: dict[int, float] = {}
     for node in G.Nodes():
-        deg[node.GetId()] = float(node.GetDeg())
+        deg[node.GetId()] = float(node.GetDeg()) / denom
     return deg
 
 

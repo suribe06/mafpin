@@ -77,11 +77,14 @@ def compute_median_delta(cascade_file: str | Path | None = None) -> float:
 
             # Timestamps are at odd indices: 1, 3, 5, …
             timestamps = [float(parts[i]) for i in range(1, len(parts), 2)]
-            for i in range(len(timestamps)):
-                for j in range(i + 1, len(timestamps)):
-                    diff = abs(timestamps[j] - timestamps[i])
-                    if diff > 0:
-                        deltas.append(diff)
+            # Use only consecutive (adjacent) differences.
+            # Cascades are now written in ascending time order (C-1 fix), so
+            # timestamps[i+1] >= timestamps[i] always holds; no abs() needed.
+            timestamps.sort()  # defensive sort in case file was generated earlier
+            for i in range(len(timestamps) - 1):
+                diff = timestamps[i + 1] - timestamps[i]
+                if diff > 0:
+                    deltas.append(diff)
 
     if not deltas:
         raise ValueError("No positive time deltas found in cascade file.")
