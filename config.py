@@ -61,6 +61,10 @@ class Defaults:
     K = 20  # number of latent factors
     LAMBDA_REG = 1.0  # regularisation coefficient
 
+    # CMF side-information weights (enhanced model only)
+    W_MAIN = 1.0  # weight for main rating-matrix reconstruction loss
+    W_USER = 0.1  # weight for user side-information reconstruction loss
+
 
 # ---------------------------------------------------------------------------
 # Global train / test split

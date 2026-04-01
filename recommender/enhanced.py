@@ -34,8 +34,7 @@ import pandas as pd
 from cmfrec import CMF  # type: ignore[import-untyped]
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
-from config import Paths, Models
-from recommender.baseline import save_search_results, search_best_params
+from config import Paths, Models, Defaults
 from recommender.data import evaluate_single_split, split_data_single
 
 # Scaler type alias used inside the per-split loop.
@@ -104,6 +103,8 @@ def evaluate_cmf_with_user_attributes(
     user_attributes: pd.DataFrame,
     k: int = 20,
     lambda_reg: float = 1.0,
+    w_main: float = Defaults.W_MAIN,
+    w_user: float = Defaults.W_USER,
     n_splits: int = 5,
     test_size: float = 0.2,
     transform: str = "standard",
@@ -123,6 +124,12 @@ def evaluate_cmf_with_user_attributes(
                           ``UserId`` (aligned with *data*).
         k:                Number of latent factors.
         lambda_reg:       L2 regularisation strength.
+        w_main:           Weight for the main rating-matrix reconstruction loss.
+                          Relative to *w_user*; higher values retain more signal
+                          from the rating matrix.
+        w_user:           Weight for the user side-information reconstruction
+                          loss.  Lower values reduce the influence of network
+                          features on the learned user embeddings.
         n_splits:         Number of random splits.
         test_size:        Test fraction.
         transform:        Scaler to apply per fold — ``"standard"``, ``"minmax"``,
@@ -154,12 +161,14 @@ def evaluate_cmf_with_user_attributes(
 
         # --- M-2: fit scaler on training users only -------------------------
         train_users = sorted(train_df["UserId"].unique())
-        train_feats = user_attributes.loc[
-            [u for u in train_users if u in user_attributes.index]
-        ]
+        train_feats = user_attributes.loc[train_users]
         scaler = _SCALERS[transform]()
         scaler.fit(train_feats.values)
-        # Apply the train-fitted scaler to all users (for inference on test).
+        # Apply the train-fitted scaler to ALL users (train + test).
+        # Passing every user's features to cmfrec lets it use network
+        # side-information for test-user embeddings too.  There is no
+        # leakage because these features are derived from the training
+        # network (C-3), not from test ratings.
         scaled_all = pd.DataFrame(
             scaler.transform(user_attributes.values),
             index=user_attributes.index,
@@ -167,12 +176,17 @@ def evaluate_cmf_with_user_attributes(
         )
 
         # Build U matrix: UserId as a column (required by cmfrec).
-        u_matrix = scaled_all.loc[
-            [u for u in train_users if u in scaled_all.index]
-        ].reset_index()  # brings UserId back as a column
+        u_matrix = scaled_all.reset_index()  # all users, not just training
 
         # --- Enhanced model -------------------------------------------------
-        enhanced_model = CMF(method="als", k=k, lambda_=lambda_reg, verbose=False)
+        enhanced_model = CMF(
+            method="als",
+            k=k,
+            lambda_=lambda_reg,
+            w_main=w_main,
+            w_user=w_user,
+            verbose=False,
+        )
         enhanced_model.fit(X=train_df, U=u_matrix)
         enhanced_rmse = evaluate_single_split(enhanced_model, test_df)["rmse"]
 
@@ -193,6 +207,110 @@ def evaluate_cmf_with_user_attributes(
 
 
 # ---------------------------------------------------------------------------
+# Enhanced hyperparameter search (k, lambda_reg, w_main, w_user) — Optuna TPE
+# ---------------------------------------------------------------------------
+
+
+def search_enhanced_params(
+    data: pd.DataFrame,
+    user_attributes: pd.DataFrame,
+    n_trials: int = 50,
+    n_splits: int = 3,
+) -> dict:
+    """
+    Bayesian hyperparameter search (Optuna TPE) over ``k``, ``lambda_reg``,
+    ``w_main``, and ``w_user`` for the enhanced CMF model.
+
+    Random search over 4 interacting parameters is sample-inefficient; Optuna's
+    Tree-structured Parzen Estimator (TPE) models the objective surface and
+    proposes candidates that are likely to improve over previous trials, making
+    ~50 trials roughly equivalent to ~150 uniform random draws for this
+    parameter count.
+
+    ``w_main`` and ``w_user`` control the split of the total loss between the
+    rating matrix and the user side-information matrix.  They must be searched
+    jointly with ``k`` and ``lambda_reg`` because high ``w_user`` demands lower
+    regularisation to avoid killing the side-info signal.
+
+    Args:
+        data:            Full (training) ratings DataFrame.
+        user_attributes: Raw (unscaled) feature DataFrame indexed by 0-based
+                         ``UserId``.  Scaling is applied inside
+                         :func:`evaluate_cmf_with_user_attributes`.
+        n_trials:        Number of Optuna trials (default 50).
+        n_splits:        CV splits per trial.
+
+    Returns:
+        Dict with ``best_params`` (``k``, ``lambda_reg``, ``w_main``,
+        ``w_user``) and ``all_results`` (list, one dict per trial).
+    """
+    import optuna
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    all_results: list[dict] = []
+
+    def _objective(trial: optuna.Trial) -> float:
+        k_val = trial.suggest_int("k", 5, 50)
+        lambda_val = trial.suggest_float("lambda_reg", 0.01, 10.0, log=True)
+        # w_main: keep ≥ 0.1 so the model cannot fully ignore ratings.
+        w_main_val = trial.suggest_float("w_main", 0.1, 1.0)
+        # w_user: log-scale concentrates trials on small values where
+        # side-information typically helps without overwhelming ratings.
+        w_user_val = trial.suggest_float("w_user", 0.01, 1.0, log=True)
+
+        split_results = evaluate_cmf_with_user_attributes(
+            data,
+            user_attributes,
+            k=k_val,
+            lambda_reg=lambda_val,
+            w_main=w_main_val,
+            w_user=w_user_val,
+            n_splits=n_splits,
+        )
+        if not split_results:
+            raise optuna.exceptions.TrialPruned()
+
+        mean_rmse = float(np.mean([r["rmse_enhanced"] for r in split_results]))
+        all_results.append(
+            {
+                "k": k_val,
+                "lambda_reg": lambda_val,
+                "w_main": w_main_val,
+                "w_user": w_user_val,
+                "rmse": mean_rmse,
+            }
+        )
+        return mean_rmse
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(
+        _objective,
+        n_trials=n_trials,
+        callbacks=[
+            lambda study, trial: print(
+                f"  [trial {trial.number + 1:2d}/{n_trials}] "
+                f"k={trial.params.get('k')}  "
+                f"lambda={trial.params.get('lambda_reg'):.4f}  "
+                f"w_main={trial.params.get('w_main'):.3f}  "
+                f"w_user={trial.params.get('w_user'):.3f}  "
+                f"RMSE={trial.value:.4f}"
+            )
+        ],
+    )
+
+    best = study.best_params
+    best_params = {
+        "k": best["k"],
+        "lambda_reg": best["lambda_reg"],
+        "w_main": best["w_main"],
+        "w_user": best["w_user"],
+    }
+    print(f"\nBest enhanced params: {best_params}  RMSE={study.best_value:.4f}")
+    return {"best_params": best_params, "all_results": all_results}
+
+
+# ---------------------------------------------------------------------------
 # Single-network evaluation
 # ---------------------------------------------------------------------------
 
@@ -203,6 +321,8 @@ def evaluate_single_network(
     network_index: int,
     k: int = 20,
     lambda_reg: float = 1.0,
+    w_main: float = Defaults.W_MAIN,
+    w_user: float = Defaults.W_USER,
     transform: str = "standard",
     include_communities: bool = True,
     n_splits: int = 5,
@@ -216,6 +336,8 @@ def evaluate_single_network(
         network_index:       Zero-based network index.
         k:                   Number of latent factors.
         lambda_reg:          L2 regularisation strength.
+        w_main:              Weight for main rating-matrix loss.
+        w_user:              Weight for user side-information loss.
         transform:           Feature normalisation method.
         include_communities: Whether to include community features.
         n_splits:            Number of cross-validation splits.
@@ -238,6 +360,8 @@ def evaluate_single_network(
         features,
         k=k,
         lambda_reg=lambda_reg,
+        w_main=w_main,
+        w_user=w_user,
         n_splits=n_splits,
         transform=transform,
     )
@@ -294,12 +418,21 @@ def run_network_evaluation(
     transform: str = "standard",
     include_communities: bool = True,
     n_splits: int = 5,
+    k: int | None = None,
+    lambda_reg: float | None = None,
+    w_main: float | None = None,
+    w_user: float | None = None,
 ) -> dict[str, list[float]]:
     """
     Evaluate a random sample of networks for all three diffusion models.
 
     For each sampled network the mean enhanced RMSE, paired baseline RMSE, and
     improvement percentage are saved back to ``inferred_edges_<short>.csv``.
+
+    Hyperparameters (*k*, *lambda_reg*, *w_main*, *w_user*) can be supplied
+    directly (e.g. from a prior Optuna search in the pipeline) or left as
+    ``None``, in which case :func:`search_enhanced_params` is called once
+    here using the first available feature file.
 
     Args:
         data:                Ratings DataFrame to use for training (should be the
@@ -309,6 +442,14 @@ def run_network_evaluation(
         transform:           Feature normalisation method.
         include_communities: Whether to include community features.
         n_splits:            Cross-validation splits per network.
+        k:                   Number of latent factors.  If ``None``, searched
+                             via Optuna.
+        lambda_reg:          L2 regularisation strength.  If ``None``, searched
+                             via Optuna.
+        w_main:              Weight for main rating-matrix loss.  If ``None``,
+                             searched via Optuna.
+        w_user:              Weight for user side-information loss.  If ``None``,
+                             searched via Optuna.
 
     Returns:
         Dict mapping model name → list of mean enhanced RMSE values (one per
@@ -316,22 +457,45 @@ def run_network_evaluation(
     """
     all_results: dict[str, list[float]] = {m: [] for m in Models.ALL}
 
-    # Hyperparameter search uses only train data — no leakage from held-out test.
-    print("Searching best hyperparameters (baseline) …")
-    search_result = search_best_params(data, n_iter=50, n_splits=3)
-    if search_result is None:
-        print("Hyperparameter search failed — using defaults k=20, lambda_reg=1.0")
-        best_k, best_lambda = 20, 1.0
+    # --- Optuna hyperparameter search (only when params are not pre-supplied) --
+    if any(p is None for p in (k, lambda_reg, w_main, w_user)):
+        sample_features: pd.DataFrame | None = None
+        sample_model_name: str | None = None
+        for _mn in Models.ALL:
+            _csvs = sorted(
+                (Paths.CENTRALITY / _mn).glob(f"centrality_metrics_{_mn}_*.csv")
+            )
+            if _csvs:
+                sample_features = load_network_features(
+                    _mn, 0, include_communities=include_communities
+                )
+                sample_model_name = _mn
+                if sample_features is not None:
+                    break
+
+        if sample_features is not None:
+            print(
+                f"\nSearching best hyperparameters (Optuna TPE — k, lambda_reg, "
+                f"w_main, w_user) using first {sample_model_name} network …"
+            )
+            enhanced_search = search_enhanced_params(
+                data, sample_features, n_trials=50, n_splits=3
+            )
+            best_k = enhanced_search["best_params"]["k"]
+            best_lambda = enhanced_search["best_params"]["lambda_reg"]
+            best_w_main = enhanced_search["best_params"]["w_main"]
+            best_w_user = enhanced_search["best_params"]["w_user"]
+        else:
+            print("No feature files found — using default enhanced params.")
+            best_k = Defaults.K
+            best_lambda = Defaults.LAMBDA_REG
+            best_w_main = Defaults.W_MAIN
+            best_w_user = Defaults.W_USER
     else:
-        best_k = search_result["best_params"]["k"]
-        best_lambda = search_result["best_params"]["lambda_reg"]
-        # m-3 fix: keep only the minimum (the first assignment was dead code).
-        best_search_rmse = float(min(r["rmse"] for r in search_result["all_results"]))
-        print(
-            f"Best params: k={best_k}, lambda_reg={best_lambda:.4f} "
-            f"(search RMSE={best_search_rmse:.4f})"
-        )
-        save_search_results(search_result)
+        # All four params were supplied; assert to narrow types for type checker.
+        assert k is not None and lambda_reg is not None
+        assert w_main is not None and w_user is not None
+        best_k, best_lambda, best_w_main, best_w_user = k, lambda_reg, w_main, w_user
 
     for model_name in Models.ALL:
         model_dir = Paths.CENTRALITY / model_name
@@ -363,6 +527,8 @@ def run_network_evaluation(
                 net_idx,
                 k=best_k,
                 lambda_reg=best_lambda,
+                w_main=best_w_main,
+                w_user=best_w_user,
                 transform=transform,
                 include_communities=include_communities,
                 n_splits=n_splits,
