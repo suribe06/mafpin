@@ -65,11 +65,7 @@ def _run_cascade(args: argparse.Namespace) -> None:
         print(f"Using dataset: {dataset}")
 
     csv_path = Paths.DATA / f"{dataset}.csv"
-    # Load 4 columns (UserId, ItemId, Rating, timestamp) without encoding —
-    # generate_cascades_from_df uses original IDs, same sorted order as
-    # LabelEncoder, so _build_mapper alignment is preserved.
-    df = pd.read_csv(csv_path, usecols=range(4), header=None)
-    df.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
+    df = pd.read_csv(csv_path, usecols=["UserId", "ItemId", "Rating", "timestamp"])
 
     # Apply the global split so NetInf learns from training interactions only.
     # Pass all_user_ids=df["UserId"] so the cascade header declares the full
