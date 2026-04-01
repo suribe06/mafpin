@@ -60,3 +60,22 @@ class Defaults:
     # Matrix factorization
     K = 20  # number of latent factors
     LAMBDA_REG = 1.0  # regularisation coefficient
+
+
+# ---------------------------------------------------------------------------
+# Global train / test split
+# ---------------------------------------------------------------------------
+
+
+class Split:
+    """Parameters for the single global train/test split applied at the start
+    of the pipeline.
+
+    Using one fixed split ensures that:
+    * Cascade generation (NetInf input) sees only training interactions.
+    * CMF training and feature scaling never touch held-out ratings.
+    * Results are reproducible across pipeline re-runs.
+    """
+
+    TEST_SIZE = 0.2  # fraction of ratings held out for testing
+    RANDOM_STATE = 42  # seed for train_test_split — change to re-randomise

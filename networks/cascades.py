@@ -26,9 +26,9 @@ Usage (CLI)::
 from __future__ import annotations
 
 import argparse
-import datetime
-import itertools
 import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -48,9 +48,106 @@ def list_available_datasets() -> list[str]:
     return [f.stem for f in Paths.DATA.iterdir() if f.suffix == ".csv"]
 
 
+def generate_cascades_from_df(
+    interactions: pd.DataFrame,
+    output_file: str | "Path" | None = None,
+    all_user_ids=None,
+) -> bool:
+    """
+    Build a cascade file from an already-loaded ratings DataFrame and write it
+    to disk.
+
+    This is the core implementation.  Use :func:`generate_cascades` for the
+    convenience wrapper that reads a CSV from disk.
+
+    The DataFrame must have at least the columns ``UserId``, ``ItemId``, and
+    ``timestamp`` (any additional columns are ignored).
+
+    Args:
+        interactions: Ratings DataFrame (may be a train-only split).
+        output_file:  Destination path.  Defaults to ``Paths.CASCADES``.
+        all_user_ids: Optional array-like of *all* user IDs in the full dataset
+            (including those absent from ``interactions``).  When provided the
+            cascade header declares the complete user-ID space, which keeps
+            NetInf node IDs aligned with the LabelEncoder mapping used by the
+            CMF recommender.  Pass this whenever ``interactions`` is a
+            train-only subset so that compact network IDs produced by NetInf
+            still correspond to LabelEncoder user IDs (C-3 fix).
+
+    Returns:
+        ``True`` on success, ``False`` otherwise.
+    """
+    if output_file is None:
+        output_file = Paths.CASCADES
+    output_file = Path(output_file)
+
+    num_users = interactions["UserId"].nunique()
+    num_items = interactions["ItemId"].nunique()
+    print(f"Found {num_items} unique items and {num_users} unique users")
+
+    # Build the user mapping over the FULL user-ID space when provided.
+    # This guarantees that cascade node IDs are consistent with the
+    # LabelEncoder-assigned IDs used by the recommender (C-3 fix).
+    users_for_mapping = (
+        np.unique(all_user_ids)
+        if all_user_ids is not None
+        else np.unique(interactions["UserId"])
+    )
+    num_users_total = len(users_for_mapping)
+
+    # Map original IDs to consecutive integers.
+    # Users are offset past items so that item and user IDs are disjoint in
+    # the NetInf node namespace.
+    item_mapper = dict(zip(np.unique(interactions["ItemId"]), range(int(num_items))))
+    user_mapper = dict(
+        zip(
+            users_for_mapping,
+            range(int(num_items), int(num_items) + num_users_total),
+        )
+    )
+
+    # Build cascade dict: item_id → [(user_id, unix_timestamp), ...]
+    cascades: dict[int, list] = {item_id: [] for item_id in item_mapper.values()}
+    for _, row in interactions.iterrows():
+        item_id = item_mapper[row["ItemId"]]
+        user_id = user_mapper[row["UserId"]]
+        # Store raw Unix float — no datetime conversion needed.
+        cascades[item_id].append([user_id, float(row["timestamp"])])
+
+    # Sort ascending by time (seed = earliest infected user comes first,
+    # as required by NetInf's diffusion models) and flatten to
+    # [user, unix_ts, user, unix_ts, ...].
+    for item_id, records in cascades.items():
+        records.sort(key=lambda x: x[1])  # ascending — C-1 fix
+        flat: list = []
+        for pair in records:
+            flat.extend(pair)
+        cascades[item_id] = flat
+
+    # Write output
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, "w", encoding="utf-8") as fh:
+        # Header declares ALL users (incl. test-only) for ID-space consistency.
+        for u in user_mapper.values():
+            fh.write(f"{u},{u}\n")
+        fh.write("\n")
+        for record in cascades.values():
+            # Skip single-user cascades (< 2 user-timestamp pairs = < 4 elements).
+            # They carry no diffusion signal and can confuse NetInf.
+            if len(record) >= 4:  # m-2 fix
+                fh.write(",".join(map(str, record)) + "\n")
+
+    print(f"Cascades saved to: {output_file}")
+    return True
+
+
 def generate_cascades(dataset_name: str) -> bool:
     """
-    Build cascade file from a rating dataset and write it to disk.
+    Build cascade file from a rating dataset CSV and write it to disk.
+
+    Loads the full dataset and delegates to
+    :func:`generate_cascades_from_df`.  For leakage-free evaluation, call
+    :func:`generate_cascades_from_df` directly with a train-only split.
 
     Args:
         dataset_name: Name of the CSV file (without extension) inside ``data/``.
@@ -59,7 +156,6 @@ def generate_cascades(dataset_name: str) -> bool:
         ``True`` on success, ``False`` otherwise.
     """
     data_file = Paths.DATA / f"{dataset_name}.csv"
-    output_file = Paths.CASCADES
 
     if not data_file.exists():
         print(f"Error: dataset '{data_file}' not found.")
@@ -69,47 +165,9 @@ def generate_cascades(dataset_name: str) -> bool:
 
     # Load the first four columns: UserId, ItemId, Rating, timestamp
     interactions = pd.read_csv(data_file, usecols=range(4))  # type: ignore[call-overload]
+    interactions.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
 
-    num_users = interactions["UserId"].nunique()
-    num_items = interactions["ItemId"].nunique()
-    print(f"Found {num_items} unique items and {num_users} unique users")
-
-    # Map original IDs to consecutive integers
-    item_mapper = dict(zip(np.unique(interactions["ItemId"]), range(int(num_items))))
-    user_mapper = dict(
-        zip(
-            np.unique(interactions["UserId"]),
-            range(int(num_items), int(num_items) + int(num_users)),
-        )
-    )
-
-    # Build cascade dict: item_id → [(user_id, datetime), ...]
-    cascades: dict[int, list] = {item_id: [] for item_id in item_mapper.values()}
-    for _, row in interactions.iterrows():
-        item_id = item_mapper[row["ItemId"]]
-        user_id = user_mapper[row["UserId"]]
-        timestamp = datetime.datetime.fromtimestamp(float(row["timestamp"]))
-        cascades[item_id].append([user_id, timestamp])
-
-    # Sort descending by time and flatten to [user, unix_ts, user, unix_ts, ...]
-    for item_id, records in cascades.items():
-        records.sort(key=lambda x: x[1], reverse=True)
-        cascades[item_id] = list(
-            itertools.chain(*[[u, dt.timestamp()] for u, dt in records])
-        )
-
-    # Write output
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, "w", encoding="utf-8") as fh:
-        for u in user_mapper.values():
-            fh.write(f"{u},{u}\n")
-        fh.write("\n")
-        for record in cascades.values():
-            if record:
-                fh.write(",".join(map(str, record)) + "\n")
-
-    print(f"Cascades saved to: {output_file}")
-    return True
+    return generate_cascades_from_df(interactions)
 
 
 # ---------------------------------------------------------------------------

@@ -49,7 +49,11 @@ import sys
 
 
 def _run_cascade(args: argparse.Namespace) -> None:
-    from networks.cascades import generate_cascades, list_available_datasets
+    import pandas as pd
+    from sklearn.model_selection import train_test_split
+
+    from networks.cascades import generate_cascades_from_df, list_available_datasets
+    from config import Paths, Split
 
     dataset = args.dataset
     if dataset is None:
@@ -59,7 +63,21 @@ def _run_cascade(args: argparse.Namespace) -> None:
             sys.exit(1)
         dataset = datasets[0]
         print(f"Using dataset: {dataset}")
-    generate_cascades(dataset)
+
+    csv_path = Paths.DATA / f"{dataset}.csv"
+    # Load 4 columns (UserId, ItemId, Rating, timestamp) without encoding —
+    # generate_cascades_from_df uses original IDs, same sorted order as
+    # LabelEncoder, so _build_mapper alignment is preserved.
+    df = pd.read_csv(csv_path, usecols=range(4), header=None)
+    df.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
+
+    # Apply the global split so NetInf learns from training interactions only.
+    # Pass all_user_ids=df["UserId"] so the cascade header declares the full
+    # user-ID space — keeping network compact IDs aligned with LabelEncoder.
+    train_df, _ = train_test_split(
+        df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
+    )
+    generate_cascades_from_df(train_df, all_user_ids=df["UserId"])
 
 
 def _run_delta(_args: argparse.Namespace) -> None:
@@ -112,18 +130,37 @@ def _run_communities(_args: argparse.Namespace) -> None:
 
 
 def _run_recommend(args: argparse.Namespace) -> None:
-    from recommender.data import load_dataset
-    from recommender.baseline import train_final_model
+    from recommender.data import load_and_split_dataset
+    from recommender.baseline import (
+        train_final_model,
+        save_search_results,
+        search_best_params,
+    )
     from recommender.enhanced import run_network_evaluation
+    from recommender.data import evaluate_single_split
 
-    data = load_dataset()
+    _, train_df, test_df = load_and_split_dataset()
 
-    # Baseline
-    baseline_model = train_final_model(data)
-    print(f"Baseline model trained — type: {type(baseline_model).__name__}")
+    # Baseline: hyperparameter search on train, final model evaluated on test.
+    print("Searching best hyperparameters (baseline) …")
+    search_result = search_best_params(train_df, n_iter=50, n_splits=3)
+    if search_result is None:
+        best_k, best_lambda = 20, 1.0
+    else:
+        best_k = search_result["best_params"]["k"]
+        best_lambda = search_result["best_params"]["lambda_reg"]
+        save_search_results(search_result)
 
-    # Enhanced
+    baseline_model = train_final_model(train_df, k=best_k, lambda_reg=best_lambda)
+    baseline_metrics = evaluate_single_split(baseline_model, test_df)
+    print(
+        f"Baseline (global test) — RMSE: {baseline_metrics['rmse']:.4f}  "
+        f"MAE: {baseline_metrics['mae']:.4f}  R²: {baseline_metrics['r2']:.4f}"
+    )
+
+    # Enhanced: all data passed is train_df — test is never seen during fitting.
     run_network_evaluation(
+        data=train_df,
         include_communities=args.include_communities,
         sample_networks=args.sample_networks,
     )
