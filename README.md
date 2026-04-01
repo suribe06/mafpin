@@ -16,6 +16,8 @@ The core hypothesis is that user centrality metrics and community structure in i
 | [docs/lph.md](docs/lph.md) | Local Pluralistic Homophily definition and Demon algorithm |
 | [docs/centrality_metrics.md](docs/centrality_metrics.md) | All seven centrality metrics with formulas |
 | [docs/usage.md](docs/usage.md) | Step-by-step CLI and Python API guide |
+| [docs/hyperparameter_tuning.md](docs/hyperparameter_tuning.md) | Optuna TPE search, parameter ranges, two-baseline strategy |
+| [docs/visualization.md](docs/visualization.md) | Plot reference: alpha-RMSE, delta-RMSE, community and network plots |
 
 ## Quick Start
 
