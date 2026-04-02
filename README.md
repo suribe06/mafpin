@@ -1,7 +1,5 @@
 # MAFPIN: Matrix Factorization with Properties of Inferred Networks
 
-> Matrix-factorisation Amplified by Feed-forward influence on networks for Personalised Item recomendatioNs
-
 MAFPIN is a research framework that combines **information diffusion modelling** with **collaborative filtering** to build network-aware recommender systems.
 
 The core hypothesis is that user centrality metrics and community structure in inferred social influence networks can improve traditional matrix factorisation accuracy.
