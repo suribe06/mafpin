@@ -36,6 +36,8 @@ python pipeline.py --all
 
 ```text
 cascade → delta → inference → centrality → communities → recommend
+                                                              │
+                                                    hypertune → shap
 ```
 
 Run individual steps:
@@ -43,6 +45,12 @@ Run individual steps:
 ```bash
 python pipeline.py --steps cascade inference centrality
 python pipeline.py --steps recommend --include-communities
+
+# Tune enhanced CMF hyperparameters without running the full evaluation
+python pipeline.py --steps hypertune --include-communities
+
+# SHAP feature importance (requires hypertune or recommend to have run first)
+python pipeline.py --steps shap --include-communities
 ```
 
 See [docs/usage.md](docs/usage.md) for the full reference.
@@ -55,6 +63,7 @@ mafpin/
 ├── pipeline.py             # Unified CLI entry point
 ├── networks/               # Cascade generation, inference, centrality, communities
 ├── recommender/            # Dataset utilities, baseline CMF, enhanced CMF
+├── analysis/               # Post-hoc analyses (SHAP feature importance)
 ├── visualization/          # Plot functions (model, network, community)
 ├── data/                   # Raw data + generated artefacts
 ├── plots/                  # Generated PNG figures
@@ -70,6 +79,7 @@ Traditional collaborative filtering relies solely on user-item rating patterns. 
 3. **Detecting overlapping communities** (Demon / ASLPAw) and computing **Local Pluralistic Homophily (LPH)**.
 4. **Incorporating network features as user side-information** in Collective Matrix Factorisation (CMF).
 5. **Evaluating RMSE improvement** across a log-spaced alpha (transmission rate) grid.
+6. **Explaining predictions via SHAP** — a GBT surrogate trained on CMF outputs is analysed with TreeSHAP to rank the contribution of each network feature per diffusion model.
 
 ## Citation
 

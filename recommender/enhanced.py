@@ -310,6 +310,30 @@ def search_enhanced_params(
     return {"best_params": best_params, "all_results": all_results}
 
 
+def save_enhanced_search_results(
+    search_result: dict,
+    path: "_Path | None" = None,
+) -> None:
+    """
+    Persist *search_result* (from :func:`search_enhanced_params`) to a JSON file.
+
+    Saved at ``data/enhanced_search_results.json`` by default so that
+    :mod:`analysis.shap_analysis` can load the best hyperparameters without
+    re-running the search.
+
+    Args:
+        search_result: Dict with ``best_params`` and ``all_results``.
+        path:          Override destination path.
+    """
+    import json as _json
+
+    dest = path or (Paths.DATA / "enhanced_search_results.json")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, "w", encoding="utf-8") as fh:
+        _json.dump(search_result, fh, indent=2)
+    print(f"Enhanced search results saved → {dest}")
+
+
 # ---------------------------------------------------------------------------
 # Single-network evaluation
 # ---------------------------------------------------------------------------
