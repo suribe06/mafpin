@@ -65,6 +65,7 @@ from recommender.enhanced import load_network_features
 
 _ENHANCED_PARAMS_PATH = Paths.DATA / "enhanced_search_results.json"
 _SHAP_RESULTS_PATH = Paths.DATA / "shap_results.json"
+_SHAP_MATRICES_DIR = Paths.DATA / "shap_matrices"
 
 _SCALERS = {
     "standard": StandardScaler,
@@ -271,7 +272,7 @@ def compute_shap_for_network(
 
 
 def run_shap_analysis(
-    k_networks: int = 5,
+    k_networks: int | None = 20,
     include_communities: bool = True,
     seed: int = 42,
     model_names: list[str] | None = None,
@@ -289,6 +290,7 @@ def run_shap_analysis(
 
     Args:
         k_networks:          Number of networks to sample per diffusion model.
+                             Pass ``None`` to use **all** available networks.
         include_communities: Include LPH and ``num_communities`` features.
         seed:                Random seed for reproducible network sampling.
         model_names:         Subset of diffusion models to analyse.  Defaults
@@ -319,7 +321,10 @@ def run_shap_analysis(
     for model_name in model_names:
         print(f"\n{'='*55}\nModel: {model_name.upper()}\n{'='*55}")
 
-        indices = _sample_indices(model_name, k_networks, rng)
+        if k_networks is None:
+            indices = _available_indices(model_name)
+        else:
+            indices = _sample_indices(model_name, k_networks, rng)
         if not indices:
             print("  No networks found, skipping.")
             continue
@@ -347,6 +352,13 @@ def run_shap_analysis(
             all_shap.append(sv)
             feature_names = fn
             valid_indices.append(idx)
+
+            # Persist full matrix so plots can be regenerated without re-running.
+            model_matrices_dir = _SHAP_MATRICES_DIR / model_name
+            model_matrices_dir.mkdir(parents=True, exist_ok=True)
+            matrix_path = model_matrices_dir / f"{model_name}_{idx:03d}.npy"
+            np.save(matrix_path, sv)
+
             print(f"OK  ({sv.shape[0]} users, {sv.shape[1]} features)")
 
         if not all_shap:
@@ -357,12 +369,17 @@ def run_shap_analysis(
         mean_abs = np.mean([np.abs(sv).mean(axis=0) for sv in all_shap], axis=0)
         mean_signed = np.mean([sv.mean(axis=0) for sv in all_shap], axis=0)
 
+        matrix_paths = [
+            str(_SHAP_MATRICES_DIR / model_name / f"{model_name}_{i:03d}.npy")
+            for i in valid_indices
+        ]
         results[model_name] = {
             "mean_shap_abs": mean_abs.tolist(),
             "mean_shap": mean_signed.tolist(),
             "feature_names": feature_names,
             "n_networks": len(all_shap),
             "network_indices": valid_indices,
+            "matrix_paths": matrix_paths,
         }
 
         # Pretty-print ranked feature importances.

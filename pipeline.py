@@ -254,14 +254,16 @@ def _run_hypertune(args: argparse.Namespace) -> None:
 
 def _run_shap(args: argparse.Namespace) -> None:
     from analysis.shap_analysis import run_shap_analysis, save_shap_results
+    from visualization.shap_plots import plot_all_shap
 
     results = run_shap_analysis(
-        k_networks=args.k_networks,
+        k_networks=None if args.all_networks else args.k_networks,
         include_communities=args.include_communities,
         seed=args.seed,
         model_names=[args.model] if args.model else None,
     )
     save_shap_results(results)
+    plot_all_shap()
 
 
 # ---------------------------------------------------------------------------
@@ -352,9 +354,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--k-networks",
         type=int,
-        default=5,
+        default=20,
         dest="k_networks",
         help="Networks to sample per diffusion model for SHAP analysis.",
+    )
+    parser.add_argument(
+        "--all-networks",
+        action="store_true",
+        dest="all_networks",
+        help="Use ALL available networks for SHAP analysis (overrides --k-networks).",
     )
     parser.add_argument(
         "--seed",
