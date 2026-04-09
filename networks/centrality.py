@@ -13,11 +13,18 @@ Each measure is computed with the SNAP library (snap-stanford).  Because SNAP
 returns node-keyed dictionaries via its own container types, the results are
 extracted with ``snap.ConvertToFltNIdH`` / ``snap.ConvertToIntNIdH`` helpers.
 
+Additionally, if the ``communities`` step has already been run for the same
+network, a ``pagerank_lph`` column is appended: a generalised PageRank
+(Newman Eq. 7.18) where the intrinsic centrality vector β is set to the
+normalised LPH scores from Barraza et al. (2025).
+
 Outputs saved in ``data/centrality_metrics/<model>/``:
 
 * ``centrality_metrics_<model>_<index>.csv``
   Columns: ``UserId, degree, betweenness, closeness, eigenvector,
-  pagerank, clustering, eccentricity``
+  pagerank, clustering, eccentricity[, pagerank_lph]``
+
+  ``pagerank_lph`` is present only when the corresponding community CSV exists.
 
 Usage (CLI)::
 
@@ -33,7 +40,11 @@ import argparse
 import sys
 from pathlib import Path
 
+import networkx as nx
+import numpy as np
 import pandas as pd
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 
 try:
     from snap import snap  # type: ignore[import-untyped]
@@ -43,7 +54,7 @@ except ImportError as _snap_err:
     ) from _snap_err
 
 from config import Paths, Models
-from networks.network_io import load_as_snap, parse_network_filename
+from networks.network_io import load_as_networkx, load_as_snap, parse_network_filename
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +136,130 @@ def calculate_eccentricity(G) -> dict[int, float]:
 
 
 # ---------------------------------------------------------------------------
+# Custom PageRank with LPH-weighted intrinsic centralities
+# ---------------------------------------------------------------------------
+
+
+def pagerank_custom_beta(
+    G: nx.Graph,
+    alpha: float,
+    beta: dict[int, float],
+) -> dict[int, float]:
+    """
+    Generalised PageRank with per-node intrinsic centrality vector β.
+
+    Solves the linear system derived from Newman Eq. 7.18:
+
+        x_i = α Σ_j A_{ij} (x_j / k_j^out) + β_i
+
+    which in matrix form is ``(D - α A) x = β``, where *D* is the diagonal
+    out-degree matrix.  The caller is responsible for providing a *beta* dict
+    that already satisfies ``Σ β_i = 1 - α`` (use
+    :func:`compute_pagerank_lph` to get the correctly normalised vector).
+
+    After solving, any negative entries (numerical artefacts) are clipped to
+    zero and the result is re-normalised to sum to 1.
+
+    Args:
+        G:      Directed NetworkX graph.
+        alpha:  Damping factor (same role as in standard PageRank).
+        beta:   Mapping node_id → intrinsic centrality value.  Nodes missing
+                from the dict receive ``(1 − alpha) / n`` as default.
+
+    Returns:
+        Dict mapping node_id → PageRank score.
+    """
+    nodes = list(G.nodes())
+    n = len(nodes)
+    idx = {node: i for i, node in enumerate(nodes)}
+
+    A = nx.to_scipy_sparse_array(G, nodelist=nodes, format="csr", dtype=float)
+
+    out_degrees = np.array(A.sum(axis=1)).flatten()
+    out_degrees[out_degrees == 0] = 1.0  # dangling nodes: avoid division by zero
+    D = sp.diags(out_degrees, format="csr")
+    M = D - alpha * A
+
+    default_beta = (1.0 - alpha) / n
+    beta_vec = np.array([beta.get(node, default_beta) for node in nodes])
+
+    x = np.asarray(spla.spsolve(M, beta_vec), dtype=float)
+    x = np.clip(x, 0.0, None)
+    total = x.sum()
+    if total > 0.0:
+        x = x / total
+
+    return {node: float(x[idx[node]]) for node in nodes}
+
+
+def compute_pagerank_lph(
+    network_file: str | Path,
+    model_name: str,
+    network_id: str,
+    alpha: float = 0.85,
+) -> dict[int, float] | None:
+    """
+    Compute LPH-weighted custom PageRank for a single network.
+
+    Loads the corresponding community CSV to retrieve ``lph_score`` (h̃v,
+    Barraza et al. 2025), applies a softmax transform to map the real-valued
+    scores to a valid intrinsic-centrality vector β with ``Σ β_i = 1 − α``,
+    then calls :func:`pagerank_custom_beta`.
+
+    Using softmax rather than a linear shift avoids making β_i = 0 dependent
+    on the most extreme outlier in each network, and is the maximum-entropy
+    transformation that preserves the relative ordering of h̃v scores.
+
+    Returns ``None`` if the community CSV is missing (falls back gracefully so
+    the standard centrality metrics are still saved without the extra column).
+
+    Args:
+        network_file: Path to the NetInf ``.txt`` network file.
+        model_name:   Diffusion model name (exponential / powerlaw / rayleigh).
+        network_id:   Zero-padded index string (e.g. ``"007"``).
+        alpha:        PageRank damping factor.
+
+    Returns:
+        Dict mapping node_id → pagerank_lph score, or ``None``.
+    """
+    community_csv = (
+        Paths.COMMUNITIES / model_name / f"communities_{model_name}_{network_id}.csv"
+    )
+    if not community_csv.exists():
+        return None
+
+    com_df = pd.read_csv(community_csv)
+    if "lph_score" not in com_df.columns:
+        return None
+
+    # Use h̃v (lph_score, Barraza et al. 2025) as the intrinsic centrality
+    # vector β.  h̃v can be negative, so a linear shift would make β=0 depend
+    # on the most extreme outlier in each network.  Instead, use softmax:
+    #
+    #   β_i ∝ exp(h̃v_i)
+    #
+    # which maps any real-valued score to a strictly positive probability
+    # vector without introducing an arbitrary zero, and preserves the relative
+    # ordering (more homophilic nodes receive higher intrinsic weight).
+    # Centring by max(h̃v) before exponentiating avoids numerical overflow.
+    lph_series = com_df.set_index("UserId")["lph_score"]
+    lph_shifted = lph_series - lph_series.max()  # numerical stability
+    exp_lph = np.exp(lph_shifted.values.astype(float))
+    exp_sum = exp_lph.sum()
+    if exp_sum == 0.0:
+        return None
+
+    # Normalise: Σ β_i = 1 − α
+    beta: dict[int, float] = {
+        int(uid): float(w) * (1.0 - alpha) / exp_sum  # type: ignore[arg-type]
+        for uid, w in zip(lph_series.index, exp_lph)
+    }
+
+    G_nx, _ = load_as_networkx(network_file)
+    return pagerank_custom_beta(G_nx, alpha, beta)
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -153,17 +288,20 @@ def save_centrality_results(
     model_name: str,
     network_id: str,
     output_dir: str | Path | None = None,
+    pagerank_lph: dict[int, float] | None = None,
 ) -> Path:
     """
     Write centrality metrics to a CSV file.
 
     Args:
-        user_ids:    Ordered list of node identifiers.
-        metrics:     Dict produced by :func:`compute_all_centrality`.
-        model_name:  Diffusion model name (exponential / powerlaw / rayleigh).
-        network_id:  Zero-padded index string (e.g. ``"007"``).
-        output_dir:  Directory to write into.  Defaults to
+        user_ids:     Ordered list of node identifiers.
+        metrics:      Dict produced by :func:`compute_all_centrality`.
+        model_name:   Diffusion model name (exponential / powerlaw / rayleigh).
+        network_id:   Zero-padded index string (e.g. ``"007"``).
+        output_dir:   Directory to write into.  Defaults to
             ``Paths.CENTRALITY / model_name``.
+        pagerank_lph: Optional LPH-weighted custom PageRank scores.  When
+            provided, a ``pagerank_lph`` column is appended to the CSV.
 
     Returns:
         Path of the written CSV file.
@@ -175,18 +313,19 @@ def save_centrality_results(
 
     records = []
     for uid in user_ids:
-        records.append(
-            {
-                "UserId": uid,
-                "degree": metrics["degree"].get(uid, 0.0),
-                "betweenness": metrics["betweenness"].get(uid, 0.0),
-                "closeness": metrics["closeness"].get(uid, 0.0),
-                "eigenvector": metrics["eigenvector"].get(uid, 0.0),
-                "pagerank": metrics["pagerank"].get(uid, 0.0),
-                "clustering": metrics["clustering"].get(uid, 0.0),
-                "eccentricity": metrics["eccentricity"].get(uid, 0.0),
-            }
-        )
+        row = {
+            "UserId": uid,
+            "degree": metrics["degree"].get(uid, 0.0),
+            "betweenness": metrics["betweenness"].get(uid, 0.0),
+            "closeness": metrics["closeness"].get(uid, 0.0),
+            "eigenvector": metrics["eigenvector"].get(uid, 0.0),
+            "pagerank": metrics["pagerank"].get(uid, 0.0),
+            "clustering": metrics["clustering"].get(uid, 0.0),
+            "eccentricity": metrics["eccentricity"].get(uid, 0.0),
+        }
+        if pagerank_lph is not None:
+            row["pagerank_lph"] = pagerank_lph.get(uid, 0.0)
+        records.append(row)
 
     df = pd.DataFrame(records)
     out_file = output_dir / f"centrality_metrics_{model_name}_{network_id}.csv"
@@ -224,7 +363,18 @@ def calculate_centrality_for_network(network_file: str | Path) -> bool:
     print(f"Processing {network_file.name} (model={model_name}, id={network_id})")
     G, user_ids = load_as_snap(network_file)
     metrics = compute_all_centrality(G)
-    save_centrality_results(user_ids, metrics, model_name, network_id)
+
+    pr_lph = compute_pagerank_lph(network_file, model_name, network_id)
+    if pr_lph is not None:
+        print("  Computing pagerank_lph (LPH-weighted custom PageRank) ✓")
+    else:
+        print(
+            "  pagerank_lph skipped (no community CSV found; run communities step first)"
+        )
+
+    save_centrality_results(
+        user_ids, metrics, model_name, network_id, pagerank_lph=pr_lph
+    )
     return True
 
 
