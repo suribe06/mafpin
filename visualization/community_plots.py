@@ -87,6 +87,7 @@ def _aggregate_community_stats(model_name: str, n_networks: int = 100) -> pd.Dat
     Return per-network aggregated community statistics.
 
     Columns: ``network_index``, ``mean_lph``, ``median_lph``, ``std_lph``,
+    ``mean_lph_score``, ``median_lph_score``, ``std_lph_score``,
     ``mean_num_coms``, ``median_num_coms``.
     """
     rows = []
@@ -94,16 +95,19 @@ def _aggregate_community_stats(model_name: str, n_networks: int = 100) -> pd.Dat
         raw = _load_community_csv(model_name, i)
         if raw is None:
             continue
-        rows.append(
-            {
-                "network_index": i,
-                "mean_lph": raw["local_pluralistic_hom"].mean(),
-                "median_lph": raw["local_pluralistic_hom"].median(),
-                "std_lph": raw["local_pluralistic_hom"].std(),
-                "mean_num_coms": raw["num_communities"].mean(),
-                "median_num_coms": raw["num_communities"].median(),
-            }
-        )
+        row: dict = {
+            "network_index": i,
+            "mean_lph": raw["local_pluralistic_hom"].mean(),
+            "median_lph": raw["local_pluralistic_hom"].median(),
+            "std_lph": raw["local_pluralistic_hom"].std(),
+            "mean_num_coms": raw["num_communities"].mean(),
+            "median_num_coms": raw["num_communities"].median(),
+        }
+        if "lph_score" in raw.columns:
+            row["mean_lph_score"] = raw["lph_score"].mean()
+            row["median_lph_score"] = raw["lph_score"].median()
+            row["std_lph_score"] = raw["lph_score"].std()
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -118,11 +122,12 @@ def plot_lph_distribution(
     save: bool = True,
 ) -> None:
     """
-    Violin + strip plot comparing the LPH distribution across the three models.
+    Violin + box plot comparing LPH distributions across the three models.
 
-    Each violin pools LPH values from up to *sample_nodes* randomly selected
-    nodes per network, giving a distribution that reveals the full shape
-    without excessive memory use.
+    Two side-by-side subplots are produced:
+    - Left: Jaccard-based ``local_pluralistic_hom`` (range [0, 1]).
+    - Right: Normalized boundary score ``lph_score`` / h̃v (can be negative),
+      only shown when the column is present in the CSV files.
 
     Args:
         n_networks:   Number of networks to sample per model.
@@ -131,53 +136,80 @@ def plot_lph_distribution(
     """
     rng = np.random.default_rng(42)
     records = []
+    has_lph_score = False
     for model in MODELS:
         for i in range(n_networks):
             raw = _load_community_csv(model, i)
             if raw is None:
                 continue
-            sample = raw["local_pluralistic_hom"].dropna()
-            if len(sample) > sample_nodes:
-                sample = sample.iloc[
-                    rng.choice(len(sample), sample_nodes, replace=False)
-                ]
-            for v in sample:
-                records.append({"model": model, "LPH": v})
+            if "lph_score" in raw.columns:
+                has_lph_score = True
+            sample_idx = np.arange(len(raw))
+            if len(sample_idx) > sample_nodes:
+                sample_idx = rng.choice(len(sample_idx), sample_nodes, replace=False)
+            subset = raw.iloc[sample_idx]
+            for _, row in subset.iterrows():
+                rec: dict = {
+                    "model": model,
+                    "LPH (Jaccard)": row["local_pluralistic_hom"],
+                }
+                if "lph_score" in raw.columns:
+                    rec["h̃v (paper)"] = row["lph_score"]
+                records.append(rec)
 
     if not records:
         print("No community data found.")
         return
 
     data = pd.DataFrame(records)
-    _, ax = plt.subplots(figsize=(9, 6))
-    sns.violinplot(
-        data=data,
-        x="model",
-        y="LPH",
-        palette=PALETTE,
-        inner=None,
-        cut=0,
-        ax=ax,
-        alpha=0.7,
+    ncols = 2 if has_lph_score else 1
+    fig, axes = plt.subplots(1, ncols, figsize=(9 * ncols, 6))
+    if ncols == 1:
+        axes = [axes]
+
+    def _violin_box(ax: plt.Axes, col: str, ylabel: str, ylim: tuple | None) -> None:
+        sns.violinplot(
+            data=data,
+            x="model",
+            y=col,
+            palette=PALETTE,
+            inner=None,
+            cut=0,
+            ax=ax,
+            alpha=0.7,
+        )
+        sns.boxplot(
+            data=data,
+            x="model",
+            y=col,
+            width=0.15,
+            showcaps=True,
+            boxprops={"zorder": 3},
+            whiskerprops={"zorder": 3},
+            medianprops={"color": "white", "linewidth": 2},
+            flierprops={"marker": "o", "markersize": 2, "alpha": 0.3},
+            palette=PALETTE,
+            ax=ax,
+        )
+        ax.set_xlabel("Inference Model", fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        ax.grid(axis="y", alpha=0.3)
+
+    _violin_box(axes[0], "LPH (Jaccard)", "LPH (Jaccard)", (-0.05, 1.05))
+    axes[0].set_title("Jaccard-based LPH", fontsize=13)
+
+    if has_lph_score:
+        _violin_box(axes[1], "h̃v (paper)", "h̃v (Barraza et al. 2025)", None)
+        axes[1].set_title("Normalized h̃v — Boundary Score", fontsize=13)
+        axes[1].axhline(0, color="gray", linewidth=0.8, linestyle="--")
+
+    fig.suptitle(
+        "Local Pluralistic Homophily Distribution by Model",
+        fontsize=14,
+        fontweight="bold",
     )
-    sns.boxplot(
-        data=data,
-        x="model",
-        y="LPH",
-        width=0.15,
-        showcaps=True,
-        boxprops={"zorder": 3},
-        whiskerprops={"zorder": 3},
-        medianprops={"color": "white", "linewidth": 2},
-        flierprops={"marker": "o", "markersize": 2, "alpha": 0.3},
-        palette=PALETTE,
-        ax=ax,
-    )
-    ax.set_title("Local Pluralistic Homophily (LPH) Distribution by Model", fontsize=14)
-    ax.set_xlabel("Inference Model", fontsize=12)
-    ax.set_ylabel("LPH", fontsize=12)
-    ax.set_ylim(-0.05, 1.05)
-    ax.grid(axis="y", alpha=0.3)
     plt.tight_layout()
 
     if save:
@@ -463,8 +495,11 @@ def plot_community_correlation_heatmap(
         print(f"Data not found for {model_name} network {network_index}.")
         return
 
+    comm_cols = ["UserId", "local_pluralistic_hom", "num_communities"]
+    if "lph_score" in comm_df.columns:
+        comm_cols.append("lph_score")
     merged = (
-        comm_df[["UserId", "local_pluralistic_hom", "num_communities"]]
+        comm_df[comm_cols]
         .merge(cent_df, on="UserId", how="inner")
         .drop(columns=["UserId"])
     )

@@ -89,6 +89,106 @@ Results are stored in the communities CSV alongside the community count per node
 
 ---
 
+## Normalized Local Pluralistic Homophily (h̃v) — Paper Metric
+
+The Jaccard-based LPH above measures raw similarity in the neighborhood, but its
+values can be dominated by degree or global variance effects, making direct node
+comparison unreliable. Barraza et al. (2025) propose a normalized, neighborhood-centered
+score **h̃v** that surfaces membership-based boundary positions orthogonally to topology.
+
+### Key idea
+
+A **boundary node** is not characterized by its deviation from a graph-wide average,
+but by how its community profile **differs from its local neighborhood**. h̃v captures
+this local misalignment. Large negative h̃v marks nodes whose membership profile
+diverges from those of their neighbors → boundary-spanning candidates.
+
+### Step-by-step computation (Algorithm 1)
+
+#### Step 1 — Neighborhood alignment s(v)
+
+For each node v, count how many of its own communities are represented at least
+once in its neighborhood:
+
+$$s(v) = \left|\bigcup_{i \in N(v)} \left(\mathcal{C}(v) \cap \mathcal{C}(i)\right)\right|$$
+
+*Interpretation:* s(v) measures which portions of v's community identity are present
+among its immediate neighbors. No weighting is applied.
+
+#### Step 2 — Network-level pluralistic homophily h
+
+Compute the Pearson-style edge assortativity using s(·) as node attribute
+(equivalent form, Supplementary S1):
+
+$$h = \frac{\sum_{(i,j)\in E}(s(i)-\mu_q)(s(j)-\mu_q)}{\sum_{(i,j)\in E}(s(i)-\mu_q)^2}$$
+
+where $\mu_q = \tfrac{1}{2M}\sum_{(i,j)\in E}(s(i)+s(j))$ is the degree-weighted mean.
+
+#### Step 3 — Local dissimilarity δv
+
+$$\delta_v = \frac{1}{d_v}\sum_{i \in N(v)} |s(v) - s(i)|, \qquad \delta_v = 0 \text{ if } d_v = 0$$
+
+This is the mean absolute difference between v's alignment score and those of its
+neighbors.
+
+#### Step 4 — Scaling factor λ
+
+$$\lambda = \frac{h + \sum_{u \in V}\delta_u}{N}$$
+
+#### Step 5 — Local score h̃v
+
+$$\tilde{h}_v = \lambda - \delta_v$$
+
+### Properties
+
+| Property | Value |
+| --- | --- |
+| Range | $(-\infty, \lambda]$ — can be negative |
+| Sum | $\sum_v \tilde{h}_v = h$ (global-local consistency) |
+| Complexity | $O(M \cdot \bar{s})$ end-to-end, near-linear in practice |
+| Boundary signal | Most negative $\tilde{h}_v$ → strongest boundary-spanning position |
+
+### Boundary Signal Interpretation
+
+| h̃v sign | Meaning |
+| --- | --- |
+| $\tilde{h}_v > 0$ | **Assortative** — v and neighbors share similar community membership patterns |
+| $\tilde{h}_v \approx 0$ | Neutral neighborhood alignment |
+| $\tilde{h}_v < 0$ | **Disassortative** — v's membership profile differ from its neighbors → boundary position |
+
+Nodes ranked lowest by h̃v are prime candidates for boundary-spanning roles:
+removing them in ascending h̃v order depletes inter-community coupling faster than
+random removal while preserving global connectivity.
+
+### Comparison with Jaccard-LPH
+
+| Aspect | Jaccard LPH | h̃v |
+| --- | --- | --- |
+| Range | [0, 1] | $(-\infty, \lambda]$ |
+| Global reference | None | Network-level assortativity h |
+| Boundary signal | Low value | Strongly negative value |
+| Degree bias | Present | Corrected via δv and λ |
+
+---
+
+## Implementation of h̃v
+
+`compute_lph_paper(G, membership)` in `networks/communities.py` implements Algorithm 1
+and returns a `dict[node_id, float]` of h̃v scores. The result is stored in the
+`lph_score` column of the communities CSV and loaded into the user-side attribute
+matrix by `recommender/enhanced.py`.
+
+```python
+from networks.communities import compute_lph_paper
+
+G = ...            # networkx graph
+membership = ...   # dict[node_id, set[int]]  — community-index sets per node
+htilde = compute_lph_paper(G, membership)
+# htilde: dict[node_id, float]  — boundary score; most negative = strongest boundary
+```
+
+---
+
 ## Visualisation
 
 Community-level and LPH plots are available in `visualization/community_plots.py`:

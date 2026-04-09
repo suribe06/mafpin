@@ -29,7 +29,11 @@ structures.
 Outputs saved in ``data/communities/<model>/``:
 
 * ``communities_<model>_<index>.csv``
-  Columns: ``UserId, num_communities, community_ids, local_pluralistic_hom``
+  Columns: ``UserId, num_communities, community_ids, local_pluralistic_hom, lph_score``
+
+  - ``local_pluralistic_hom``: mean Jaccard similarity with neighbours ∈ [0, 1].
+  - ``lph_score``: normalized h̃v boundary score (Barraza et al. 2025); most
+    negative values indicate boundary-spanning positions.
 
 Usage (CLI)::
 
@@ -112,7 +116,7 @@ def compute_node_community_membership(
 
 
 # ---------------------------------------------------------------------------
-# LPH computation
+# LPH computation — Jaccard-based
 # ---------------------------------------------------------------------------
 
 
@@ -157,13 +161,116 @@ def compute_local_pluralistic_homophily(
 
 
 # ---------------------------------------------------------------------------
-# File I/O
+# LPH computation — Paper metric (h̃v, Barraza et al. 2025)
 # ---------------------------------------------------------------------------
+
+
+def _compute_neighborhood_alignment(
+    G: nx.Graph,
+    membership: dict[int, set[int]],
+) -> dict[int, int]:
+    """
+    Compute s(v) = |⋃_{i∈N(v)} (C(v) ∩ C(i))| for every node.
+
+    s(v) counts how many of v's own communities are represented at least once
+    among its neighbours (Eq. 3 of Barraza et al. 2025).
+
+    Args:
+        G:          Undirected NetworkX graph.
+        membership: Dict mapping node_id → set of community indices.
+
+    Returns:
+        Dict mapping node_id → integer s value.
+    """
+    s: dict[int, int] = {}
+    for node in G.nodes():
+        c_v = membership.get(node, set())
+        s_neigh: set[int] = set()
+        for nb in G.neighbors(node):
+            s_neigh |= c_v & membership.get(nb, set())
+        s[node] = len(s_neigh)
+    return s
+
+
+def _compute_network_homophily(G: nx.Graph, s: dict[int, int]) -> float:
+    """
+    Compute the network-level pluralistic homophily coefficient h.
+
+    Uses the edge-based Pearson form (equivalent form, SI Eq. 12):
+
+        h = Σ_{(i,j)∈E} (s(i) − µq)(s(j) − µq)
+            ─────────────────────────────────────
+            Σ_{(i,j)∈E} (s(i) − µq)²
+
+    where µq = (1/2M) Σ_{(i,j)∈E} (s(i) + s(j)).
+
+    Returns 0.0 when the graph has no edges or zero variance.
+    """
+    edges = list(G.edges())
+    if not edges:
+        return 0.0
+
+    M = len(edges)
+    mu_q = sum(s.get(u, 0) + s.get(v, 0) for u, v in edges) / (2 * M)
+    numerator = sum((s.get(u, 0) - mu_q) * (s.get(v, 0) - mu_q) for u, v in edges)
+    denominator = sum((s.get(u, 0) - mu_q) ** 2 for u, v in edges)
+
+    if denominator == 0.0:
+        return 0.0
+    return numerator / denominator
+
+
+def compute_lph_paper(
+    G: nx.Graph,
+    membership: dict[int, set[int]],
+) -> dict[int, float]:
+    """
+    Compute the normalized Local Pluralistic Homophily score h̃v for every node
+    (Algorithm 1, Barraza et al. 2025).
+
+    Steps:
+
+    1. s(v) = |⋃_{i∈N(v)} (C(v) ∩ C(i))|  — neighborhood alignment.
+    2. h = network-level Pearson assortativity using s(·).
+    3. δv = (1/dv) Σ_{i∈N(v)} |s(v) − s(i)|  — local dissimilarity (0 if isolated).
+    4. λ = (h + Σu δu) / N
+    5. h̃v = λ − δv
+
+    Nodes with strongly negative h̃v are boundary-spanning candidates: their
+    community profile diverges from those of their neighbours.
+    Sum property: Σv h̃v = h (global-local consistency).
+
+    Args:
+        G:          Undirected NetworkX graph.
+        membership: Dict returned by :func:`compute_node_community_membership`.
+
+    Returns:
+        Dict mapping node_id → h̃v score.
+    """
+    s = _compute_neighborhood_alignment(G, membership)
+    h = _compute_network_homophily(G, s)
+
+    delta: dict[int, float] = {}
+    for node in G.nodes():
+        neighbours = list(G.neighbors(node))
+        dv = len(neighbours)
+        if dv == 0:
+            delta[node] = 0.0
+        else:
+            delta[node] = (
+                sum(abs(s.get(node, 0) - s.get(nb, 0)) for nb in neighbours) / dv
+            )
+
+    N = G.number_of_nodes()
+    lam = (h + sum(delta.values())) / N if N > 0 else 0.0
+
+    return {node: lam - delta[node] for node in G.nodes()}
 
 
 def save_community_results(
     user_ids: list[int],
     lph: dict[int, float],
+    lph_paper: dict[int, float],
     membership: dict[int, set[int]],
     model_name: str,
     network_id: str,
@@ -174,7 +281,8 @@ def save_community_results(
 
     Args:
         user_ids:    Ordered list of node identifiers.
-        lph:         Dict of LPH scores per node.
+        lph:         Dict of Jaccard-based LPH scores per node.
+        lph_paper:   Dict of normalized h̃v scores per node (Barraza et al. 2025).
         membership:  Dict of community-index sets per node.
         model_name:  Diffusion model name.
         network_id:  Zero-padded index string (e.g. ``"007"``).
@@ -198,6 +306,7 @@ def save_community_results(
                 "num_communities": len(coms),
                 "community_ids": ";".join(map(str, coms)),
                 "local_pluralistic_hom": lph.get(uid, 0.0),
+                "lph_score": lph_paper.get(uid, 0.0),
             }
         )
 
@@ -256,8 +365,9 @@ def calculate_communities_for_network(
 
     membership = compute_node_community_membership(user_ids, communities)
     lph = compute_local_pluralistic_homophily(G, membership)
+    lph_paper = compute_lph_paper(G, membership)
 
-    save_community_results(user_ids, lph, membership, model_name, network_id)
+    save_community_results(user_ids, lph, lph_paper, membership, model_name, network_id)
     return True
 
 

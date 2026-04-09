@@ -85,10 +85,11 @@ def load_network_features(
         community_dir = Paths.COMMUNITIES / model_name
         community_csv = community_dir / f"communities_{model_name}_{index_str}.csv"
         if community_csv.exists():
-            com_df = pd.read_csv(community_csv)[
-                ["UserId", "local_pluralistic_hom", "num_communities"]
-            ]
-            df = df.merge(com_df, on="UserId", how="left")
+            com_raw = pd.read_csv(community_csv)
+            com_cols = ["UserId", "local_pluralistic_hom", "num_communities"]
+            if "lph_score" in com_raw.columns:
+                com_cols.append("lph_score")
+            df = df.merge(com_raw[com_cols], on="UserId", how="left")
 
     return df.set_index("UserId").fillna(0.0)
 
