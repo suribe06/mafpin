@@ -363,18 +363,23 @@ def plot_alpha_rmse_analysis(
     rmse_std_values: list[float] | None = None,
     save_plot: bool = True,
     figsize: tuple = (12, 8),
+    global_baseline_rmse: float | None = None,
 ) -> None:
     """
     Alpha vs RMSE line + scatter with best-alpha marker and baseline reference.
 
     Args:
-        model_name:       Diffusion model name.
-        rmse_values:      Per-alpha mean RMSE values.
-        baseline_rmse:    Baseline (no side information) RMSE for comparison.
-        rmse_std_values:  Optional per-alpha std values; if provided, a ±1σ
-                          shaded band is drawn around the line.
-        save_plot:        Write PNG to ``plots/models/``.
-        figsize:          Figure size.
+        model_name:           Diffusion model name.
+        rmse_values:          Per-alpha mean RMSE values.
+        baseline_rmse:        Paired baseline RMSE (same user subset as the
+                              enhanced model — fair comparison reference).
+        rmse_std_values:      Optional per-alpha std values; if provided, a ±1σ
+                              shaded band is drawn around the line.
+        save_plot:            Write PNG to ``plots/models/``.
+        figsize:              Figure size.
+        global_baseline_rmse: Optional global plain-CMF baseline (all users).
+                              When provided it is drawn as a second dashed line
+                              for absolute reference.
     """
     alpha_values = _extract_alphas(model_name)
     if len(alpha_values) == 0 or len(alpha_values) != len(rmse_values):
@@ -415,8 +420,19 @@ def plot_alpha_rmse_analysis(
         color="seagreen",
         linestyle="--",
         linewidth=2,
-        label=f"Baseline RMSE={baseline_rmse:.4f}",
+        label=f"Paired baseline RMSE={baseline_rmse:.4f}",
     )
+    if (
+        global_baseline_rmse is not None
+        and abs(global_baseline_rmse - baseline_rmse) > 1e-6
+    ):
+        plt.axhline(
+            global_baseline_rmse,
+            color="darkorange",
+            linestyle=":",
+            linewidth=1.5,
+            label=f"Global baseline RMSE={global_baseline_rmse:.4f}",
+        )
 
     alpha_range = (
         float(alpha_values.max()) / float(alpha_values.min())
@@ -459,24 +475,35 @@ def plot_alpha_delta_rmse(
     baseline_rmse: float,
     save_plot: bool = True,
     figsize: tuple = (12, 8),
+    delta_pct_values: list[float] | None = None,
 ) -> None:
     """
     Signed delta RMSE scatter: positive = better than baseline (blue), negative =
     worse (red).
 
     Args:
-        model_name:     Diffusion model name.
-        rmse_values:    Per-alpha RMSE values.
-        baseline_rmse:  Baseline RMSE reference.
-        save_plot:      Write PNG to ``plots/models/``.
-        figsize:        Figure size.
+        model_name:      Diffusion model name.
+        rmse_values:     Per-alpha enhanced RMSE values.
+        baseline_rmse:   Fallback scalar baseline RMSE (used only when
+                         *delta_pct_values* is ``None``).
+        save_plot:       Write PNG to ``plots/models/``.
+        figsize:         Figure size.
+        delta_pct_values: Pre-computed per-network improvement percentages
+                          (paired comparison, same user subset).  When provided
+                          these are used directly so the plot reflects a fair
+                          comparison between models evaluated on the same users.
+                          When ``None`` the delta is derived from *baseline_rmse*
+                          and *rmse_values* (both must be on the same population).
     """
     alpha_values = _extract_alphas(model_name)
     if len(alpha_values) == 0 or len(alpha_values) != len(rmse_values):
         print("Mismatch between alpha values and RMSE values — cannot plot.")
         return
 
-    deltas_pct = (baseline_rmse - np.array(rmse_values)) / baseline_rmse * 100
+    if delta_pct_values is not None:
+        deltas_pct = np.array(delta_pct_values)
+    else:
+        deltas_pct = (baseline_rmse - np.array(rmse_values)) / baseline_rmse * 100
     colours = ["steelblue" if d > 0 else "tomato" for d in deltas_pct]
 
     plt.figure(figsize=figsize)
@@ -664,6 +691,18 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # Per-model alpha plots (reads inferred_edges CSVs)
     # ------------------------------------------------------------------
+    # Load the globally-tuned baseline RMSE saved by the recommend step.
+    # Falls back to None — in which case the per-CSV baseline is used.
+    _global_baseline_rmse: float | None = None
+    if _search_json.exists():
+        with open(_search_json, encoding="utf-8") as _bf:
+            _bs = json.load(_bf)
+        if "global_test_rmse" in _bs:
+            _global_baseline_rmse = float(_bs["global_test_rmse"])
+            print(
+                f"Global baseline RMSE (from recommend step): {_global_baseline_rmse:.4f}"
+            )
+
     if _do_all or _plots & {"alpha-rmse", "delta-rmse"}:
         for _model_name in _model_list:
             _short = Models.SHORT[_model_name]
@@ -687,9 +726,17 @@ if __name__ == "__main__":
                 if "rmse_std" in _df.columns and not bool(_df["rmse_std"].isna().all())
                 else None
             )
-            # Derive baseline from improvement_pct: baseline = rmse / (1 - pct/100)
+
+            # --- Paired baseline for alpha-rmse plot ------------------------
+            # Use the per-network paired baseline (same user subset) so the
+            # reference is on the same population as the enhanced RMSE values.
+            # The global baseline is passed separately as a secondary line.
             _baseline: float
-            if "improvement_pct" in _df.columns and not bool(
+            if "baseline_rmse_mean" in _df.columns and not bool(
+                _df["baseline_rmse_mean"].isna().all()
+            ):
+                _baseline = float(_df["baseline_rmse_mean"].dropna().mean())
+            elif "improvement_pct" in _df.columns and not bool(
                 _df["improvement_pct"].isna().all()
             ):
                 _valid = _df.dropna(subset=["rmse_mean", "improvement_pct"])
@@ -698,10 +745,24 @@ if __name__ == "__main__":
                         _valid["rmse_mean"] / (1.0 - _valid["improvement_pct"] / 100.0)
                     ).mean()
                 )
+            elif _global_baseline_rmse is not None:
+                _baseline = _global_baseline_rmse
             else:
                 _baseline = float(_df["rmse_mean"].mean())
 
-            print(f"\n--- {_model_name.upper()} (baseline≈{_baseline:.4f}) ---")
+            # --- Pre-computed paired deltas for delta-rmse plot --------------
+            # improvement_pct was computed in _save_rmses as:
+            #   (baseline_rmse_mean - rmse_mean) / baseline_rmse_mean * 100
+            # Both values come from the same user subset (network users only),
+            # so this is a fair paired comparison.  Using the global baseline
+            # here would mix populations (network users vs all users).
+            _delta_pct: list[float] | None = None
+            if "improvement_pct" in _df.columns and not bool(
+                _df["improvement_pct"].isna().all()
+            ):
+                _delta_pct = _df["improvement_pct"].fillna(0.0).tolist()
+
+            print(f"\n--- {_model_name.upper()} (paired baseline≈{_baseline:.4f}) ---")
 
             if _do_all or "alpha-rmse" in _plots:
                 plot_alpha_rmse_analysis(
@@ -710,6 +771,7 @@ if __name__ == "__main__":
                     baseline_rmse=_baseline,
                     rmse_std_values=_std,
                     save_plot=_save,
+                    global_baseline_rmse=_global_baseline_rmse,
                 )
             if _do_all or "delta-rmse" in _plots:
                 plot_alpha_delta_rmse(
@@ -717,6 +779,7 @@ if __name__ == "__main__":
                     _rmse,
                     baseline_rmse=_baseline,
                     save_plot=_save,
+                    delta_pct_values=_delta_pct,
                 )
 
     if _do_all or "alpha-edges" in _plots:
