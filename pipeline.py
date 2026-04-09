@@ -205,15 +205,24 @@ def _run_recommend(args: argparse.Namespace) -> None:
         f"MAE: {baseline_metrics['mae']:.4f}  R²: {baseline_metrics['r2']:.4f}"
     )
 
+    # Persist the global test-set baseline RMSE so the visualization can use
+    # the correctly tuned reference instead of the paired per-fold baseline.
+    from recommender.baseline import save_search_results as _save_baseline
+
+    baseline_search["global_test_rmse"] = baseline_metrics["rmse"]
+    _save_baseline(baseline_search)
+
     # Enhanced evaluation — pass pre-tuned enhanced params.
     run_network_evaluation(
         data=train_df,
         include_communities=args.include_communities,
-        sample_networks=args.sample_networks,
+        sample_networks=999_999 if args.all_networks else args.sample_networks,
         k=best_k_e,
         lambda_reg=best_lambda_e,
         w_main=best_w_main,
         w_user=best_w_user,
+        baseline_k=best_k_b,
+        baseline_lambda=best_lambda_b,
     )
 
 
@@ -349,7 +358,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=5,
         dest="sample_networks",
-        help="Number of networks to sample per model. Use a very large number (e.g. 9999) to run all.",
+        help="Number of networks to sample per model for the recommend step.",
     )
     parser.add_argument(
         "--k-networks",

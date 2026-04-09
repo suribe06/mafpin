@@ -12,6 +12,30 @@ These features are loaded from the pre-computed CSV files in
 ``data/centrality_metrics/`` and ``data/communities/``, normalised, and passed as
 the ``U`` (user-side attribute) matrix to :class:`cmfrec.CMF`.
 
+Comparison Design
+-----------------
+The evaluation compares **plain CMF** (baseline) against **CMF with network
+side-information** (enhanced) under the same conditions.
+
+Two independent Optuna searches are run before the per-network evaluation:
+
+1. **Baseline search** — optimises ``k`` and ``lambda_reg`` for plain CMF only.
+   The resulting (k*, λ*) represent the best achievable RMSE without any
+   side-information.
+2. **Enhanced search** — optimises ``k``, ``lambda_reg``, ``w_main``, and
+   ``w_user`` for the enhanced model.  The optimal λ here is systematically
+   different because the side-information reconstruction term shifts the
+   effective regularisation landscape; reusing the baseline λ would
+   mis-configure the enhanced model.
+
+For each inferred network a **paired comparison** is used: both models are
+trained and evaluated on the same user subset (only users present in that
+network have features), the same CV folds, and the same data.  The paired
+baseline always uses the baseline-optimal (k*, λ*) from the baseline search —
+not the enhanced model's hyperparameters — so that any improvement in RMSE is
+attributable solely to the network side-information and not to differences in
+regularisation strength.
+
 Functions
 ---------
 load_network_features
@@ -109,6 +133,8 @@ def evaluate_cmf_with_user_attributes(
     n_splits: int = 5,
     test_size: float = 0.2,
     transform: str = "standard",
+    baseline_k: int | None = None,
+    baseline_lambda: float | None = None,
 ) -> list[dict]:
     """
     Evaluate enhanced CMF via repeated random train/test splits.
@@ -135,6 +161,12 @@ def evaluate_cmf_with_user_attributes(
         test_size:        Test fraction.
         transform:        Scaler to apply per fold — ``"standard"``, ``"minmax"``,
                           or ``"normalizer"``.
+        baseline_k:       Number of latent factors for the paired plain-CMF baseline.
+                          Should come from the independently-tuned baseline search.
+                          When ``None`` (e.g. during hyperparameter search) the
+                          baseline is skipped and ``rmse_baseline`` is ``nan``.
+        baseline_lambda:  L2 regularisation for the paired baseline.  Same origin
+                          as *baseline_k*.
 
     Returns:
         List of per-split result dicts with keys ``rmse_enhanced``,
@@ -192,9 +224,19 @@ def evaluate_cmf_with_user_attributes(
         enhanced_rmse = evaluate_single_split(enhanced_model, test_df)["rmse"]
 
         # --- M-3: paired baseline on the same filtered subset ---------------
-        baseline_model = CMF(method="als", k=k, lambda_=lambda_reg, verbose=False)
-        baseline_model.fit(X=train_df)
-        baseline_rmse = evaluate_single_split(baseline_model, test_df)["rmse"]
+        # Use the independently-tuned baseline params (baseline_k, baseline_lambda)
+        # so the comparison is fair: same users, same fold, optimal plain-CMF
+        # hyperparameters rather than hyperparameters calibrated for the enhanced
+        # model.  When baseline params are not provided (e.g. during the Optuna
+        # search over enhanced hyperparameters) the paired baseline is skipped.
+        if baseline_k is not None and baseline_lambda is not None:
+            baseline_model = CMF(
+                method="als", k=baseline_k, lambda_=baseline_lambda, verbose=False
+            )
+            baseline_model.fit(X=train_df)
+            baseline_rmse = evaluate_single_split(baseline_model, test_df)["rmse"]
+        else:
+            baseline_rmse = float("nan")
 
         results.append(
             {
@@ -351,6 +393,8 @@ def evaluate_single_network(
     transform: str = "standard",
     include_communities: bool = True,
     n_splits: int = 5,
+    baseline_k: int | None = None,
+    baseline_lambda: float | None = None,
 ) -> list[dict]:
     """
     Load features and evaluate CMF for one (model, index) pair.
@@ -366,6 +410,8 @@ def evaluate_single_network(
         transform:           Feature normalisation method.
         include_communities: Whether to include community features.
         n_splits:            Number of cross-validation splits.
+        baseline_k:          Latent factors for the paired plain-CMF baseline.
+        baseline_lambda:     L2 regularisation for the paired plain-CMF baseline.
 
     Returns:
         List of per-split result dicts (keys: ``rmse_enhanced``,
@@ -389,6 +435,8 @@ def evaluate_single_network(
         w_user=w_user,
         n_splits=n_splits,
         transform=transform,
+        baseline_k=baseline_k,
+        baseline_lambda=baseline_lambda,
     )
 
 
@@ -447,6 +495,8 @@ def run_network_evaluation(
     lambda_reg: float | None = None,
     w_main: float | None = None,
     w_user: float | None = None,
+    baseline_k: int | None = None,
+    baseline_lambda: float | None = None,
 ) -> dict[str, list[float]]:
     """
     Evaluate a random sample of networks for all three diffusion models.
@@ -475,6 +525,11 @@ def run_network_evaluation(
                              searched via Optuna.
         w_user:              Weight for user side-information loss.  If ``None``,
                              searched via Optuna.
+        baseline_k:          Latent factors for the paired plain-CMF baseline per
+                             network.  Should be the result of the independent
+                             baseline Optuna search.  When ``None``, the paired
+                             baseline is skipped (``rmse_baseline`` = nan).
+        baseline_lambda:     L2 regularisation for the paired plain-CMF baseline.
 
     Returns:
         Dict mapping model name → list of mean enhanced RMSE values (one per
@@ -557,6 +612,8 @@ def run_network_evaluation(
                 transform=transform,
                 include_communities=include_communities,
                 n_splits=n_splits,
+                baseline_k=baseline_k,
+                baseline_lambda=baseline_lambda,
             )
             if split_results:
                 mean_enhanced = float(
