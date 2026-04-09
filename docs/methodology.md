@@ -132,31 +132,56 @@ Source: `networks/communities.py`
 
 ## 6. Recommendation
 
-### Baseline CMF
+### Models
 
-A standard Collective Matrix Factorisation model trained only on the rating matrix:
+**Baseline CMF** — a standard Collective Matrix Factorisation model trained only on the rating matrix:
 
 $$\min_{U, V}\ \|R - UV^\top\|_F^2 + \lambda(\|U\|_F^2 + \|V\|_F^2)$$
 
-Fitted with ALS using `cmfrec.CMF`.
+**Enhanced CMF** — the baseline augmented with a user side-information matrix **S** built from:
+
+- Seven centrality metrics computed over the inferred diffusion network.
+- Optionally: community membership count and LPH score.
+
+Features are standardised (or min–max / L2-normalised, configurable) and passed to `cmfrec.CMF` as `U=S`. Scaling is fitted on **training users only** within each fold, preventing leakage.
+
+---
+
+### Comparison Design
+
+The goal of the evaluation is to answer a single question: **does adding diffusion-network side-information improve a CMF recommender, relative to the best possible plain CMF of the same class?**
+
+To answer this fairly two separate hyperparameter searches are run:
+
+| Search | Parameters | Purpose |
+| --- | --- | --- |
+| Baseline Optuna (k, λ) | latent factors, L2 regularisation | Find the best achievable RMSE for plain CMF |
+| Enhanced Optuna (k, λ, w_main, w_user) | all above + loss weights | Find the best achievable RMSE with network side-info |
+
+The searches are **independent**: optimal λ for plain CMF is systematically different from optimal λ for enhanced CMF (the side-information term changes the effective regularisation landscape), so a shared search would bias the result.
+
+#### Two-level evaluation
+
+**Level 1 — Global baseline (whole dataset)**  
+The baseline model is trained with its optimally-tuned (k\*, λ*) on the global training split and evaluated on the global held-out test set. This gives the best-case RMSE achievable by plain CMF on the full user population.
+
+**Level 2 — Per-network paired comparison**  
+For each inferred network, only the users present in that network have features available. The evaluation is therefore restricted to that user subset, making a direct global comparison invalid. Instead, for every network and every cross-validation fold:
+
+1. The **enhanced model** is trained with enhanced-optimal (k, λ, w_main, w_user) on the filtered training fold.
+2. A **paired baseline** is trained with baseline-optimal (k\*, λ*) on the **same filtered fold** and evaluated on the **same test fold**.
+
+Because both models see exactly the same users and the same data, the difference in RMSE is attributable solely to the network side-information.
+
+> **Why not reuse the enhanced λ for the paired baseline?**  
+> The enhanced model is jointly regularised by the rating loss and the side-info reconstruction loss. Its optimal λ is larger than what a plain CMF needs, so applying it to the baseline would over-regularise it and inflate its RMSE — making the improvement look larger than it truly is.
+
+---
 
 ### Evaluation Protocol
 
-The pipeline applies a **single global train/test split** (80/20, seed from `config.Split`) before any step runs:
-
-- **Cascade generation** uses only training interactions (test ratings are never seen by NetInf).
-- **Hyperparameter search** and **CMF training** use only the training partition.
-- **Feature scaling** (StandardScaler / MinMaxScaler / Normalizer) is fitted on training users within each cross-validation fold and then applied to all users, preventing test-set leakage.
-- **Baseline comparison** is always a paired CMF (no side information) trained on the same training subset as the enhanced model, ensuring a fair comparison.
-- **Final metrics** (RMSE, MAE, R²) are reported on the held-out global test set.
-
-### Enhanced CMF
-
-The baseline is augmented with a user side-information matrix **S** built from:
-
-- Seven centrality metrics (per network).
-- Optionally: community membership counts and LPH value.
-
-Features are standardised (or min–max normalised / L2-normalised, configurable) and passed to CMF as `U=S`. Scaling is fitted on **training users only** within each fold.
+- **Single global 80/20 split** (seed: `config.Split.RANDOM_STATE`). Cascade generation, feature computation, hyperparameter search, and model training all use the training partition only.
+- **Feature scaling** is fitted on training users within each CV fold and applied to all users.
+- **Final metrics** (RMSE, MAE, R²) on the held-out global test set.
 
 Source: `recommender/baseline.py`, `recommender/enhanced.py`, `config.Split`
