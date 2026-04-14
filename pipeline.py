@@ -65,20 +65,21 @@ def _run_cascade(args: argparse.Namespace) -> None:
     import pandas as pd
     from sklearn.model_selection import train_test_split
 
-    from networks.cascades import generate_cascades_from_df, list_available_datasets
-    from config import Paths, Split
+    from networks.cascades import generate_cascades_from_df
+    from config import Datasets, Split
 
-    dataset = args.dataset
-    if dataset is None:
-        datasets = list_available_datasets()
-        if not datasets:
-            print("No datasets found in data/. Provide --dataset explicitly.")
-            sys.exit(1)
-        dataset = datasets[0]
-        print(f"Using dataset: {dataset}")
-
-    csv_path = Paths.DATA / f"{dataset}.csv"
-    df = pd.read_csv(csv_path, usecols=["UserId", "ItemId", "Rating", "timestamp"])  # type: ignore[call-overload]
+    ds_name = args.dataset
+    cfg = Datasets.CONFIG[ds_name]
+    csv_path = Datasets.ROOT / ds_name / cfg["file"]
+    cols = [cfg["col_user"], cfg["col_item"], cfg["col_rating"], cfg["col_time"]]
+    df = pd.read_csv(
+        csv_path,
+        sep=cfg["sep"],
+        header=cfg["header"],
+        usecols=cols,
+        engine="python",
+    )
+    df.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
 
     # Apply the global split so NetInf learns from training interactions only.
     # Pass all_user_ids=df["UserId"] so the cascade header declares the full
@@ -140,7 +141,6 @@ def _run_communities(_args: argparse.Namespace) -> None:
 
 def _run_recommend(args: argparse.Namespace) -> None:
     import mlflow
-    import pandas as pd
     from recommender.data import load_and_split_dataset, evaluate_single_split
     from recommender.baseline import train_final_model, search_baseline_params
     from recommender.enhanced import (
@@ -166,7 +166,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
             }
         )
 
-        _, train_df, test_df = load_and_split_dataset()
+        _, train_df, test_df = load_and_split_dataset(dataset=args.dataset)
 
         # Find first available feature file to represent the feature space.
         sample_features = None
@@ -299,7 +299,7 @@ def _run_hypertune(args: argparse.Namespace) -> None:
             }
         )
 
-        _, train_df, _ = load_and_split_dataset()
+        _, train_df, _ = load_and_split_dataset(dataset=args.dataset)
 
         sample_features = None
         sample_model_name = None
@@ -354,6 +354,7 @@ def _run_shap(args: argparse.Namespace) -> None:
             include_communities=args.include_communities,
             seed=args.seed,
             model_names=[args.model] if args.model else None,
+            dataset=args.dataset,
         )
         save_shap_results(results)
         plot_all_shap()
@@ -426,8 +427,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--dataset",
-        default=None,
-        help="Ratings dataset filename inside data/ (auto-detected if omitted).",
+        choices=["movielens", "ciao", "epinions"],
+        default="movielens",
+        help="Dataset to use for the pipeline (reads from datasets/<name>/).",
     )
     parser.add_argument(
         "--n-alphas",

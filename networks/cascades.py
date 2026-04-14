@@ -32,7 +32,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from config import Paths
+from config import Datasets, Paths
 
 
 # ---------------------------------------------------------------------------
@@ -41,11 +41,11 @@ from config import Paths
 
 
 def list_available_datasets() -> list[str]:
-    """Return dataset names (without ``.csv`` extension) found in ``data/``."""
-    if not Paths.DATA.exists():
-        print(f"Error: data directory '{Paths.DATA}' not found.")
+    """Return dataset names found as subdirectories of ``datasets/``."""
+    if not Datasets.ROOT.exists():
+        print(f"Error: datasets directory '{Datasets.ROOT}' not found.")
         return []
-    return [f.stem for f in Paths.DATA.iterdir() if f.suffix == ".csv"]
+    return [d.name for d in sorted(Datasets.ROOT.iterdir()) if d.is_dir()]
 
 
 def generate_cascades_from_df(

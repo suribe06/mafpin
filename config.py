@@ -27,6 +27,50 @@ class Paths:
     NETINF_BIN = ROOT / "networks" / "netinf"
 
 
+class Datasets:
+    """Paths and format configurations for supported rating datasets.
+
+    Each entry in :attr:`CONFIG` describes how to read the raw file for a
+    given dataset.  Column indices (``col_user``, ``col_item``,
+    ``col_rating``, ``col_time``) are zero-based positions in the raw file
+    and are used to extract the four fields needed by the pipeline.
+    """
+
+    ROOT = Path(__file__).parent / "datasets"
+    DEFAULT = "movielens"
+    ALL = ["movielens", "ciao", "epinions"]
+
+    CONFIG: "dict[str, dict]" = {
+        "movielens": {
+            "file": "ratings_small.csv",
+            "sep": ",",
+            "header": 0,  # first row is a header
+            "col_user": 0,
+            "col_item": 1,
+            "col_rating": 2,
+            "col_time": 3,
+        },
+        "ciao": {
+            "file": "rating_with_timestamp.txt",
+            "sep": r"\s+",
+            "header": None,  # no header row
+            "col_user": 0,
+            "col_item": 1,
+            "col_rating": 3,  # columns: user, product, category, rating, helpfulness, time
+            "col_time": 5,
+        },
+        "epinions": {
+            "file": "rating_with_timestamp.txt",
+            "sep": r"\s+",
+            "header": None,  # no header row
+            "col_user": 0,
+            "col_item": 1,
+            "col_rating": 3,  # columns: user, product, category, rating, helpfulness, time
+            "col_time": 5,
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Model identifiers
 # ---------------------------------------------------------------------------

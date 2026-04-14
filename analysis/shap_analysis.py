@@ -278,6 +278,7 @@ def run_shap_analysis(
     model_names: list[str] | None = None,
     params_path: Path | None = None,
     transform: str = "standard",
+    dataset: str | None = None,
 ) -> dict[str, dict]:
     """
     Run SHAP feature importance analysis over ``k_networks`` random networks
@@ -310,7 +311,7 @@ def run_shap_analysis(
             }
     """
     params = load_enhanced_params(params_path)
-    _, train_df, test_df = load_and_split_dataset()
+    _, train_df, test_df = load_and_split_dataset(dataset=dataset)
 
     if model_names is None:
         model_names = Models.ALL

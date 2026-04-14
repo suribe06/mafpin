@@ -31,7 +31,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from config import Paths
+from config import Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -39,28 +39,49 @@ from config import Paths
 # ---------------------------------------------------------------------------
 
 
-def load_dataset(filename: str | Path | None = None) -> pd.DataFrame:
+def load_dataset(
+    dataset: str | None = None,
+    filename: str | Path | None = None,
+) -> pd.DataFrame:
     """
-    Load a ratings CSV and return a DataFrame with encoded integer IDs.
+    Load a ratings dataset and return a DataFrame with encoded integer IDs.
 
-    The CSV must have at least three columns in order: UserId, ItemId, Rating.
-    Both UserId and ItemId are re-encoded to zero-based consecutive integers
-    via :class:`sklearn.preprocessing.LabelEncoder`.
+    Pass *dataset* (e.g. ``"movielens"``, ``"ciao"``, ``"epinions"``) to
+    read from the ``datasets/<name>/`` folder using the format defined in
+    :class:`config.Datasets`.  Alternatively, pass an explicit *filename*
+    for a CSV file (legacy behaviour, columns 0-1-2 are assumed to be
+    UserId, ItemId, Rating respectively).  When neither is supplied the
+    default dataset (``config.Datasets.DEFAULT``) is used.
 
     Args:
-        filename: Path to the CSV file.  Defaults to
-            ``Paths.DATA / "ratings_small.csv"``.
+        dataset:  Dataset name.  Defaults to ``Datasets.DEFAULT``.
+        filename: Explicit path to a CSV file (legacy, overrides *dataset*).
 
     Returns:
         DataFrame with columns ``UserId`` (int), ``ItemId`` (int),
         ``Rating`` (float).
     """
-    if filename is None:
-        filename = Paths.DATA / "ratings_small.csv"
-    filename = Path(filename)
-
-    data = pd.read_csv(filename, usecols=[0, 1, 2])  # type: ignore[call-overload]
-    data.columns = pd.Index(["UserId", "ItemId", "Rating"])
+    if filename is not None:
+        path = Path(filename)
+        data = pd.read_csv(path, usecols=[0, 1, 2])  # type: ignore[call-overload]
+        data.columns = pd.Index(["UserId", "ItemId", "Rating"])
+    else:
+        ds_name = dataset or Datasets.DEFAULT
+        if ds_name not in Datasets.CONFIG:
+            raise ValueError(
+                f"Unknown dataset '{ds_name}'. " f"Choose from: {Datasets.ALL}"
+            )
+        cfg = Datasets.CONFIG[ds_name]
+        path = Datasets.ROOT / ds_name / cfg["file"]
+        cols: list[int] = [cfg["col_user"], cfg["col_item"], cfg["col_rating"]]
+        data = pd.read_csv(
+            path,
+            sep=cfg["sep"],
+            header=cfg["header"],
+            usecols=cols,
+            engine="python",
+        )  # type: ignore[call-overload]
+        data.columns = pd.Index(["UserId", "ItemId", "Rating"])
 
     user_enc = LabelEncoder()
     item_enc = LabelEncoder()
@@ -76,6 +97,7 @@ def load_dataset(filename: str | Path | None = None) -> pd.DataFrame:
 
 
 def load_and_split_dataset(
+    dataset: str | None = None,
     filename: str | Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
@@ -87,8 +109,9 @@ def load_and_split_dataset(
     on the same held-out partition.
 
     Args:
-        filename: Path to the CSV file.  Defaults to
-            ``Paths.DATA / "ratings_small.csv"``.
+        dataset:  Dataset name (e.g. ``"movielens"``, ``"ciao"``,
+                  ``"epinions"``).  Defaults to ``Datasets.DEFAULT``.
+        filename: Explicit path to a CSV file (legacy, overrides *dataset*).
 
     Returns:
         Tuple of ``(full_df, train_df, test_df)`` with LabelEncoder-encoded
@@ -96,7 +119,7 @@ def load_and_split_dataset(
     """
     from config import Split  # local import to avoid circular dependency
 
-    data = load_dataset(filename)
+    data = load_dataset(dataset=dataset, filename=filename)
     train_df, test_df = split_data_single(
         data, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
     )
