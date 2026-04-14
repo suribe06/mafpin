@@ -83,3 +83,20 @@ class Split:
 
     TEST_SIZE = 0.2  # fraction of ratings held out for testing
     RANDOM_STATE = 42  # seed for train_test_split — change to re-randomise
+
+
+# ---------------------------------------------------------------------------
+# MLflow tracking
+# ---------------------------------------------------------------------------
+
+
+class MLflow:
+    """MLflow experiment tracking configuration.
+
+    By default MLflow stores runs under ``mlruns/`` in the project root
+    (file-based, no server required).  Run ``mlflow ui`` from the project
+    root to browse results at http://127.0.0.1:5000.
+    """
+
+    EXPERIMENT_NAME = "mafpin"
+    TRACKING_URI = str(ROOT / "mlruns")
