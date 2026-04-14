@@ -8,10 +8,21 @@ This document describes the technical steps behind the MAFPIN pipeline.
 
 A **cascade** encodes how a single item propagates through a user population.
 
-Given the MovieLens ratings CSV (columns: `userId`, `movieId`, `rating`, `timestamp`):
+Three rating datasets are supported and read from the `datasets/` directory.  
+The active dataset is selected via the `--dataset` CLI flag (default: `movielens`).
+
+| Dataset | Source file | Columns used |
+| --- | --- | --- |
+| `movielens` | `datasets/movielens/ratings_small.csv` | `UserId`, `ItemId`, `Rating`, `timestamp` |
+| `ciao` | `datasets/ciao/rating_with_timestamp.txt` | user (col 0), product (col 1), rating (col 3), timestamp (col 5) |
+| `epinions` | `datasets/epinions/rating_with_timestamp.txt` | user (col 0), product (col 1), rating (col 3), timestamp (col 5) |
+
+Column mappings are defined in `config.Datasets.CONFIG`.
+
+Given the selected dataset:
 
 1. The dataset is split into **train (80%) and test (20%)** using the global seed defined in `config.Split.RANDOM_STATE` (default: 42). Only training interactions are used to build cascades.
-2. For each movie, collect all `(userId, timestamp)` pairs present in the **training split**.
+2. For each item, collect all `(userId, timestamp)` pairs present in the **training split**.
 3. Sort by timestamp **ascending** to form an ordered adoption sequence.
 4. Write to `cascades.txt` in NetInf format: one line per cascade, values as comma-separated `userId,timestamp` pairs.
 
@@ -23,7 +34,7 @@ The cascade **header** (self-loop lines that declare node existence) lists the f
 
 Cascades with only one user are skipped; they carry no diffusion signal.
 
-Source: `networks/cascades.py`, `config.Split`
+Source: `networks/cascades.py`, `config.Split`, `config.Datasets`
 
 ---
 

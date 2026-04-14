@@ -66,15 +66,21 @@ Each model is evaluated across a log-spaced grid of the alpha (transmission rate
 
 ```text
 mafpin/
-├── config.py               # Centralised paths, default parameters, and global split settings (Split class)
+├── config.py               # Centralised paths, default parameters, dataset configs, and global split settings
 ├── pipeline.py             # Unified CLI entry point
 ├── networks/               # Cascade generation, inference, centrality, communities
 ├── recommender/            # Dataset utilities, baseline CMF, enhanced CMF
 ├── analysis/               # Post-hoc analyses (SHAP feature importance)
 ├── visualization/          # All plot functions (model, network, community)
-├── data/                   # Raw data + generated artefacts
+├── datasets/               # Raw rating datasets (movielens, ciao, epinions)
+│   ├── movielens/
+│   │   └── ratings_small.csv
+│   ├── ciao/
+│   │   └── rating_with_timestamp.txt
+│   └── epinions/
+│       └── rating_with_timestamp.txt
+├── data/                   # Generated artefacts (git-ignored except JSON outputs)
 │   ├── cascades.txt
-│   ├── ratings_small.csv
 │   ├── inferred_networks/
 │   ├── centrality_metrics/
 │   ├── communities/

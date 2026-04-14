@@ -6,11 +6,21 @@ This guide walks through each step of the MAFPIN pipeline using `pipeline.py`.
 
 ## Quick Start — Full Pipeline
 
-Run all steps in order for all three diffusion models:
+Run all steps in order using the default **MovieLens** dataset:
 
 ```bash
 python pipeline.py --all
 ```
+
+To use a different dataset:
+
+```bash
+python pipeline.py --all --dataset ciao
+python pipeline.py --all --dataset epinions
+```
+
+Available datasets: `movielens` (default), `ciao`, `epinions`.  
+Raw files are read from the `datasets/<name>/` directory.
 
 ---
 
@@ -18,19 +28,22 @@ python pipeline.py --all
 
 ### 1. Generate Cascades
 
-Convert the MovieLens ratings CSV into a cascades file for NetInf:
+Convert the ratings dataset into a cascades file for NetInf:
 
 ```bash
 python pipeline.py --steps cascade
 ```
 
-This reads `data/ratings_small.csv`, applies the **global 80/20 split** (seed from `config.Split.RANDOM_STATE`), and writes `data/cascades.txt` built from training interactions only. Held-out test ratings are never seen by NetInf.
+This reads from `datasets/movielens/` by default, applies the **global 80/20 split** (seed from `config.Split.RANDOM_STATE`), and writes `data/cascades.txt` built from training interactions only. Held-out test ratings are never seen by NetInf.
 
 To use a different dataset:
 
 ```bash
-python pipeline.py --steps cascade --dataset my_ratings
+python pipeline.py --steps cascade --dataset ciao
+python pipeline.py --steps cascade --dataset epinions
 ```
+
+> **Note:** Use the same `--dataset` flag consistently for all subsequent steps in the same pipeline run so that cascade IDs and recommender encodings stay aligned.
 
 ---
 
@@ -180,6 +193,41 @@ query results programmatically.
 
 ---
 
+## Datasets
+
+All three rating datasets are stored under `datasets/` and are ready to use without any preprocessing.
+
+| Name | Folder | File | Format |
+| --- | --- | --- | --- |
+| `movielens` | `datasets/movielens/` | `ratings_small.csv` | CSV with header: `UserId,ItemId,Rating,timestamp` |
+| `ciao` | `datasets/ciao/` | `rating_with_timestamp.txt` | Whitespace-separated, no header. Columns: `user, product, category, rating, helpfulness, timestamp` |
+| `epinions` | `datasets/epinions/` | `rating_with_timestamp.txt` | Whitespace-separated, no header. Columns: `user, product, category, rating, helpfulness, timestamp` |
+
+Column mapping and separators are configured in `config.Datasets.CONFIG`.  
+Adding a new dataset only requires adding an entry to that dict and placing the raw file in `datasets/<name>/`.
+
+---
+
+## CLI Reference
+
+All options accepted by `pipeline.py`:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--all` | — | Run every step in order (mutually exclusive with `--steps`). |
+| `--steps STEP [STEP ...]` | — | One or more steps to run: `cascade`, `delta`, `inference`, `centrality`, `communities`, `recommend`, `hypertune`, `shap`. |
+| `--dataset {movielens,ciao,epinions}` | `movielens` | Dataset to use. Reads raw files from `datasets/<name>/`. |
+| `--model {exponential,powerlaw,rayleigh}` | *(all)* | Restrict inference/recommendation to a single diffusion model. |
+| `--n-alphas N` | `100` | Number of α values in the NetInf log-spaced grid. |
+| `--max-iter N` | `5000` | Maximum NetInf iterations per network. |
+| `--include-communities` | `False` | Include LPH and community-count features in the enhanced CMF. |
+| `--sample-networks N` | `5` | Networks sampled per model for the `recommend` step. |
+| `--k-networks N` | `20` | Networks sampled per model for the `shap` step. |
+| `--all-networks` | `False` | Use all available networks for SHAP (overrides `--k-networks`). |
+| `--seed N` | `42` | Random seed for network sampling in SHAP analysis. |
+
+---
+
 ## Combining Steps
 
 Steps can be chained in a single call:
@@ -201,9 +249,11 @@ python pipeline.py --steps hypertune shap --include-communities
 Each module can also be used directly:
 
 ```python
-# Global split (same partition as the pipeline)
+# Global split (same partition as the pipeline) — MovieLens default
 from recommender.data import load_and_split_dataset
-data, train_df, test_df = load_and_split_dataset()  # uses config.Split
+data, train_df, test_df = load_and_split_dataset()              # movielens
+data, train_df, test_df = load_and_split_dataset(dataset="ciao")
+data, train_df, test_df = load_and_split_dataset(dataset="epinions")
 
 # Cascade generation from a pre-split DataFrame
 from networks.cascades import generate_cascades_from_df
@@ -232,7 +282,8 @@ save_enhanced_search_results(search)
 
 # SHAP feature importance
 from analysis.shap_analysis import run_shap_analysis, save_shap_results
-results = run_shap_analysis(k_networks=5, include_communities=True)
+results = run_shap_analysis(k_networks=5, include_communities=True)                 # movielens
+results = run_shap_analysis(k_networks=5, include_communities=True, dataset="ciao")
 save_shap_results(results)
 ```
 
