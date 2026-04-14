@@ -41,6 +41,11 @@ surface that must be explored together.
 The search uses [Optuna](https://optuna.org/) with the default **Tree-structured
 Parzen Estimator (TPE)** sampler.
 
+All Optuna trials are tracked with [MLflow](mlflow.md): each trial's RMSE is
+logged as a step metric (`enhanced_trial_rmse`) and the final best parameters
+are logged to the active run. Run `mlflow ui --backend-store-uri mlruns/` after
+a `hypertune` or `recommend` step to inspect the convergence curve.
+
 ### Why not random search?
 
 The previous version used `scipy.stats.randint` / `scipy.stats.uniform` for

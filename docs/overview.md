@@ -58,6 +58,7 @@ Each model is evaluated across a log-spaced grid of the alpha (transmission rate
 | **NetInf** | Maximum-likelihood network structure learner from cascades. |
 | **LPH** | *Local Pluralistic Homophily* — per-node community overlap similarity (see [lph.md](lph.md)). |
 | **CMF** | *Collective Matrix Factorisation* — jointly factorises ratings and side-information matrices. |
+| **MLflow** | Experiment tracking for `recommend`, `hypertune`, and `shap` steps (see [mlflow.md](mlflow.md)). |
 
 ---
 
@@ -80,6 +81,7 @@ mafpin/
 │   ├── enhanced_search_results.json
 │   └── shap_results.json
 ├── plots/                  # Generated PNG figures
+├── mlruns/                 # MLflow tracking store (git-ignored)
 └── docs/                   # This documentation
 ```
 

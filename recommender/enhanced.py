@@ -179,7 +179,7 @@ def evaluate_cmf_with_user_attributes(
 
     # Keep only users for whom network features are available.
     # user_attributes is 0-based — same space as data["UserId"].
-    valid_users = set(user_attributes.index)
+    valid_users = list(user_attributes.index)
     filtered = data[data["UserId"].isin(valid_users)]
 
     if filtered.empty:
@@ -324,6 +324,10 @@ def search_enhanced_params(
                 "rmse": mean_rmse,
             }
         )
+        import mlflow as _mlflow
+
+        if _mlflow.active_run():
+            _mlflow.log_metric("enhanced_trial_rmse", mean_rmse, step=trial.number)
         return mean_rmse
 
     study = optuna.create_study(direction="minimize")
@@ -350,6 +354,20 @@ def search_enhanced_params(
         "w_user": best["w_user"],
     }
     print(f"\nBest enhanced params: {best_params}  RMSE={study.best_value:.4f}")
+
+    import mlflow as _mlflow
+
+    if _mlflow.active_run():
+        _mlflow.log_params(
+            {
+                "enhanced_best_k": best_params["k"],
+                "enhanced_best_lambda_reg": best_params["lambda_reg"],
+                "enhanced_best_w_main": best_params["w_main"],
+                "enhanced_best_w_user": best_params["w_user"],
+            }
+        )
+        _mlflow.log_metric("enhanced_best_rmse", study.best_value)
+
     return {"best_params": best_params, "all_results": all_results}
 
 
@@ -632,6 +650,34 @@ def run_network_evaluation(
                 )
                 _save_rmses(model_name, net_idx, split_results)
                 all_results[model_name].append(mean_enhanced)
+
+                import mlflow as _mlflow
+
+                if _mlflow.active_run():
+                    _mlflow.log_metric(
+                        f"{model_name}_rmse_enhanced", mean_enhanced, step=net_idx
+                    )
+                    _mlflow.log_metric(
+                        f"{model_name}_rmse_baseline", mean_baseline, step=net_idx
+                    )
+                    if mean_baseline > 0:
+                        _mlflow.log_metric(
+                            f"{model_name}_improvement_pct",
+                            improvement / mean_baseline * 100,
+                            step=net_idx,
+                        )
+
+    import mlflow as _mlflow
+
+    if _mlflow.active_run():
+        for _model_name, _rmse_list in all_results.items():
+            if _rmse_list:
+                _mlflow.log_metric(
+                    f"{_model_name}_mean_rmse_enhanced", float(np.mean(_rmse_list))
+                )
+                _mlflow.log_metric(
+                    f"{_model_name}_n_networks_evaluated", len(_rmse_list)
+                )
 
     return all_results
 

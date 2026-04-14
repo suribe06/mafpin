@@ -50,7 +50,7 @@ def list_available_datasets() -> list[str]:
 
 def generate_cascades_from_df(
     interactions: pd.DataFrame,
-    output_file: str | "Path" | None = None,
+    output_file: str | Path | None = None,
     all_user_ids=None,
 ) -> bool:
     """

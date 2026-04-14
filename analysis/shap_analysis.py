@@ -237,8 +237,8 @@ def compute_shap_for_network(
         return None
 
     preds = model.predict(
-        user=test_filtered["UserId"].values,
-        item=test_filtered["ItemId"].values,
+        user=test_filtered["UserId"].values,  # type: ignore[union-attr]
+        item=test_filtered["ItemId"].values,  # type: ignore[union-attr]
     )
     test_filtered["_pred"] = preds
     per_user_pred = test_filtered.groupby("UserId")["_pred"].mean()

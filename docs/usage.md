@@ -163,6 +163,23 @@ python pipeline.py --steps shap --seed 7 --include-communities
 
 ---
 
+### Experiment Tracking (MLflow)
+
+The `recommend`, `hypertune`, and `shap` steps automatically log parameters,
+metrics, and artifacts to a local MLflow store in `mlruns/`.
+
+Inspect results in the MLflow UI after any tracked step:
+
+```bash
+mlflow ui --backend-store-uri mlruns/
+# → http://127.0.0.1:5000
+```
+
+See [mlflow.md](mlflow.md) for the full list of tracked metrics and how to
+query results programmatically.
+
+---
+
 ## Combining Steps
 
 Steps can be chained in a single call:

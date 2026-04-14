@@ -235,6 +235,10 @@ def search_baseline_params(
             data, k=k_val, lambda_reg=lambda_val, n_splits=n_splits
         )
         all_results.append({"k": k_val, "lambda_reg": lambda_val, **metrics})
+        import mlflow
+
+        if mlflow.active_run():
+            mlflow.log_metric("baseline_trial_rmse", metrics["rmse"], step=trial.number)
         return metrics["rmse"]
 
     study = optuna.create_study(direction="minimize")
@@ -245,6 +249,18 @@ def search_baseline_params(
         "lambda_reg": study.best_params["lambda_reg"],
     }
     print(f"Best baseline params: {best_params}  RMSE={study.best_value:.4f}")
+
+    import mlflow
+
+    if mlflow.active_run():
+        mlflow.log_params(
+            {
+                "baseline_best_k": best_params["k"],
+                "baseline_best_lambda_reg": best_params["lambda_reg"],
+            }
+        )
+        mlflow.log_metric("baseline_best_rmse", study.best_value)
+
     return {"best_params": best_params, "all_results": all_results}
 
 
