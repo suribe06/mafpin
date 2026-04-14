@@ -14,6 +14,7 @@
 | scikit-learn | ≥ 1.3 |
 | matplotlib | ≥ 3.7 |
 | seaborn | ≥ 0.12 |
+| mlflow | ≥ 2.15.0 |
 
 ## Install Dependencies
 

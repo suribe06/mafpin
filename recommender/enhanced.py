@@ -179,7 +179,7 @@ def evaluate_cmf_with_user_attributes(
 
     # Keep only users for whom network features are available.
     # user_attributes is 0-based — same space as data["UserId"].
-    valid_users = set(user_attributes.index)
+    valid_users = list(user_attributes.index)
     filtered = data[data["UserId"].isin(valid_users)]
 
     if filtered.empty:

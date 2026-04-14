@@ -78,7 +78,7 @@ def _run_cascade(args: argparse.Namespace) -> None:
         print(f"Using dataset: {dataset}")
 
     csv_path = Paths.DATA / f"{dataset}.csv"
-    df = pd.read_csv(csv_path, usecols=["UserId", "ItemId", "Rating", "timestamp"])
+    df = pd.read_csv(csv_path, usecols=["UserId", "ItemId", "Rating", "timestamp"])  # type: ignore[call-overload]
 
     # Apply the global split so NetInf learns from training interactions only.
     # Pass all_user_ids=df["UserId"] so the cascade header declares the full
@@ -86,7 +86,7 @@ def _run_cascade(args: argparse.Namespace) -> None:
     train_df, _ = train_test_split(
         df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
     )
-    generate_cascades_from_df(train_df, all_user_ids=df["UserId"])
+    generate_cascades_from_df(pd.DataFrame(train_df), all_user_ids=df["UserId"])
 
 
 def _run_delta(_args: argparse.Namespace) -> None:

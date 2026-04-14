@@ -26,6 +26,7 @@ import random
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 import seaborn as sns
 
 from config import Paths, Models
@@ -167,7 +168,7 @@ def plot_lph_distribution(
     if ncols == 1:
         axes = [axes]
 
-    def _violin_box(ax: plt.Axes, col: str, ylabel: str, ylim: tuple | None) -> None:
+    def _violin_box(ax: Axes, col: str, ylabel: str, ylim: tuple | None) -> None:
         sns.violinplot(
             data=data,
             x="model",
