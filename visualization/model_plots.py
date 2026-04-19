@@ -76,8 +76,10 @@ def plot_hyperparameter_search_results(
     k_values = [r["k"] for r in results]
     lambda_values = [r["lambda_reg"] for r in results]
     rmse_values = [r["rmse"] for r in results]
-    mae_values = [r["mae"] for r in results]
-    r2_values = [r["r2"] for r in results]
+    mae_values = [r.get("mae") for r in results]
+    r2_values = [r.get("r2") for r in results]
+    has_mae = any(v is not None for v in mae_values)
+    has_r2 = any(v is not None for v in r2_values)
     best_rmse = search_results["best_params"].get("rmse", min(rmse_values))
 
     fig, axes = plt.subplots(2, 3, figsize=figsize)
@@ -104,14 +106,24 @@ def plot_hyperparameter_search_results(
     axes[0, 2].legend()
     axes[0, 2].grid(alpha=0.3)
 
-    # 4) MAE vs RMSE
-    axes[1, 0].scatter(rmse_values, mae_values, alpha=0.6, c="mediumpurple")
-    axes[1, 0].set(xlabel="RMSE", ylabel="MAE", title="MAE vs RMSE")
+    # 4) MAE vs RMSE (only when MAE is available)
+    if has_mae:
+        axes[1, 0].scatter(rmse_values, mae_values, alpha=0.6, c="mediumpurple")
+        axes[1, 0].set(xlabel="RMSE", ylabel="MAE", title="MAE vs RMSE")
+    else:
+        axes[1, 0].text(0.5, 0.5, "MAE not available", ha="center", va="center",
+                        transform=axes[1, 0].transAxes)
+        axes[1, 0].set_title("MAE vs RMSE")
     axes[1, 0].grid(alpha=0.3)
 
-    # 5) R² vs RMSE
-    axes[1, 1].scatter(rmse_values, r2_values, alpha=0.6, c="darkorange")
-    axes[1, 1].set(xlabel="RMSE", ylabel="R²", title="R² vs RMSE")
+    # 5) R² vs RMSE (only when R² is available)
+    if has_r2:
+        axes[1, 1].scatter(rmse_values, r2_values, alpha=0.6, c="darkorange")
+        axes[1, 1].set(xlabel="RMSE", ylabel="R²", title="R² vs RMSE")
+    else:
+        axes[1, 1].text(0.5, 0.5, "R² not available", ha="center", va="center",
+                        transform=axes[1, 1].transAxes)
+        axes[1, 1].set_title("R² vs RMSE")
     axes[1, 1].grid(alpha=0.3)
 
     # 6) Top-20 results with error bars (requires per-split std — graceful fallback)
@@ -297,25 +309,31 @@ def plot_metrics_comparison(
 
     results = search_results["all_results"]
     rmse_values = [r["rmse"] for r in results]
-    mae_values = [r["mae"] for r in results]
-    r2_values = [r["r2"] for r in results]
+    mae_values_raw = [r.get("mae") for r in results]
+    r2_values_raw = [r.get("r2") for r in results]
+    mae_values = [v for v in mae_values_raw if v is not None]
+    r2_values = [v for v in r2_values_raw if v is not None]
 
     best_idx = int(np.argmin(rmse_values))
     best_rmse = rmse_values[best_idx]
 
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    metrics_data = [("RMSE", rmse_values, "steelblue")]
+    if mae_values:
+        metrics_data.append(("MAE", mae_values, "seagreen"))
+    if r2_values:
+        metrics_data.append(("R²", r2_values, "darkorange"))
+
+    n_plots = len(metrics_data)
+    fig, axes = plt.subplots(1, n_plots, figsize=(figsize[0] * n_plots / 3, figsize[1]))
+    if n_plots == 1:
+        axes = [axes]
     fig.suptitle("Metrics Distribution Comparison", fontsize=16, fontweight="bold")
 
-    for ax, vals, label, colour in zip(
-        axes,
-        [rmse_values, mae_values, r2_values],
-        ["RMSE", "MAE", "R²"],
-        ["steelblue", "seagreen", "darkorange"],
-    ):
+    for ax, (label, vals, colour) in zip(axes, metrics_data):
         ax.hist(vals, bins=20, alpha=0.7, color=colour, edgecolor="black")
-        ref_val = vals[best_idx]
+        ref_val = vals[best_idx] if label == "RMSE" else vals[0]
         ax.axvline(
-            ref_val, color="red", linestyle="--", label=f"Best RMSE idx: {ref_val:.4f}"
+            ref_val, color="red", linestyle="--", label=f"Best: {ref_val:.4f}"
         )
         ax.set(xlabel=label, ylabel="Frequency", title=f"{label} Distribution")
         ax.legend(fontsize=9)
