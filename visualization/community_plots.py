@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 import seaborn as sns
 
-from config import Paths, Models, DatasetPaths, Datasets
+from config import Models, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,6 @@ def plot_lph_distribution(
         path = f"{_plots_dir(dataset)}/lph_distribution.png"
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -279,7 +278,6 @@ def plot_num_communities_dist(
         path = f"{_plots_dir(dataset)}/num_communities_dist.png"
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -349,7 +347,6 @@ def plot_alpha_vs_lph(
         path = f"{_plots_dir(dataset)}/alpha_vs_lph.png"
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -406,7 +403,6 @@ def plot_alpha_vs_num_communities(
         path = f"{_plots_dir(dataset)}/alpha_vs_num_communities.png"
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -481,7 +477,6 @@ def plot_lph_vs_centrality(
         )
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -553,7 +548,6 @@ def plot_community_correlation_heatmap(
         )
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 

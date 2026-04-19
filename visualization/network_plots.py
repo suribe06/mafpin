@@ -17,7 +17,7 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 
-from config import Paths, Models, DatasetPaths, Datasets
+from config import Models, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -83,12 +83,13 @@ def plot_centrality_distribution(
     plt.tight_layout()
 
     if save:
-        out_dir = Paths.PLOTS / "centrality" / model_name
+        out_dir = (
+            DatasetPaths(dataset or Datasets.DEFAULT).PLOTS / "centrality" / model_name
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"{metric}_{model_name}_{network_id}.png"
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {out_path}")
-    plt.show()
     plt.close()
 
 
@@ -149,12 +150,13 @@ def plot_all_centrality_distributions(
 
     plt.tight_layout()
     if save:
-        out_dir = Paths.PLOTS / "centrality" / model_name
+        out_dir = (
+            DatasetPaths(dataset or Datasets.DEFAULT).PLOTS / "centrality" / model_name
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"all_centrality_{model_name}_{network_id}.png"
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {out_path}")
-    plt.show()
     plt.close()
 
 
@@ -167,6 +169,7 @@ def plot_cascades_timeline(
     cascade_file: str | None = None,
     n: int = 20,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Plot the first *n* cascades as event timelines.
@@ -225,12 +228,11 @@ def plot_cascades_timeline(
     plt.tight_layout()
 
     if save:
-        out_dir = Paths.PLOTS
+        out_dir = DatasetPaths(dataset or Datasets.DEFAULT).PLOTS
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / "cascades_timeline.png"
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {out_path}")
-    plt.show()
     plt.close()
 
 

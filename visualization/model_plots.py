@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from config import Paths, Models, DatasetPaths, Datasets
+from config import Models, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,6 @@ def plot_hyperparameter_search_results(
         full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
@@ -198,7 +197,6 @@ def plot_parameter_heatmap(
         full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
@@ -276,7 +274,6 @@ def plot_convergence_analysis(
         full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
@@ -329,7 +326,6 @@ def plot_metrics_comparison(
         full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
     print(f"\nRMSE: mean={np.mean(rmse_values):.4f}, best={best_rmse:.4f}")
@@ -468,7 +464,6 @@ def plot_alpha_rmse_analysis(
         full_path = f"{_plots_dir(dataset)}/alpha_rmse_{model_name}.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
     improvement = (baseline_rmse - best_rmse) / baseline_rmse * 100
@@ -540,7 +535,6 @@ def plot_alpha_delta_rmse(
         full_path = f"{_plots_dir(dataset)}/alpha_delta_rmse_{model_name}.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
@@ -597,7 +591,6 @@ def plot_alpha_edges(
         full_path = f"{_plots_dir(dataset)}/alpha_edges.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
