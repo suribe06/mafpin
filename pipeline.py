@@ -93,6 +93,14 @@ def _run_cascade(args: argparse.Namespace) -> None:
         output_file=DatasetPaths(ds_name).CASCADES,
     )
 
+    from visualization.network_plots import plot_cascades_timeline
+
+    plot_cascades_timeline(
+        cascade_file=str(DatasetPaths(ds_name).CASCADES),
+        save=True,
+        dataset=ds_name,
+    )
+
 
 def _run_delta(_args: argparse.Namespace) -> None:
     from networks.delta import compute_median_delta, alpha_centers_from_delta
@@ -140,21 +148,45 @@ def _run_inference(args: argparse.Namespace) -> None:
             cascades_file=dp.CASCADES,
         )
 
+    from visualization.model_plots import plot_alpha_edges
+
+    plot_alpha_edges(save_plot=True, dataset=args.dataset)
+
 
 def _run_centrality(args: argparse.Namespace) -> None:
     from networks.centrality import calculate_centrality_for_all_models
+    from visualization.network_plots import plot_all_centrality_distributions
+    from config import Models
 
     calculate_centrality_for_all_models(
         dataset=args.dataset if hasattr(args, "dataset") else None
     )
 
+    for _mn in Models.ALL:
+        plot_all_centrality_distributions(_mn, "000", save=True, dataset=args.dataset)
+
 
 def _run_communities(args: argparse.Namespace) -> None:
     from networks.communities import calculate_communities_for_all_models
+    from visualization.community_plots import (
+        plot_lph_distribution,
+        plot_num_communities_dist,
+        plot_alpha_vs_lph,
+        plot_alpha_vs_num_communities,
+        plot_lph_vs_centrality,
+        plot_community_correlation_heatmap,
+    )
 
     calculate_communities_for_all_models(
         dataset=args.dataset if hasattr(args, "dataset") else None
     )
+
+    plot_lph_distribution(dataset=args.dataset)
+    plot_num_communities_dist(dataset=args.dataset)
+    plot_alpha_vs_lph(dataset=args.dataset)
+    plot_alpha_vs_num_communities(dataset=args.dataset)
+    plot_lph_vs_centrality(dataset=args.dataset)
+    plot_community_correlation_heatmap(dataset=args.dataset)
 
 
 def _run_recommend(args: argparse.Namespace) -> None:
@@ -280,7 +312,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
         _save_baseline(baseline_search, path=dp.BASELINE_RESULTS)
 
         # Enhanced evaluation — pass pre-tuned enhanced params.
-        run_network_evaluation(
+        all_results = run_network_evaluation(
             data=train_df,
             include_communities=args.include_communities,
             sample_networks=999_999 if args.all_networks else args.sample_networks,
@@ -299,6 +331,55 @@ def _run_recommend(args: argparse.Namespace) -> None:
         ]:
             if _artifact.exists():
                 mlflow.log_artifact(str(_artifact))
+
+    # --- plots ---------------------------------------------------------------
+    from visualization.model_plots import (
+        plot_hyperparameter_search_results,
+        plot_parameter_heatmap,
+        plot_convergence_analysis,
+        plot_metrics_comparison,
+        plot_alpha_rmse_analysis,
+        plot_alpha_delta_rmse,
+        plot_alpha_edges,
+    )
+
+    for _search, _prefix in [
+        (baseline_search, "baseline"),
+        (enhanced_search if sample_features is not None else None, "enhanced"),
+    ]:
+        if _search and _search.get("all_results"):
+            plot_hyperparameter_search_results(
+                _search, save_path=f"{_prefix}_hyper_search.png", dataset=args.dataset
+            )
+            plot_parameter_heatmap(
+                _search, save_path=f"{_prefix}_param_heatmap.png", dataset=args.dataset
+            )
+            plot_convergence_analysis(
+                _search, save_path=f"{_prefix}_convergence.png", dataset=args.dataset
+            )
+            plot_metrics_comparison(
+                _search, save_path=f"{_prefix}_metrics.png", dataset=args.dataset
+            )
+
+    global_rmse = baseline_metrics["rmse"]
+    for _mn, _rmse_list in all_results.items():
+        if _rmse_list:
+            plot_alpha_rmse_analysis(
+                model_name=_mn,
+                rmse_values=_rmse_list,
+                baseline_rmse=global_rmse,
+                save_plot=True,
+                dataset=args.dataset,
+            )
+            plot_alpha_delta_rmse(
+                model_name=_mn,
+                rmse_values=_rmse_list,
+                baseline_rmse=global_rmse,
+                save_plot=True,
+                dataset=args.dataset,
+            )
+
+    plot_alpha_edges(save_plot=True, dataset=args.dataset)
 
 
 def _run_hypertune(args: argparse.Namespace) -> None:
@@ -355,6 +436,36 @@ def _run_hypertune(args: argparse.Namespace) -> None:
         _artifact = dp.ENHANCED_RESULTS
         if _artifact.exists():
             mlflow.log_artifact(str(_artifact))
+
+    # --- plots ---------------------------------------------------------------
+    from visualization.model_plots import (
+        plot_hyperparameter_search_results,
+        plot_parameter_heatmap,
+        plot_convergence_analysis,
+        plot_metrics_comparison,
+    )
+
+    if enhanced_search.get("all_results"):
+        plot_hyperparameter_search_results(
+            enhanced_search,
+            save_path="enhanced_hyper_search.png",
+            dataset=args.dataset,
+        )
+        plot_parameter_heatmap(
+            enhanced_search,
+            save_path="enhanced_param_heatmap.png",
+            dataset=args.dataset,
+        )
+        plot_convergence_analysis(
+            enhanced_search,
+            save_path="enhanced_convergence.png",
+            dataset=args.dataset,
+        )
+        plot_metrics_comparison(
+            enhanced_search,
+            save_path="enhanced_metrics.png",
+            dataset=args.dataset,
+        )
 
 
 def _run_shap(args: argparse.Namespace) -> None:

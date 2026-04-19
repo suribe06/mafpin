@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from config import Paths, Defaults, DatasetPaths, Datasets
+from config import Defaults, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
