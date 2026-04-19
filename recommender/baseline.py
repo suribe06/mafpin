@@ -33,7 +33,7 @@ import pandas as pd
 import scipy.stats as stats
 from cmfrec import CMF  # type: ignore[import-untyped]
 
-from config import Defaults, Paths
+from config import DatasetPaths, Datasets, Defaults
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ def save_search_results(search_result: dict, path: Path | None = None) -> None:
         search_result: Dict with ``best_params`` and ``all_results``.
         path:          Override destination path.
     """
-    dest = path or (Paths.DATA / "baseline_search_results.json")
+    dest = path or DatasetPaths(Datasets.DEFAULT).BASELINE_RESULTS
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, "w", encoding="utf-8") as fh:
         json.dump(search_result, fh, indent=2)

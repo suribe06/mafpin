@@ -14,7 +14,7 @@ centred on a data-driven value (derived from the median inter-event delta in
 ``cascades.txt``) is used so that the sweep covers meaningfully diverse
 network densities.
 
-Outputs saved in ``data/inferred_networks/<model>/``:
+Outputs saved in ``data/<dataset>/inferred_networks/<model>/``:
 
 * ``inferred-network-<short>-<index>.txt`` – NetInf network file per alpha
 * ``edge_info/``                            – edge detail files from NetInf
@@ -40,7 +40,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from config import Paths, Models, Defaults
+from config import DatasetPaths, Datasets, Paths, Models, Defaults
 from networks.delta import (
     compute_median_delta,
     alpha_centers_from_delta,
@@ -53,14 +53,22 @@ from networks.delta import (
 # ---------------------------------------------------------------------------
 
 
-def _create_output_dirs(model_name: str) -> tuple[Path, Path]:
+def _create_output_dirs(
+    model_name: str, networks_dir: Path | None = None
+) -> tuple[Path, Path]:
     """
-    Create ``inferred_networks/<model>`` and its ``edge_info`` sub-directory.
+    Create ``<networks_dir>/<model>`` and its ``edge_info`` sub-directory.
+
+    Args:
+        model_name:   Diffusion model name.
+        networks_dir: Root directory for inferred networks.  Defaults to
+            ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
 
     Returns:
         Tuple of (model_dir, edge_info_dir) as Path objects.
     """
-    model_dir = Paths.NETWORKS / model_name
+    root = networks_dir or DatasetPaths(Datasets.DEFAULT).NETWORKS
+    model_dir = root / model_name
     edge_info_dir = model_dir / "edge_info"
     model_dir.mkdir(parents=True, exist_ok=True)
     edge_info_dir.mkdir(parents=True, exist_ok=True)
@@ -92,21 +100,24 @@ def infer_networks(
     max_iter: int = Defaults.MAX_ITER,
     name_output: str = "inferred-network",
     r: float = Defaults.RANGE_R,
+    networks_dir: Path | None = None,
 ) -> bool:
     """
     Run NetInf for every alpha in a log-spaced grid and save the results.
 
     The NetInf binary is expected at ``Paths.NETINF_BIN``.  All output files
-    are written under ``Paths.NETWORKS / <model_name>``.
+    are written under ``networks_dir / <model_name>``.
 
     Args:
         cascades_file: Path to the cascades input file.  Defaults to
-            ``Paths.CASCADES``.
+            ``DatasetPaths(Datasets.DEFAULT).CASCADES``.
         n:            Number of alpha grid points.
         model:        Model index — 0 (exponential), 1 (powerlaw), 2 (rayleigh).
         max_iter:     Maximum NetInf iterations per run.
         name_output:  Base name for per-alpha output files.
         r:            Multiplicative range factor for the alpha grid.
+        networks_dir: Root directory for output networks.  Defaults to
+            ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
 
     Returns:
         ``True`` on success, ``False`` otherwise.
@@ -119,7 +130,7 @@ def infer_networks(
     model_suffix = Models.SHORT[model_name]
 
     if cascades_file is None:
-        cascades_file = Paths.CASCADES
+        cascades_file = DatasetPaths(Datasets.DEFAULT).CASCADES
     cascades_file = Path(cascades_file)
 
     if not cascades_file.exists():
@@ -159,7 +170,7 @@ def infer_networks(
     print(f"Alpha grid: [{alpha_min:.2e}, {alpha_max:.2e}], {n} points")
 
     # -- Prepare output directories  -----------------------------------------
-    model_dir, edge_info_dir = _create_output_dirs(model_name)
+    model_dir, edge_info_dir = _create_output_dirs(model_name, networks_dir)
 
     print(f"\nStarting inference — model: {model_name}, max_iter: {max_iter}")
     print(f"Output directory: {model_dir}\n")
@@ -269,16 +280,20 @@ def infer_networks_all_models(
     max_iter: int = Defaults.MAX_ITER,
     name_output: str = "inferred-network",
     r: float = Defaults.RANGE_R,
+    networks_dir: Path | None = None,
 ) -> dict[str, bool]:
     """
     Run network inference for all three diffusion models.
 
     Args:
-        cascades_file: Path to cascades file (default ``Paths.CASCADES``).
+        cascades_file: Path to cascades file.  Defaults to
+            ``DatasetPaths(Datasets.DEFAULT).CASCADES``.
         n:             Number of alpha grid points.
         max_iter:      Maximum NetInf iterations per run.
         name_output:   Base name for output files.
         r:             Range factor for the log alpha grid.
+        networks_dir:  Root directory for output networks.  Defaults to
+            ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
 
     Returns:
         Dict mapping model name → success flag.
@@ -295,6 +310,7 @@ def infer_networks_all_models(
             max_iter=max_iter,
             name_output=name_output,
             r=r,
+            networks_dir=networks_dir,
         )
     return results
 
@@ -321,9 +337,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run inference for all three models.",
     )
     parser.add_argument(
+        "--dataset",
+        choices=Datasets.ALL,
+        default=Datasets.DEFAULT,
+        help="Dataset whose cascades/networks to use (default: %(default)s).",
+    )
+    parser.add_argument(
         "--cascades",
-        default=str(Paths.CASCADES),
-        help="Path to the cascades file.",
+        default=None,
+        help="Override path to the cascades file.",
     )
     parser.add_argument(
         "--n-alphas",
@@ -355,25 +377,31 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
+    dp = DatasetPaths(args.dataset)
+    cascades_file = args.cascades or dp.CASCADES
+    networks_dir = dp.NETWORKS
+
     if args.all:
         results = infer_networks_all_models(
-            cascades_file=args.cascades,
+            cascades_file=cascades_file,
             n=args.n_alphas,
             max_iter=args.max_iter,
             name_output=args.name_output,
             r=args.range_r,
+            networks_dir=networks_dir,
         )
         any_failed = any(not v for v in results.values())
         sys.exit(1 if any_failed else 0)
     else:
         model_idx = Models.ALL.index(args.model)
         success = infer_networks(
-            cascades_file=args.cascades,
+            cascades_file=cascades_file,
             n=args.n_alphas,
             model=model_idx,
             max_iter=args.max_iter,
             name_output=args.name_output,
             r=args.range_r,
+            networks_dir=networks_dir,
         )
         sys.exit(0 if success else 1)
 

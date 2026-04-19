@@ -20,11 +20,36 @@ class Paths:
 
     DATA = ROOT / "data"
     PLOTS = ROOT / "plots"
-    CASCADES = DATA / "cascades.txt"
-    NETWORKS = DATA / "inferred_networks"
-    CENTRALITY = DATA / "centrality_metrics"
-    COMMUNITIES = DATA / "communities"
     NETINF_BIN = ROOT / "networks" / "netinf"
+
+
+class DatasetPaths:
+    """Per-dataset output paths, scoped under ``data/<dataset>/``.
+
+    All generated artefacts (cascades, networks, centrality metrics, etc.) are
+    stored inside a dataset-specific subdirectory so that results from
+    different datasets never overwrite each other.
+
+    Example::
+
+        dp = DatasetPaths("movielens")
+        dp.CASCADES    # data/movielens/cascades.txt
+        dp.NETWORKS    # data/movielens/inferred_networks/
+        dp.PLOTS       # plots/movielens/
+    """
+
+    def __init__(self, dataset: str) -> None:
+        base = Paths.DATA / dataset
+        self.BASE = base
+        self.CASCADES = base / "cascades.txt"
+        self.NETWORKS = base / "inferred_networks"
+        self.CENTRALITY = base / "centrality_metrics"
+        self.COMMUNITIES = base / "communities"
+        self.SHAP_MATRICES = base / "shap_matrices"
+        self.PLOTS = Paths.PLOTS / dataset
+        self.BASELINE_RESULTS = base / "baseline_search_results.json"
+        self.ENHANCED_RESULTS = base / "enhanced_search_results.json"
+        self.SHAP_RESULTS = base / "shap_results.json"
 
 
 class Datasets:

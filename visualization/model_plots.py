@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from config import Paths, Models
+from config import Paths, Models, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -37,8 +37,8 @@ from config import Paths, Models
 # ---------------------------------------------------------------------------
 
 
-def _plots_dir() -> str:
-    out = Paths.PLOTS / "models"
+def _plots_dir(dataset: str | None = None) -> str:
+    out = DatasetPaths(dataset or Datasets.DEFAULT).PLOTS / "models"
     out.mkdir(parents=True, exist_ok=True)
     return str(out)
 
@@ -52,6 +52,7 @@ def plot_hyperparameter_search_results(
     search_results: dict,
     save_path: str | None = None,
     figsize: tuple = (15, 10),
+    dataset: str | None = None,
 ) -> None:
     """
     Six-panel overview of a hyperparameter search run.
@@ -126,7 +127,7 @@ def plot_hyperparameter_search_results(
 
     plt.tight_layout()
     if save_path:
-        full_path = f"{_plots_dir()}/{save_path}"
+        full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
     plt.show()
@@ -138,6 +139,7 @@ def plot_parameter_heatmap(
     metric: str = "rmse",
     save_path: str | None = None,
     figsize: tuple = (12, 8),
+    dataset: str | None = None,
 ) -> None:
     """
     Heatmap of *metric* across the (k, λ) parameter space.
@@ -193,7 +195,7 @@ def plot_parameter_heatmap(
     plt.tight_layout()
 
     if save_path:
-        full_path = f"{_plots_dir()}/{save_path}"
+        full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
     plt.show()
@@ -204,6 +206,7 @@ def plot_convergence_analysis(
     search_results: dict,
     save_path: str | None = None,
     figsize: tuple = (12, 6),
+    dataset: str | None = None,
 ) -> None:
     """
     Convergence plot: all trial RMSE values and running-best curve.
@@ -270,7 +273,7 @@ def plot_convergence_analysis(
 
     plt.tight_layout()
     if save_path:
-        full_path = f"{_plots_dir()}/{save_path}"
+        full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
     plt.show()
@@ -281,6 +284,7 @@ def plot_metrics_comparison(
     search_results: dict,
     save_path: str | None = None,
     figsize: tuple = (15, 5),
+    dataset: str | None = None,
 ) -> None:
     """
     Side-by-side histograms of RMSE, MAE, and R².
@@ -322,7 +326,7 @@ def plot_metrics_comparison(
 
     plt.tight_layout()
     if save_path:
-        full_path = f"{_plots_dir()}/{save_path}"
+        full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
     plt.show()
@@ -338,14 +342,14 @@ def plot_metrics_comparison(
 # ---------------------------------------------------------------------------
 
 
-def _extract_alphas(model_name: str) -> np.ndarray:
+def _extract_alphas(model_name: str, dataset: str | None = None) -> np.ndarray:
     """
     Load the alpha column from ``data/inferred_networks/<model>/inferred_edges_<short>.csv``.
 
     Returns an empty array if the file is missing or malformed.
     """
     short = Models.SHORT.get(model_name, "")
-    fp = Paths.NETWORKS / model_name / f"inferred_edges_{short}.csv"
+    fp = DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS / model_name / f"inferred_edges_{short}.csv"
     if not fp.exists():
         print(f"Alpha file not found: {fp}")
         return np.array([])
@@ -364,6 +368,7 @@ def plot_alpha_rmse_analysis(
     save_plot: bool = True,
     figsize: tuple = (12, 8),
     global_baseline_rmse: float | None = None,
+    dataset: str | None = None,
 ) -> None:
     """
     Alpha vs RMSE line + scatter with best-alpha marker and baseline reference.
@@ -381,7 +386,7 @@ def plot_alpha_rmse_analysis(
                               When provided it is drawn as a second dashed line
                               for absolute reference.
     """
-    alpha_values = _extract_alphas(model_name)
+    alpha_values = _extract_alphas(model_name, dataset=dataset)
     if len(alpha_values) == 0 or len(alpha_values) != len(rmse_values):
         print("Mismatch between alpha values and RMSE values — cannot plot.")
         return
@@ -456,7 +461,7 @@ def plot_alpha_rmse_analysis(
     plt.tight_layout()
 
     if save_plot:
-        full_path = f"{_plots_dir()}/alpha_rmse_{model_name}.png"
+        full_path = f"{_plots_dir(dataset)}/alpha_rmse_{model_name}.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
     plt.show()
@@ -476,6 +481,7 @@ def plot_alpha_delta_rmse(
     save_plot: bool = True,
     figsize: tuple = (12, 8),
     delta_pct_values: list[float] | None = None,
+    dataset: str | None = None,
 ) -> None:
     """
     Signed delta RMSE scatter: positive = better than baseline (blue), negative =
@@ -495,7 +501,7 @@ def plot_alpha_delta_rmse(
                           When ``None`` the delta is derived from *baseline_rmse*
                           and *rmse_values* (both must be on the same population).
     """
-    alpha_values = _extract_alphas(model_name)
+    alpha_values = _extract_alphas(model_name, dataset=dataset)
     if len(alpha_values) == 0 or len(alpha_values) != len(rmse_values):
         print("Mismatch between alpha values and RMSE values — cannot plot.")
         return
@@ -527,7 +533,7 @@ def plot_alpha_delta_rmse(
     plt.tight_layout()
 
     if save_plot:
-        full_path = f"{_plots_dir()}/alpha_delta_rmse_{model_name}.png"
+        full_path = f"{_plots_dir(dataset)}/alpha_delta_rmse_{model_name}.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
     plt.show()
@@ -537,6 +543,7 @@ def plot_alpha_delta_rmse(
 def plot_alpha_edges(
     save_plot: bool = True,
     figsize: tuple = (18, 5),
+    dataset: str | None = None,
 ) -> None:
     """
     Three-subplot figure: one subplot per diffusion model showing alpha (x-axis)
@@ -556,7 +563,7 @@ def plot_alpha_edges(
     fig.suptitle("Alpha vs Inferred Edge Count", fontsize=15, fontweight="bold", y=1.02)
 
     for ax, (model_name, short, colour) in zip(axes, _MODEL_CFG):
-        csv = Paths.NETWORKS / model_name / f"inferred_edges_{short}.csv"
+        csv = DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS / model_name / f"inferred_edges_{short}.csv"
         if not csv.exists():
             ax.set_title(f"{model_name.capitalize()}\n(data not found)")
             ax.axis("off")
@@ -579,7 +586,7 @@ def plot_alpha_edges(
     plt.tight_layout()
 
     if save_plot:
-        full_path = f"{_plots_dir()}/alpha_edges.png"
+        full_path = f"{_plots_dir(dataset)}/alpha_edges.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
     plt.show()
@@ -635,17 +642,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Show plots interactively without saving.",
     )
+    _parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Dataset name (default: uses Datasets.DEFAULT).",
+    )
     _args = _parser.parse_args()
 
     _plots = set(_args.plot)
     _do_all = "all" in _plots
     _model_list = Models.ALL if "all" in _args.models else _args.models
     _save = not _args.no_save
+    _dataset = _args.dataset
 
     # ------------------------------------------------------------------
     # Baseline search results (hyperparam / metrics / convergence plots)
     # ------------------------------------------------------------------
-    _search_json = Paths.DATA / "baseline_search_results.json"
+    _search_json = DatasetPaths(_dataset or Datasets.DEFAULT).BASELINE_RESULTS
     _search_result: dict | None = None
     if _do_all or _plots & {"hyperparam", "metrics", "convergence", "heatmap"}:
         if _search_json.exists():
@@ -706,7 +719,7 @@ if __name__ == "__main__":
     if _do_all or _plots & {"alpha-rmse", "delta-rmse"}:
         for _model_name in _model_list:
             _short = Models.SHORT[_model_name]
-            _csv = Paths.NETWORKS / _model_name / f"inferred_edges_{_short}.csv"
+            _csv = DatasetPaths(_dataset or Datasets.DEFAULT).NETWORKS / _model_name / f"inferred_edges_{_short}.csv"
 
             if not _csv.exists():
                 print(f"Skipping {_model_name}: {_csv} not found.")
@@ -772,6 +785,7 @@ if __name__ == "__main__":
                     rmse_std_values=_std,
                     save_plot=_save,
                     global_baseline_rmse=_global_baseline_rmse,
+                    dataset=_dataset,
                 )
             if _do_all or "delta-rmse" in _plots:
                 plot_alpha_delta_rmse(
@@ -780,10 +794,11 @@ if __name__ == "__main__":
                     baseline_rmse=_baseline,
                     save_plot=_save,
                     delta_pct_values=_delta_pct,
+                    dataset=_dataset,
                 )
 
     if _do_all or "alpha-edges" in _plots:
         print("\n--- Alpha vs Inferred Edges (all models) ---")
-        plot_alpha_edges(save_plot=_save)
+        plot_alpha_edges(save_plot=_save, dataset=_dataset)
 
     sys.exit(0)

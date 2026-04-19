@@ -1,8 +1,8 @@
 """
 SHAP feature importance visualizations for the enhanced CMF recommender.
 
-All save paths are derived from :mod:`config.Paths` so the plots are written
-to ``plots/`` regardless of the working directory.
+All save paths are derived from :mod:`config.DatasetPaths` so the plots are written
+to ``plots/<dataset>/shap/`` regardless of the working directory.
 
 Available plots
 ---------------
@@ -30,7 +30,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from config import Paths
+from config import DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ PALETTE = {
     "rayleigh": "#4CAF50",
 }
 
-_SHAP_RESULTS_PATH = Paths.DATA / "shap_results.json"
+_SHAP_RESULTS_PATH = DatasetPaths(Datasets.DEFAULT).SHAP_RESULTS
 
 
 # ---------------------------------------------------------------------------
@@ -51,8 +51,8 @@ _SHAP_RESULTS_PATH = Paths.DATA / "shap_results.json"
 # ---------------------------------------------------------------------------
 
 
-def _plots_dir() -> str:
-    out = Paths.PLOTS / "shap"
+def _plots_dir(dataset: str | None = None) -> str:
+    out = DatasetPaths(dataset or Datasets.DEFAULT).PLOTS / "shap"
     out.mkdir(parents=True, exist_ok=True)
     return str(out)
 
@@ -76,6 +76,7 @@ def _load_results(results_path: str | Path | None) -> dict:
 def plot_shap_importance_comparison(
     results_path: str | Path | None = None,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Grouped horizontal bar chart comparing mean |SHAP| for every feature
@@ -137,7 +138,7 @@ def plot_shap_importance_comparison(
     fig.tight_layout()
 
     if save:
-        path = Path(_plots_dir()) / "shap_importance_comparison.png"
+        path = Path(_plots_dir(dataset)) / "shap_importance_comparison.png"
         fig.savefig(path, dpi=150, bbox_inches="tight")
         print(f"[shap_plots] Saved → {path}")
 
@@ -154,6 +155,7 @@ def plot_shap_beeswarm(
     results_path: str | Path | None = None,
     save: bool = True,
     max_display_pts: int = 2000,
+    dataset: str | None = None,
 ) -> None:
     """
     Beeswarm-style strip plot of SHAP values per feature for *model_name*.
@@ -245,7 +247,7 @@ def plot_shap_beeswarm(
     fig.tight_layout()
 
     if save:
-        path = Path(_plots_dir()) / f"shap_beeswarm_{model_name}.png"
+        path = Path(_plots_dir(dataset)) / f"shap_beeswarm_{model_name}.png"
         fig.savefig(path, dpi=150, bbox_inches="tight")
         print(f"[shap_plots] Saved → {path}")
 
@@ -260,6 +262,7 @@ def plot_shap_beeswarm(
 def plot_all_shap(
     results_path: str | Path | None = None,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Generate all SHAP plots:
@@ -272,12 +275,12 @@ def plot_all_shap(
         save:         When ``True``, write figures to ``plots/shap/``.
     """
     print("[shap_plots] Generating SHAP importance comparison chart…")
-    plot_shap_importance_comparison(results_path=results_path, save=save)
+    plot_shap_importance_comparison(results_path=results_path, save=save, dataset=dataset)
 
     results = _load_results(results_path)
     for model_name in results:
         print(f"[shap_plots] Generating beeswarm for '{model_name}'…")
-        plot_shap_beeswarm(model_name, results_path=results_path, save=save)
+        plot_shap_beeswarm(model_name, results_path=results_path, save=save, dataset=dataset)
 
 
 # ---------------------------------------------------------------------------

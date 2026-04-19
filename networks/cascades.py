@@ -5,13 +5,13 @@ A *cascade* represents the temporal sequence of user interactions with a
 specific item (e.g. movie ratings).  The cascade format is required as input
 for the NetInf algorithm used in the network inference step.
 
-Input CSV columns (order matters):
+Expected DataFrame columns (after dataset loading):
     UserId    – unique user identifier
     ItemId    – unique item identifier
     Rating    – numeric rating
     timestamp – Unix epoch seconds
 
-Output file (``data/cascades.txt``):
+Output file (``data/<dataset>/cascades.txt``):
     - Header block: one ``user_id,user_id`` line per unique user
     - Empty separator line
     - One cascade line per item:
@@ -19,7 +19,7 @@ Output file (``data/cascades.txt``):
 
 Usage (CLI)::
 
-    python -m networks.cascades ratings_small
+    python -m networks.cascades --dataset movielens
     python -m networks.cascades --help
 """
 
@@ -32,7 +32,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from config import Datasets, Paths
+from config import DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def generate_cascades_from_df(
         ``True`` on success, ``False`` otherwise.
     """
     if output_file is None:
-        output_file = Paths.CASCADES
+        output_file = DatasetPaths(Datasets.DEFAULT).CASCADES
     output_file = Path(output_file)
 
     num_users = interactions["UserId"].nunique()
@@ -146,35 +146,6 @@ def generate_cascades_from_df(
     return True
 
 
-def generate_cascades(dataset_name: str) -> bool:
-    """
-    Build cascade file from a rating dataset CSV and write it to disk.
-
-    Loads the full dataset and delegates to
-    :func:`generate_cascades_from_df`.  For leakage-free evaluation, call
-    :func:`generate_cascades_from_df` directly with a train-only split.
-
-    Args:
-        dataset_name: Name of the CSV file (without extension) inside ``data/``.
-
-    Returns:
-        ``True`` on success, ``False`` otherwise.
-    """
-    data_file = Paths.DATA / f"{dataset_name}.csv"
-
-    if not data_file.exists():
-        print(f"Error: dataset '{data_file}' not found.")
-        return False
-
-    print(f"Processing dataset: {data_file}")
-
-    # Load the first four columns: UserId, ItemId, Rating, timestamp
-    interactions = pd.read_csv(data_file, usecols=range(4))  # type: ignore[call-overload]
-    interactions.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
-
-    return generate_cascades_from_df(interactions)
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -186,10 +157,10 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "dataset",
-        nargs="?",
-        default=None,
-        help="Dataset name (without .csv extension). Defaults to 'ratings_small'.",
+        "--dataset",
+        choices=Datasets.ALL,
+        default=Datasets.DEFAULT,
+        help="Dataset to process (default: %(default)s).",
     )
     return parser
 
@@ -198,18 +169,31 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    datasets = list_available_datasets()
-    if args.dataset is None:
-        print("Available datasets:")
-        for d in datasets:
-            print(f"  - {d}")
-        print()
-        dataset_name = "ratings_small"
-        print(f"No dataset specified — using default: {dataset_name}")
-    else:
-        dataset_name = args.dataset
+    from sklearn.model_selection import train_test_split
+    from config import Split
 
-    success = generate_cascades(dataset_name)
+    cfg = Datasets.CONFIG[args.dataset]
+    csv_path = Datasets.ROOT / args.dataset / cfg["file"]
+    cols: list[int] = [cfg["col_user"], cfg["col_item"], cfg["col_rating"], cfg["col_time"]]
+    df = pd.read_csv(
+        csv_path,
+        sep=cfg["sep"],
+        header=cfg["header"],
+        usecols=cols,  # type: ignore[call-overload]
+        engine="python",
+    )
+    df.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
+
+    train_df, _ = train_test_split(
+        df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
+    )
+
+    dp = DatasetPaths(args.dataset)
+    success = generate_cascades_from_df(
+        pd.DataFrame(train_df),
+        output_file=dp.CASCADES,
+        all_user_ids=df["UserId"],
+    )
     sys.exit(0 if success else 1)
 
 

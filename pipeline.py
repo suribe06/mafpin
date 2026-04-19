@@ -66,7 +66,7 @@ def _run_cascade(args: argparse.Namespace) -> None:
     from sklearn.model_selection import train_test_split
 
     from networks.cascades import generate_cascades_from_df
-    from config import Datasets, Split
+    from config import DatasetPaths, Datasets, Split
 
     ds_name = args.dataset
     cfg = Datasets.CONFIG[ds_name]
@@ -87,7 +87,11 @@ def _run_cascade(args: argparse.Namespace) -> None:
     train_df, _ = train_test_split(
         df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
     )
-    generate_cascades_from_df(pd.DataFrame(train_df), all_user_ids=df["UserId"])
+    generate_cascades_from_df(
+        pd.DataFrame(train_df),
+        all_user_ids=df["UserId"],
+        output_file=DatasetPaths(ds_name).CASCADES,
+    )
 
 
 def _run_delta(_args: argparse.Namespace) -> None:
@@ -107,8 +111,9 @@ def _run_inference(args: argparse.Namespace) -> None:
         alpha_centers_from_delta,
         log_alpha_grid,
     )
-    from config import Paths, Defaults
+    from config import DatasetPaths, Datasets
 
+    dp = DatasetPaths(args.dataset if hasattr(args, 'dataset') and args.dataset else Datasets.DEFAULT)
     model = args.model
     model_index_map = {"exponential": 0, "powerlaw": 1, "rayleigh": 2}
     if model:
@@ -116,27 +121,33 @@ def _run_inference(args: argparse.Namespace) -> None:
         _ = alpha_centers_from_delta(_)  # kept for reference
         _ = log_alpha_grid  # kept for reference
         infer_networks(
-            cascades_file=Paths.CASCADES,
+            cascades_file=dp.CASCADES,
             n=args.n_alphas,
             model=model_index_map[model],
             max_iter=args.max_iter,
-            name_output=str(Paths.NETWORKS / model),
+            name_output=str(dp.NETWORKS / model),
             r=Defaults.RANGE_R,
+            networks_dir=dp.NETWORKS,
         )
     else:
-        infer_networks_all_models(n=args.n_alphas, max_iter=args.max_iter)
+        infer_networks_all_models(
+            n=args.n_alphas,
+            max_iter=args.max_iter,
+            networks_dir=dp.NETWORKS,
+            cascades_file=dp.CASCADES,
+        )
 
 
-def _run_centrality(_args: argparse.Namespace) -> None:
+def _run_centrality(args: argparse.Namespace) -> None:
     from networks.centrality import calculate_centrality_for_all_models
 
-    calculate_centrality_for_all_models()
+    calculate_centrality_for_all_models(dataset=args.dataset if hasattr(args, 'dataset') else None)
 
 
-def _run_communities(_args: argparse.Namespace) -> None:
+def _run_communities(args: argparse.Namespace) -> None:
     from networks.communities import calculate_communities_for_all_models
 
-    calculate_communities_for_all_models()
+    calculate_communities_for_all_models(dataset=args.dataset if hasattr(args, 'dataset') else None)
 
 
 def _run_recommend(args: argparse.Namespace) -> None:
@@ -149,7 +160,9 @@ def _run_recommend(args: argparse.Namespace) -> None:
         save_enhanced_search_results,
         load_network_features,
     )
-    from config import Models, Defaults, Paths, MLflow as MlflowCfg
+    from config import Models, DatasetPaths, MLflow as MlflowCfg
+
+    dp = DatasetPaths(args.dataset)
 
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
@@ -173,7 +186,8 @@ def _run_recommend(args: argparse.Namespace) -> None:
         sample_model_name = None
         for _mn in Models.ALL:
             sample_features = load_network_features(
-                _mn, 0, include_communities=args.include_communities
+                _mn, 0, include_communities=args.include_communities,
+                dataset=args.dataset,
             )
             if sample_features is not None:
                 sample_model_name = _mn
@@ -202,7 +216,9 @@ def _run_recommend(args: argparse.Namespace) -> None:
                 enhanced_search = search_enhanced_params(
                     train_df, sample_features, n_trials=50, n_splits=3
                 )
-            save_enhanced_search_results(enhanced_search)
+            save_enhanced_search_results(
+                enhanced_search, path=dp.ENHANCED_RESULTS
+            )
             best_k_e = enhanced_search["best_params"]["k"]
             best_lambda_e = enhanced_search["best_params"]["lambda_reg"]
             best_w_main = enhanced_search["best_params"]["w_main"]
@@ -267,11 +283,12 @@ def _run_recommend(args: argparse.Namespace) -> None:
             w_user=best_w_user,
             baseline_k=best_k_b,
             baseline_lambda=best_lambda_b,
+            dataset=args.dataset,
         )
 
         for _artifact in [
-            Paths.DATA / "baseline_search_results.json",
-            Paths.DATA / "enhanced_search_results.json",
+            dp.BASELINE_RESULTS,
+            dp.ENHANCED_RESULTS,
         ]:
             if _artifact.exists():
                 mlflow.log_artifact(str(_artifact))
@@ -285,8 +302,9 @@ def _run_hypertune(args: argparse.Namespace) -> None:
         save_enhanced_search_results,
         load_network_features,
     )
-    from config import Models, MLflow as MlflowCfg, Paths
+    from config import Models, MLflow as MlflowCfg, DatasetPaths
 
+    dp = DatasetPaths(args.dataset)
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
@@ -305,7 +323,8 @@ def _run_hypertune(args: argparse.Namespace) -> None:
         sample_model_name = None
         for _mn in Models.ALL:
             sample_features = load_network_features(
-                _mn, 0, include_communities=args.include_communities
+                _mn, 0, include_communities=args.include_communities,
+                dataset=args.dataset,
             )
             if sample_features is not None:
                 sample_model_name = _mn
@@ -322,9 +341,9 @@ def _run_hypertune(args: argparse.Namespace) -> None:
         enhanced_search = search_enhanced_params(
             train_df, sample_features, n_trials=50, n_splits=3
         )
-        save_enhanced_search_results(enhanced_search)
+        save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
 
-        _artifact = Paths.DATA / "enhanced_search_results.json"
+        _artifact = dp.ENHANCED_RESULTS
         if _artifact.exists():
             mlflow.log_artifact(str(_artifact))
 
@@ -333,8 +352,9 @@ def _run_shap(args: argparse.Namespace) -> None:
     import mlflow
     from analysis.shap_analysis import run_shap_analysis, save_shap_results
     from visualization.shap_plots import plot_all_shap
-    from config import MLflow as MlflowCfg, Paths
+    from config import MLflow as MlflowCfg, DatasetPaths
 
+    dp = DatasetPaths(args.dataset)
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
@@ -356,8 +376,8 @@ def _run_shap(args: argparse.Namespace) -> None:
             model_names=[args.model] if args.model else None,
             dataset=args.dataset,
         )
-        save_shap_results(results)
-        plot_all_shap()
+        save_shap_results(results, path=dp.SHAP_RESULTS)
+        plot_all_shap(dataset=args.dataset)
 
         for model_name, model_results in results.items():
             mlflow.log_metric(f"{model_name}_n_networks", model_results["n_networks"])
@@ -367,7 +387,7 @@ def _run_shap(args: argparse.Namespace) -> None:
                 safe_name = fname.replace(" ", "_").replace("/", "_")
                 mlflow.log_metric(f"shap_{model_name}_{safe_name}", fval)
 
-        _artifact = Paths.DATA / "shap_results.json"
+        _artifact = dp.SHAP_RESULTS
         if _artifact.exists():
             mlflow.log_artifact(str(_artifact))
 

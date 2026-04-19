@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from config import Paths, Defaults
+from config import Paths, Defaults, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ def compute_median_delta(cascade_file: str | Path | None = None) -> float:
         ValueError: If no positive deltas can be computed from the file.
     """
     if cascade_file is None:
-        cascade_file = Paths.CASCADES
+        cascade_file = DatasetPaths(Datasets.DEFAULT).CASCADES
     cascade_file = Path(cascade_file)
 
     if not cascade_file.exists():
@@ -162,7 +162,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--cascades",
-        default=str(Paths.CASCADES),
+        default=str(DatasetPaths(Datasets.DEFAULT).CASCADES),
         help="Path to the cascades file.",
     )
     parser.add_argument(

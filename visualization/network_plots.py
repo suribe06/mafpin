@@ -17,7 +17,7 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 
-from config import Paths, Models
+from config import Paths, Models, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +40,7 @@ def plot_centrality_distribution(
     model_name: str,
     network_id: str,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Histogram + KDE for a single centrality metric of one network.
@@ -51,7 +52,7 @@ def plot_centrality_distribution(
         save:        Write PNG to ``data/centrality_metrics/<model>/plots/``.
     """
     csv_path = (
-        Paths.CENTRALITY
+        DatasetPaths(dataset or Datasets.DEFAULT).CENTRALITY
         / model_name
         / f"centrality_metrics_{Models.SHORT.get(model_name, model_name)}_{network_id}.csv"
     )
@@ -95,6 +96,7 @@ def plot_all_centrality_distributions(
     model_name: str,
     network_id: str,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Seven-panel grid showing all centrality distributions for one network.
@@ -105,7 +107,7 @@ def plot_all_centrality_distributions(
         save:        Write PNG to ``plots/centrality/<model>/``.
     """
     csv_path = (
-        Paths.CENTRALITY
+        DatasetPaths(dataset or Datasets.DEFAULT).CENTRALITY
         / model_name
         / f"centrality_metrics_{Models.SHORT.get(model_name, model_name)}_{network_id}.csv"
     )
@@ -180,7 +182,7 @@ def plot_cascades_timeline(
     """
     from pathlib import Path as _Path
 
-    path = _Path(cascade_file) if cascade_file else Paths.CASCADES
+    path = _Path(cascade_file) if cascade_file else DatasetPaths(Datasets.DEFAULT).CASCADES
     if not path.exists():
         print(f"Cascade file not found: {path}")
         return

@@ -58,7 +58,7 @@ import pandas as pd
 from cmfrec import CMF  # type: ignore[import-untyped]
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
-from config import Paths, Models, Defaults
+from config import DatasetPaths, Datasets, Models, Defaults
 from recommender.data import evaluate_single_split, split_data_single
 
 # Scaler type alias used inside the per-split loop.
@@ -78,6 +78,7 @@ def load_network_features(
     model_name: str,
     network_index: int,
     include_communities: bool = True,
+    dataset: str | None = None,
 ) -> pd.DataFrame | None:
     """
     Load centrality (and optionally community) features for one inferred network.
@@ -91,13 +92,15 @@ def load_network_features(
         network_index:       Zero-based network index (selects the CSV by filename).
         include_communities: If ``True``, merge LPH and ``num_communities`` from the
                              corresponding community CSV.
+        dataset:             Dataset name.  Defaults to ``Datasets.DEFAULT``.
 
     Returns:
         Raw feature DataFrame indexed by ``UserId``, or ``None`` if the file is
         missing.
     """
+    dp = DatasetPaths(dataset or Datasets.DEFAULT)
     index_str = f"{network_index:03d}"
-    centrality_dir = Paths.CENTRALITY / model_name
+    centrality_dir = dp.CENTRALITY / model_name
     centrality_csv = centrality_dir / f"centrality_metrics_{model_name}_{index_str}.csv"
 
     if not centrality_csv.exists():
@@ -106,7 +109,7 @@ def load_network_features(
     df = pd.read_csv(centrality_csv)
 
     if include_communities:
-        community_dir = Paths.COMMUNITIES / model_name
+        community_dir = dp.COMMUNITIES / model_name
         community_csv = community_dir / f"communities_{model_name}_{index_str}.csv"
         if community_csv.exists():
             com_raw = pd.read_csv(community_csv)
@@ -388,7 +391,7 @@ def save_enhanced_search_results(
     """
     import json as _json
 
-    dest = path or (Paths.DATA / "enhanced_search_results.json")
+    dest = path or DatasetPaths(Datasets.DEFAULT).ENHANCED_RESULTS
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, "w", encoding="utf-8") as fh:
         _json.dump(search_result, fh, indent=2)
@@ -413,6 +416,7 @@ def evaluate_single_network(
     n_splits: int = 5,
     baseline_k: int | None = None,
     baseline_lambda: float | None = None,
+    dataset: str | None = None,
 ) -> list[dict]:
     """
     Load features and evaluate CMF for one (model, index) pair.
@@ -439,6 +443,7 @@ def evaluate_single_network(
         model_name,
         network_index,
         include_communities=include_communities,
+        dataset=dataset,
     )
     if features is None:
         print(f"  Skipping {model_name} #{network_index:03d}: features not found.")
@@ -462,6 +467,7 @@ def _save_rmses(
     model_name: str,
     network_index: int,
     split_results: list[dict],
+    dataset: str | None = None,
 ) -> None:
     """
     Append mean RMSE, std, and improvement vs paired baseline to the results file.
@@ -471,9 +477,11 @@ def _save_rmses(
         network_index: Zero-based network index.
         split_results: List of per-split dicts from
                        :func:`evaluate_cmf_with_user_attributes`.
+        dataset:       Dataset name.  Defaults to ``Datasets.DEFAULT``.
     """
+    dp = DatasetPaths(dataset or Datasets.DEFAULT)
     model_short = Models.SHORT[model_name]
-    results_file = Paths.NETWORKS / model_name / f"inferred_edges_{model_short}.csv"
+    results_file = dp.NETWORKS / model_name / f"inferred_edges_{model_short}.csv"
 
     if not results_file.exists():
         return
@@ -515,6 +523,7 @@ def run_network_evaluation(
     w_user: float | None = None,
     baseline_k: int | None = None,
     baseline_lambda: float | None = None,
+    dataset: str | None = None,
 ) -> dict[str, list[float]]:
     """
     Evaluate a random sample of networks for all three diffusion models.
@@ -548,11 +557,13 @@ def run_network_evaluation(
                              baseline Optuna search.  When ``None``, the paired
                              baseline is skipped (``rmse_baseline`` = nan).
         baseline_lambda:     L2 regularisation for the paired plain-CMF baseline.
+        dataset:             Dataset name.  Defaults to ``Datasets.DEFAULT``.
 
     Returns:
         Dict mapping model name → list of mean enhanced RMSE values (one per
         sampled network).
     """
+    dp = DatasetPaths(dataset or Datasets.DEFAULT)
     all_results: dict[str, list[float]] = {m: [] for m in Models.ALL}
 
     # --- Optuna hyperparameter search (only when params are not pre-supplied) --
@@ -561,11 +572,11 @@ def run_network_evaluation(
         sample_model_name: str | None = None
         for _mn in Models.ALL:
             _csvs = sorted(
-                (Paths.CENTRALITY / _mn).glob(f"centrality_metrics_{_mn}_*.csv")
+                (dp.CENTRALITY / _mn).glob(f"centrality_metrics_{_mn}_*.csv")
             )
             if _csvs:
                 sample_features = load_network_features(
-                    _mn, 0, include_communities=include_communities
+                    _mn, 0, include_communities=include_communities, dataset=dataset
                 )
                 sample_model_name = _mn
                 if sample_features is not None:
@@ -596,7 +607,7 @@ def run_network_evaluation(
         best_k, best_lambda, best_w_main, best_w_user = k, lambda_reg, w_main, w_user
 
     for model_name in Models.ALL:
-        model_dir = Paths.CENTRALITY / model_name
+        model_dir = dp.CENTRALITY / model_name
         if not model_dir.exists():
             print(f"  Skipping {model_name}: centrality directory not found.")
             continue
@@ -648,7 +659,7 @@ def run_network_evaluation(
                     f"improvement={sign}{improvement:.4f} "
                     f"({sign}{improvement / mean_baseline * 100:.2f}%)"
                 )
-                _save_rmses(model_name, net_idx, split_results)
+                _save_rmses(model_name, net_idx, split_results, dataset=dataset)
                 all_results[model_name].append(mean_enhanced)
 
                 import mlflow as _mlflow
