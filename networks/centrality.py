@@ -18,7 +18,7 @@ network, a ``pagerank_lph`` column is appended: a generalised PageRank
 (Newman Eq. 7.18) where the intrinsic centrality vector β is set to the
 normalised LPH scores from Barraza et al. (2025).
 
-Outputs saved in ``data/centrality_metrics/<model>/``:
+Outputs saved in ``data/<dataset>/centrality_metrics/<model>/``:
 
 * ``centrality_metrics_<model>_<index>.csv``
   Columns: ``UserId, degree, betweenness, closeness, eigenvector,
@@ -53,7 +53,7 @@ except ImportError as _snap_err:
         "snap-stanford is required: pip install snap-stanford==6.0.0"
     ) from _snap_err
 
-from config import Paths, Models
+from config import DatasetPaths, Datasets, Models
 from networks.network_io import load_as_networkx, load_as_snap, parse_network_filename
 
 
@@ -197,6 +197,7 @@ def compute_pagerank_lph(
     model_name: str,
     network_id: str,
     alpha: float = 0.85,
+    communities_dir: Path | None = None,
 ) -> dict[int, float] | None:
     """
     Compute LPH-weighted custom PageRank for a single network.
@@ -214,17 +215,18 @@ def compute_pagerank_lph(
     the standard centrality metrics are still saved without the extra column).
 
     Args:
-        network_file: Path to the NetInf ``.txt`` network file.
-        model_name:   Diffusion model name (exponential / powerlaw / rayleigh).
-        network_id:   Zero-padded index string (e.g. ``"007"``).
-        alpha:        PageRank damping factor.
+        network_file:    Path to the NetInf ``.txt`` network file.
+        model_name:      Diffusion model name (exponential / powerlaw / rayleigh).
+        network_id:      Zero-padded index string (e.g. ``"007"``).
+        alpha:           PageRank damping factor.
+        communities_dir: Root communities directory.  Defaults to
+            ``DatasetPaths(Datasets.DEFAULT).COMMUNITIES``.
 
     Returns:
         Dict mapping node_id → pagerank_lph score, or ``None``.
     """
-    community_csv = (
-        Paths.COMMUNITIES / model_name / f"communities_{model_name}_{network_id}.csv"
-    )
+    root = communities_dir or DatasetPaths(Datasets.DEFAULT).COMMUNITIES
+    community_csv = root / model_name / f"communities_{model_name}_{network_id}.csv"
     if not community_csv.exists():
         return None
 
@@ -299,7 +301,7 @@ def save_centrality_results(
         model_name:   Diffusion model name (exponential / powerlaw / rayleigh).
         network_id:   Zero-padded index string (e.g. ``"007"``).
         output_dir:   Directory to write into.  Defaults to
-            ``Paths.CENTRALITY / model_name``.
+            ``DatasetPaths(Datasets.DEFAULT).CENTRALITY / model_name``.
         pagerank_lph: Optional LPH-weighted custom PageRank scores.  When
             provided, a ``pagerank_lph`` column is appended to the CSV.
 
@@ -307,7 +309,7 @@ def save_centrality_results(
         Path of the written CSV file.
     """
     if output_dir is None:
-        output_dir = Paths.CENTRALITY / model_name
+        output_dir = DatasetPaths(Datasets.DEFAULT).CENTRALITY / model_name
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -339,12 +341,20 @@ def save_centrality_results(
 # ---------------------------------------------------------------------------
 
 
-def calculate_centrality_for_network(network_file: str | Path) -> bool:
+def calculate_centrality_for_network(
+    network_file: str | Path,
+    communities_dir: Path | None = None,
+    centrality_dir: Path | None = None,
+) -> bool:
     """
     Compute and save centrality metrics for a single network file.
 
     Args:
-        network_file: Path to a NetInf output ``.txt`` file.
+        network_file:    Path to a NetInf output ``.txt`` file.
+        communities_dir: Root communities directory for pagerank_lph lookup.
+            Defaults to ``DatasetPaths(Datasets.DEFAULT).COMMUNITIES``.
+        centrality_dir:  Root centrality output directory.  Defaults to
+            ``DatasetPaths(Datasets.DEFAULT).CENTRALITY``.
 
     Returns:
         ``True`` on success, ``False`` otherwise.
@@ -364,7 +374,9 @@ def calculate_centrality_for_network(network_file: str | Path) -> bool:
     G, user_ids = load_as_snap(network_file)
     metrics = compute_all_centrality(G)
 
-    pr_lph = compute_pagerank_lph(network_file, model_name, network_id)
+    pr_lph = compute_pagerank_lph(
+        network_file, model_name, network_id, communities_dir=communities_dir
+    )
     if pr_lph is not None:
         print("  Computing pagerank_lph (LPH-weighted custom PageRank) ✓")
     else:
@@ -373,21 +385,34 @@ def calculate_centrality_for_network(network_file: str | Path) -> bool:
         )
 
     save_centrality_results(
-        user_ids, metrics, model_name, network_id, pagerank_lph=pr_lph
+        user_ids,
+        metrics,
+        model_name,
+        network_id,
+        output_dir=centrality_dir,
+        pagerank_lph=pr_lph,
     )
     return True
 
 
-def calculate_centrality_for_all_models() -> dict[str, int]:
+def calculate_centrality_for_all_models(
+    dataset: str | None = None,
+) -> dict[str, int]:
     """
     Process every inferred network for all three diffusion models.
+
+    Args:
+        dataset: Dataset name.  Defaults to ``Datasets.DEFAULT``.  Used to
+            locate inferred networks and write centrality outputs into the
+            correct dataset-scoped subdirectory.
 
     Returns:
         Dict mapping model name → number of successfully processed files.
     """
+    dp = DatasetPaths(dataset or Datasets.DEFAULT)
     summary: dict[str, int] = {}
     for model_name in Models.ALL:
-        model_dir = Paths.NETWORKS / model_name
+        model_dir = dp.NETWORKS / model_name
         if not model_dir.exists():
             print(f"  Skipping {model_name}: directory not found ({model_dir})")
             summary[model_name] = 0
@@ -405,7 +430,11 @@ def calculate_centrality_for_all_models() -> dict[str, int]:
 
         success_count = 0
         for nf in network_files:
-            if calculate_centrality_for_network(nf):
+            if calculate_centrality_for_network(
+                nf,
+                communities_dir=dp.COMMUNITIES,
+                centrality_dir=dp.CENTRALITY / model_name,
+            ):
                 success_count += 1
 
         summary[model_name] = success_count
@@ -458,13 +487,20 @@ def main() -> None:
         sys.exit(0)
 
     else:
-        model_dir = Paths.NETWORKS / args.model
+        dp = DatasetPaths(Datasets.DEFAULT)
+        model_dir = dp.NETWORKS / args.model
         if not model_dir.exists():
             print(f"Error: directory not found: {model_dir}")
             sys.exit(1)
         network_files = sorted(model_dir.glob("inferred-network-*.txt"))
         success_count = sum(
-            1 for nf in network_files if calculate_centrality_for_network(nf)
+            1
+            for nf in network_files
+            if calculate_centrality_for_network(
+                nf,
+                communities_dir=dp.COMMUNITIES,
+                centrality_dir=dp.CENTRALITY,
+            )
         )
         print(f"\nProcessed: {success_count}/{len(network_files)}")
         sys.exit(0)

@@ -26,7 +26,7 @@ A high LPH value indicates that *v* and its direct neighbours tend to share
 community memberships — a measure of neighbourhood cohesion in overlapping
 structures.
 
-Outputs saved in ``data/communities/<model>/``:
+Outputs saved in ``data/<dataset>/communities/<model>/``:
 
 * ``communities_<model>_<index>.csv``
   Columns: ``UserId, num_communities, community_ids, local_pluralistic_hom, lph_score``
@@ -53,7 +53,7 @@ import networkx as nx
 import pandas as pd
 from cdlib import algorithms  # type: ignore[import-untyped]
 
-from config import Paths, Models, Defaults
+from config import DatasetPaths, Datasets, Models, Defaults
 from networks.network_io import load_as_networkx, parse_network_filename
 
 
@@ -287,13 +287,13 @@ def save_community_results(
         model_name:  Diffusion model name.
         network_id:  Zero-padded index string (e.g. ``"007"``).
         output_dir:  Target directory.  Defaults to
-            ``Paths.COMMUNITIES / model_name``.
+            ``DatasetPaths(Datasets.DEFAULT).COMMUNITIES / model_name``.
 
     Returns:
         Path of the written CSV file.
     """
     if output_dir is None:
-        output_dir = Paths.COMMUNITIES / model_name
+        output_dir = DatasetPaths(Datasets.DEFAULT).COMMUNITIES / model_name
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -327,6 +327,7 @@ def calculate_communities_for_network(
     algorithm: str = "demon",
     epsilon: float = Defaults.EPSILON,
     min_community: int = Defaults.MIN_COM,
+    output_dir: str | Path | None = None,
 ) -> bool:
     """
     Detect communities and compute LPH for a single network file.
@@ -367,7 +368,15 @@ def calculate_communities_for_network(
     lph = compute_local_pluralistic_homophily(G, membership)
     lph_paper = compute_lph_paper(G, membership)
 
-    save_community_results(user_ids, lph, lph_paper, membership, model_name, network_id)
+    save_community_results(
+        user_ids,
+        lph,
+        lph_paper,
+        membership,
+        model_name,
+        network_id,
+        output_dir=output_dir,
+    )
     return True
 
 
@@ -375,16 +384,26 @@ def calculate_communities_for_all_models(
     algorithm: str = "demon",
     epsilon: float = Defaults.EPSILON,
     min_community: int = Defaults.MIN_COM,
+    dataset: str | None = None,
 ) -> dict[str, int]:
     """
     Detect communities and compute LPH for all inferred networks across all models.
 
+    Args:
+        algorithm:     Community detection algorithm.
+        epsilon:       Demon merge threshold.
+        min_community: Minimum community size for Demon.
+        dataset:       Dataset name.  Defaults to ``Datasets.DEFAULT``.  Used
+            to locate inferred networks and write community outputs into the
+            correct dataset-scoped subdirectory.
+
     Returns:
         Dict mapping model name → number of successfully processed files.
     """
+    dp = DatasetPaths(dataset or Datasets.DEFAULT)
     summary: dict[str, int] = {}
     for model_name in Models.ALL:
-        model_dir = Paths.NETWORKS / model_name
+        model_dir = dp.NETWORKS / model_name
         if not model_dir.exists():
             print(f"  Skipping {model_name}: directory not found ({model_dir})")
             summary[model_name] = 0
@@ -404,7 +423,11 @@ def calculate_communities_for_all_models(
             1
             for nf in network_files
             if calculate_communities_for_network(
-                nf, algorithm=algorithm, epsilon=epsilon, min_community=min_community
+                nf,
+                algorithm=algorithm,
+                epsilon=epsilon,
+                min_community=min_community,
+                output_dir=dp.COMMUNITIES / model_name,
             )
         )
         summary[model_name] = success_count
@@ -481,13 +504,20 @@ def main() -> None:
         sys.exit(0)
 
     else:
-        model_dir = Paths.NETWORKS / args.model
+        dp = DatasetPaths(Datasets.DEFAULT)
+        model_dir = dp.NETWORKS / args.model
         if not model_dir.exists():
             print(f"Error: directory not found: {model_dir}")
             sys.exit(1)
         network_files = sorted(model_dir.glob("inferred-network-*.txt"))
         success_count = sum(
-            1 for nf in network_files if calculate_communities_for_network(nf, **kwargs)
+            1
+            for nf in network_files
+            if calculate_communities_for_network(
+                nf,
+                **kwargs,
+                output_dir=dp.COMMUNITIES / args.model,
+            )
         )
         print(f"\nProcessed: {success_count}/{len(network_files)}")
         sys.exit(0)

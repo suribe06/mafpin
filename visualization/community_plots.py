@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 import seaborn as sns
 
-from config import Paths, Models
+from config import Models, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -49,33 +49,41 @@ MODELS = Models.ALL
 # ---------------------------------------------------------------------------
 
 
-def _plots_dir() -> str:
-    out = Paths.PLOTS / "communities"
+def _plots_dir(dataset: str | None = None) -> str:
+    out = DatasetPaths(dataset or Datasets.DEFAULT).PLOTS / "communities"
     out.mkdir(parents=True, exist_ok=True)
     return str(out)
 
 
-def _load_community_csv(model_name: str, network_index: int) -> pd.DataFrame | None:
+def _load_community_csv(
+    model_name: str, network_index: int, dataset: str | None = None
+) -> pd.DataFrame | None:
     fp = (
-        Paths.COMMUNITIES
+        DatasetPaths(dataset or Datasets.DEFAULT).COMMUNITIES
         / model_name
         / f"communities_{model_name}_{network_index:03d}.csv"
     )
     return pd.read_csv(fp) if fp.exists() else None
 
 
-def _load_centrality_csv(model_name: str, network_index: int) -> pd.DataFrame | None:
+def _load_centrality_csv(
+    model_name: str, network_index: int, dataset: str | None = None
+) -> pd.DataFrame | None:
     fp = (
-        Paths.CENTRALITY
+        DatasetPaths(dataset or Datasets.DEFAULT).CENTRALITY
         / model_name
         / f"centrality_metrics_{model_name}_{network_index:03d}.csv"
     )
     return pd.read_csv(fp) if fp.exists() else None
 
 
-def _load_alpha_csv(model_name: str) -> pd.DataFrame | None:
+def _load_alpha_csv(model_name: str, dataset: str | None = None) -> pd.DataFrame | None:
     short = Models.SHORT[model_name]
-    fp = Paths.NETWORKS / model_name / f"inferred_edges_{short}.csv"
+    fp = (
+        DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS
+        / model_name
+        / f"inferred_edges_{short}.csv"
+    )
     if not fp.exists():
         return None
     df = pd.read_csv(fp, sep="|").reset_index(drop=True)
@@ -83,7 +91,9 @@ def _load_alpha_csv(model_name: str) -> pd.DataFrame | None:
     return df
 
 
-def _aggregate_community_stats(model_name: str, n_networks: int = 100) -> pd.DataFrame:
+def _aggregate_community_stats(
+    model_name: str, n_networks: int = 100, dataset: str | None = None
+) -> pd.DataFrame:
     """
     Return per-network aggregated community statistics.
 
@@ -93,7 +103,7 @@ def _aggregate_community_stats(model_name: str, n_networks: int = 100) -> pd.Dat
     """
     rows = []
     for i in range(n_networks):
-        raw = _load_community_csv(model_name, i)
+        raw = _load_community_csv(model_name, i, dataset=dataset)
         if raw is None:
             continue
         row: dict = {
@@ -121,6 +131,7 @@ def plot_lph_distribution(
     n_networks: int = 100,
     sample_nodes: int = 500,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Violin + box plot comparing LPH distributions across the three models.
@@ -140,7 +151,7 @@ def plot_lph_distribution(
     has_lph_score = False
     for model in MODELS:
         for i in range(n_networks):
-            raw = _load_community_csv(model, i)
+            raw = _load_community_csv(model, i, dataset=dataset)
             if raw is None:
                 continue
             if "lph_score" in raw.columns:
@@ -214,10 +225,9 @@ def plot_lph_distribution(
     plt.tight_layout()
 
     if save:
-        path = f"{_plots_dir()}/lph_distribution.png"
+        path = f"{_plots_dir(dataset)}/lph_distribution.png"
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -226,7 +236,9 @@ def plot_lph_distribution(
 # ---------------------------------------------------------------------------
 
 
-def plot_num_communities_dist(n_networks: int = 100, save: bool = True) -> None:
+def plot_num_communities_dist(
+    n_networks: int = 100, save: bool = True, dataset: str | None = None
+) -> None:
     """
     Density-normalised histogram of per-node community count, one curve per model.
 
@@ -238,7 +250,7 @@ def plot_num_communities_dist(n_networks: int = 100, save: bool = True) -> None:
     for model in MODELS:
         all_counts: list[int] = []
         for i in range(n_networks):
-            raw = _load_community_csv(model, i)
+            raw = _load_community_csv(model, i, dataset=dataset)
             if raw is None:
                 continue
             all_counts.extend(raw["num_communities"].tolist())
@@ -263,10 +275,9 @@ def plot_num_communities_dist(n_networks: int = 100, save: bool = True) -> None:
     plt.tight_layout()
 
     if save:
-        path = f"{_plots_dir()}/num_communities_dist.png"
+        path = f"{_plots_dir(dataset)}/num_communities_dist.png"
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -275,7 +286,9 @@ def plot_num_communities_dist(n_networks: int = 100, save: bool = True) -> None:
 # ---------------------------------------------------------------------------
 
 
-def plot_alpha_vs_lph(n_networks: int = 100, save: bool = True) -> None:
+def plot_alpha_vs_lph(
+    n_networks: int = 100, save: bool = True, dataset: str | None = None
+) -> None:
     """
     3-row × 2-column grid showing how the alpha parameter affects LPH.
 
@@ -291,8 +304,8 @@ def plot_alpha_vs_lph(n_networks: int = 100, save: bool = True) -> None:
     )
 
     for row, model in enumerate(MODELS):
-        alpha_df = _load_alpha_csv(model)
-        stats_df = _aggregate_community_stats(model, n_networks)
+        alpha_df = _load_alpha_csv(model, dataset=dataset)
+        stats_df = _aggregate_community_stats(model, n_networks, dataset=dataset)
         col = PALETTE[model]
         ax_mean = axes[row, 0]
         ax_med = axes[row, 1]
@@ -331,10 +344,9 @@ def plot_alpha_vs_lph(n_networks: int = 100, save: bool = True) -> None:
     plt.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
 
     if save:
-        path = f"{_plots_dir()}/alpha_vs_lph.png"
+        path = f"{_plots_dir(dataset)}/alpha_vs_lph.png"
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -343,7 +355,9 @@ def plot_alpha_vs_lph(n_networks: int = 100, save: bool = True) -> None:
 # ---------------------------------------------------------------------------
 
 
-def plot_alpha_vs_num_communities(n_networks: int = 100, save: bool = True) -> None:
+def plot_alpha_vs_num_communities(
+    n_networks: int = 100, save: bool = True, dataset: str | None = None
+) -> None:
     """
     Three-panel column showing alpha (log x-axis) vs mean community count.
 
@@ -357,8 +371,8 @@ def plot_alpha_vs_num_communities(n_networks: int = 100, save: bool = True) -> N
     )
 
     for ax, model in zip(axes, MODELS):
-        alpha_df = _load_alpha_csv(model)
-        stats_df = _aggregate_community_stats(model, n_networks)
+        alpha_df = _load_alpha_csv(model, dataset=dataset)
+        stats_df = _aggregate_community_stats(model, n_networks, dataset=dataset)
         col = PALETTE[model]
 
         if alpha_df is not None and not stats_df.empty:
@@ -386,10 +400,9 @@ def plot_alpha_vs_num_communities(n_networks: int = 100, save: bool = True) -> N
     plt.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
 
     if save:
-        path = f"{_plots_dir()}/alpha_vs_num_communities.png"
+        path = f"{_plots_dir(dataset)}/alpha_vs_num_communities.png"
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -402,6 +415,7 @@ def plot_lph_vs_centrality(
     model_name: str | None = None,
     network_index: int | None = None,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Scatter plot of LPH vs degree and PageRank, coloured by ``num_communities``.
@@ -418,8 +432,8 @@ def plot_lph_vs_centrality(
     if network_index is None:
         network_index = random.randint(0, 99)
 
-    comm_df = _load_community_csv(model_name, network_index)
-    cent_df = _load_centrality_csv(model_name, network_index)
+    comm_df = _load_community_csv(model_name, network_index, dataset=dataset)
+    cent_df = _load_centrality_csv(model_name, network_index, dataset=dataset)
     if comm_df is None or cent_df is None:
         print(f"Data not found for {model_name} network {network_index}.")
         return
@@ -458,11 +472,11 @@ def plot_lph_vs_centrality(
 
     if save:
         path = (
-            f"{_plots_dir()}/" f"lph_vs_centrality_{model_name}_{network_index:03d}.png"
+            f"{_plots_dir(dataset)}/"
+            f"lph_vs_centrality_{model_name}_{network_index:03d}.png"
         )
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 
@@ -475,6 +489,7 @@ def plot_community_correlation_heatmap(
     model_name: str | None = None,
     network_index: int | None = None,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Pearson correlation heatmap between LPH, ``num_communities``, and centrality
@@ -490,8 +505,8 @@ def plot_community_correlation_heatmap(
     if network_index is None:
         network_index = random.randint(0, 99)
 
-    comm_df = _load_community_csv(model_name, network_index)
-    cent_df = _load_centrality_csv(model_name, network_index)
+    comm_df = _load_community_csv(model_name, network_index, dataset=dataset)
+    cent_df = _load_centrality_csv(model_name, network_index, dataset=dataset)
     if comm_df is None or cent_df is None:
         print(f"Data not found for {model_name} network {network_index}.")
         return
@@ -528,12 +543,11 @@ def plot_community_correlation_heatmap(
 
     if save:
         path = (
-            f"{_plots_dir()}/"
+            f"{_plots_dir(dataset)}/"
             f"correlation_heatmap_{model_name}_{network_index:03d}.png"
         )
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")
-    plt.show()
     plt.close()
 
 

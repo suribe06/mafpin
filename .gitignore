@@ -208,3 +208,7 @@ __marimo__/
 
 # MLFlow runs
 mlruns/
+
+# Generated pipeline outputs (created automatically at runtime)
+data/*/
+plots/*/

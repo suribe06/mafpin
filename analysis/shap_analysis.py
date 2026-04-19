@@ -55,7 +55,7 @@ from cmfrec import CMF  # type: ignore[import-untyped]
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
-from config import Models, Paths
+from config import DatasetPaths, Datasets, Models
 from recommender.data import load_and_split_dataset
 from recommender.enhanced import load_network_features
 
@@ -63,9 +63,9 @@ from recommender.enhanced import load_network_features
 # Constants
 # ---------------------------------------------------------------------------
 
-_ENHANCED_PARAMS_PATH = Paths.DATA / "enhanced_search_results.json"
-_SHAP_RESULTS_PATH = Paths.DATA / "shap_results.json"
-_SHAP_MATRICES_DIR = Paths.DATA / "shap_matrices"
+_ENHANCED_PARAMS_PATH = DatasetPaths(Datasets.DEFAULT).ENHANCED_RESULTS
+_SHAP_RESULTS_PATH = DatasetPaths(Datasets.DEFAULT).SHAP_RESULTS
+_SHAP_MATRICES_DIR = DatasetPaths(Datasets.DEFAULT).SHAP_MATRICES
 
 _SCALERS = {
     "standard": StandardScaler,
@@ -109,9 +109,9 @@ def load_enhanced_params(path: Path | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _available_indices(model_name: str) -> list[int]:
+def _available_indices(model_name: str, dataset: str | None = None) -> list[int]:
     """Return the sorted list of network indices available for *model_name*."""
-    centrality_dir = Paths.CENTRALITY / model_name
+    centrality_dir = DatasetPaths(dataset or Datasets.DEFAULT).CENTRALITY / model_name
     if not centrality_dir.exists():
         return []
     return sorted(
@@ -120,9 +120,11 @@ def _available_indices(model_name: str) -> list[int]:
     )
 
 
-def _sample_indices(model_name: str, k: int, rng: random.Random) -> list[int]:
+def _sample_indices(
+    model_name: str, k: int, rng: random.Random, dataset: str | None = None
+) -> list[int]:
     """Sample up to *k* network indices without replacement."""
-    available = _available_indices(model_name)
+    available = _available_indices(model_name, dataset=dataset)
     if not available:
         return []
     return sorted(rng.sample(available, min(k, len(available))))
@@ -244,7 +246,7 @@ def compute_shap_for_network(
     per_user_pred = test_filtered.groupby("UserId")["_pred"].mean()
 
     # --- Align features and predictions --------------------------------------
-    common_users = sorted(per_user_pred.index & scaled_features.index)
+    common_users = sorted(per_user_pred.index.intersection(scaled_features.index))
     if len(common_users) < min_users:
         return None
 
@@ -278,6 +280,7 @@ def run_shap_analysis(
     model_names: list[str] | None = None,
     params_path: Path | None = None,
     transform: str = "standard",
+    dataset: str | None = None,
 ) -> dict[str, dict]:
     """
     Run SHAP feature importance analysis over ``k_networks`` random networks
@@ -310,7 +313,8 @@ def run_shap_analysis(
             }
     """
     params = load_enhanced_params(params_path)
-    _, train_df, test_df = load_and_split_dataset()
+    _, train_df, test_df = load_and_split_dataset(dataset=dataset)
+    dp = DatasetPaths(dataset or Datasets.DEFAULT)
 
     if model_names is None:
         model_names = Models.ALL
@@ -322,9 +326,9 @@ def run_shap_analysis(
         print(f"\n{'='*55}\nModel: {model_name.upper()}\n{'='*55}")
 
         if k_networks is None:
-            indices = _available_indices(model_name)
+            indices = _available_indices(model_name, dataset=dataset)
         else:
-            indices = _sample_indices(model_name, k_networks, rng)
+            indices = _sample_indices(model_name, k_networks, rng, dataset=dataset)
         if not indices:
             print("  No networks found, skipping.")
             continue
@@ -354,7 +358,7 @@ def run_shap_analysis(
             valid_indices.append(idx)
 
             # Persist full matrix so plots can be regenerated without re-running.
-            model_matrices_dir = _SHAP_MATRICES_DIR / model_name
+            model_matrices_dir = dp.SHAP_MATRICES / model_name
             model_matrices_dir.mkdir(parents=True, exist_ok=True)
             matrix_path = model_matrices_dir / f"{model_name}_{idx:03d}.npy"
             np.save(matrix_path, sv)
@@ -370,7 +374,7 @@ def run_shap_analysis(
         mean_signed = np.mean([sv.mean(axis=0) for sv in all_shap], axis=0)
 
         matrix_paths = [
-            str(_SHAP_MATRICES_DIR / model_name / f"{model_name}_{i:03d}.npy")
+            str(dp.SHAP_MATRICES / model_name / f"{model_name}_{i:03d}.npy")
             for i in valid_indices
         ]
         results[model_name] = {

@@ -20,11 +20,80 @@ class Paths:
 
     DATA = ROOT / "data"
     PLOTS = ROOT / "plots"
-    CASCADES = DATA / "cascades.txt"
-    NETWORKS = DATA / "inferred_networks"
-    CENTRALITY = DATA / "centrality_metrics"
-    COMMUNITIES = DATA / "communities"
     NETINF_BIN = ROOT / "networks" / "netinf"
+
+
+class DatasetPaths:
+    """Per-dataset output paths, scoped under ``data/<dataset>/``.
+
+    All generated artefacts (cascades, networks, centrality metrics, etc.) are
+    stored inside a dataset-specific subdirectory so that results from
+    different datasets never overwrite each other.
+
+    Example::
+
+        dp = DatasetPaths("movielens")
+        dp.CASCADES    # data/movielens/cascades.txt
+        dp.NETWORKS    # data/movielens/inferred_networks/
+        dp.PLOTS       # plots/movielens/
+    """
+
+    def __init__(self, dataset: str) -> None:
+        base = Paths.DATA / dataset
+        self.BASE = base
+        self.CASCADES = base / "cascades.txt"
+        self.NETWORKS = base / "inferred_networks"
+        self.CENTRALITY = base / "centrality_metrics"
+        self.COMMUNITIES = base / "communities"
+        self.SHAP_MATRICES = base / "shap_matrices"
+        self.PLOTS = Paths.PLOTS / dataset
+        self.BASELINE_RESULTS = base / "baseline_search_results.json"
+        self.ENHANCED_RESULTS = base / "enhanced_search_results.json"
+        self.SHAP_RESULTS = base / "shap_results.json"
+
+
+class Datasets:
+    """Paths and format configurations for supported rating datasets.
+
+    Each entry in :attr:`CONFIG` describes how to read the raw file for a
+    given dataset.  Column indices (``col_user``, ``col_item``,
+    ``col_rating``, ``col_time``) are zero-based positions in the raw file
+    and are used to extract the four fields needed by the pipeline.
+    """
+
+    ROOT = Path(__file__).parent / "datasets"
+    DEFAULT = "movielens"
+    ALL = ["movielens", "ciao", "epinions"]
+
+    CONFIG: "dict[str, dict]" = {
+        "movielens": {
+            "file": "ratings_small.csv",
+            "sep": ",",
+            "header": 0,  # first row is a header
+            "col_user": 0,
+            "col_item": 1,
+            "col_rating": 2,
+            "col_time": 3,
+        },
+        "ciao": {
+            "file": "rating_with_timestamp.txt",
+            "sep": r"\s+",
+            "header": None,  # no header row
+            "col_user": 0,
+            "col_item": 1,
+            "col_rating": 3,  # columns: user, product, category, rating, helpfulness, time
+            "col_time": 5,
+        },
+        "epinions": {
+            "file": "rating_with_timestamp.txt",
+            "sep": r"\s+",
+            "header": None,  # no header row
+            "col_user": 0,
+            "col_item": 1,
+            "col_rating": 3,  # columns: user, product, category, rating, helpfulness, time
+            "col_time": 5,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

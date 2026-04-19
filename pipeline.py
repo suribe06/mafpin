@@ -65,20 +65,21 @@ def _run_cascade(args: argparse.Namespace) -> None:
     import pandas as pd
     from sklearn.model_selection import train_test_split
 
-    from networks.cascades import generate_cascades_from_df, list_available_datasets
-    from config import Paths, Split
+    from networks.cascades import generate_cascades_from_df
+    from config import DatasetPaths, Datasets, Split
 
-    dataset = args.dataset
-    if dataset is None:
-        datasets = list_available_datasets()
-        if not datasets:
-            print("No datasets found in data/. Provide --dataset explicitly.")
-            sys.exit(1)
-        dataset = datasets[0]
-        print(f"Using dataset: {dataset}")
-
-    csv_path = Paths.DATA / f"{dataset}.csv"
-    df = pd.read_csv(csv_path, usecols=["UserId", "ItemId", "Rating", "timestamp"])  # type: ignore[call-overload]
+    ds_name = args.dataset
+    cfg = Datasets.CONFIG[ds_name]
+    csv_path = Datasets.ROOT / ds_name / cfg["file"]
+    cols = [cfg["col_user"], cfg["col_item"], cfg["col_rating"], cfg["col_time"]]
+    df = pd.read_csv(
+        csv_path,
+        sep=cfg["sep"],
+        header=cfg["header"],
+        usecols=cols,
+        engine="python",
+    )
+    df.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
 
     # Apply the global split so NetInf learns from training interactions only.
     # Pass all_user_ids=df["UserId"] so the cascade header declares the full
@@ -86,13 +87,26 @@ def _run_cascade(args: argparse.Namespace) -> None:
     train_df, _ = train_test_split(
         df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
     )
-    generate_cascades_from_df(pd.DataFrame(train_df), all_user_ids=df["UserId"])
+    generate_cascades_from_df(
+        pd.DataFrame(train_df),
+        all_user_ids=df["UserId"],
+        output_file=DatasetPaths(ds_name).CASCADES,
+    )
+
+    from visualization.network_plots import plot_cascades_timeline
+
+    plot_cascades_timeline(
+        cascade_file=str(DatasetPaths(ds_name).CASCADES),
+        save=True,
+        dataset=ds_name,
+    )
 
 
 def _run_delta(_args: argparse.Namespace) -> None:
     from networks.delta import compute_median_delta, alpha_centers_from_delta
+    from config import DatasetPaths
 
-    delta = compute_median_delta()
+    delta = compute_median_delta(DatasetPaths(_args.dataset).CASCADES)
     print(f"Median delta: {delta:.4f} days")
     centers = alpha_centers_from_delta(delta)
     for model, info in centers.items():
@@ -106,41 +120,77 @@ def _run_inference(args: argparse.Namespace) -> None:
         alpha_centers_from_delta,
         log_alpha_grid,
     )
-    from config import Paths, Defaults
+    from config import DatasetPaths, Datasets
 
+    dp = DatasetPaths(
+        args.dataset if hasattr(args, "dataset") and args.dataset else Datasets.DEFAULT
+    )
     model = args.model
     model_index_map = {"exponential": 0, "powerlaw": 1, "rayleigh": 2}
     if model:
-        _ = compute_median_delta()  # kept for reference
+        _ = compute_median_delta(dp.CASCADES)  # kept for reference
         _ = alpha_centers_from_delta(_)  # kept for reference
         _ = log_alpha_grid  # kept for reference
         infer_networks(
-            cascades_file=Paths.CASCADES,
+            cascades_file=dp.CASCADES,
             n=args.n_alphas,
             model=model_index_map[model],
             max_iter=args.max_iter,
-            name_output=str(Paths.NETWORKS / model),
+            name_output=str(dp.NETWORKS / model),
             r=Defaults.RANGE_R,
+            networks_dir=dp.NETWORKS,
         )
     else:
-        infer_networks_all_models(n=args.n_alphas, max_iter=args.max_iter)
+        infer_networks_all_models(
+            n=args.n_alphas,
+            max_iter=args.max_iter,
+            networks_dir=dp.NETWORKS,
+            cascades_file=dp.CASCADES,
+        )
+
+    from visualization.model_plots import plot_alpha_edges
+
+    plot_alpha_edges(save_plot=True, dataset=args.dataset)
 
 
-def _run_centrality(_args: argparse.Namespace) -> None:
+def _run_centrality(args: argparse.Namespace) -> None:
     from networks.centrality import calculate_centrality_for_all_models
+    from visualization.network_plots import plot_all_centrality_distributions
+    from config import Models
 
-    calculate_centrality_for_all_models()
+    calculate_centrality_for_all_models(
+        dataset=args.dataset if hasattr(args, "dataset") else None
+    )
+
+    for _mn in Models.ALL:
+        plot_all_centrality_distributions(_mn, "000", save=True, dataset=args.dataset)
 
 
-def _run_communities(_args: argparse.Namespace) -> None:
+def _run_communities(args: argparse.Namespace) -> None:
     from networks.communities import calculate_communities_for_all_models
+    from visualization.community_plots import (
+        plot_lph_distribution,
+        plot_num_communities_dist,
+        plot_alpha_vs_lph,
+        plot_alpha_vs_num_communities,
+        plot_lph_vs_centrality,
+        plot_community_correlation_heatmap,
+    )
 
-    calculate_communities_for_all_models()
+    calculate_communities_for_all_models(
+        dataset=args.dataset if hasattr(args, "dataset") else None
+    )
+
+    plot_lph_distribution(dataset=args.dataset)
+    plot_num_communities_dist(dataset=args.dataset)
+    plot_alpha_vs_lph(dataset=args.dataset)
+    plot_alpha_vs_num_communities(dataset=args.dataset)
+    plot_lph_vs_centrality(dataset=args.dataset)
+    plot_community_correlation_heatmap(dataset=args.dataset)
 
 
 def _run_recommend(args: argparse.Namespace) -> None:
     import mlflow
-    import pandas as pd
     from recommender.data import load_and_split_dataset, evaluate_single_split
     from recommender.baseline import train_final_model, search_baseline_params
     from recommender.enhanced import (
@@ -149,7 +199,9 @@ def _run_recommend(args: argparse.Namespace) -> None:
         save_enhanced_search_results,
         load_network_features,
     )
-    from config import Models, Defaults, Paths, MLflow as MlflowCfg
+    from config import Models, DatasetPaths, MLflow as MlflowCfg
+
+    dp = DatasetPaths(args.dataset)
 
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
@@ -166,14 +218,17 @@ def _run_recommend(args: argparse.Namespace) -> None:
             }
         )
 
-        _, train_df, test_df = load_and_split_dataset()
+        _, train_df, test_df = load_and_split_dataset(dataset=args.dataset)
 
         # Find first available feature file to represent the feature space.
         sample_features = None
         sample_model_name = None
         for _mn in Models.ALL:
             sample_features = load_network_features(
-                _mn, 0, include_communities=args.include_communities
+                _mn,
+                0,
+                include_communities=args.include_communities,
+                dataset=args.dataset,
             )
             if sample_features is not None:
                 sample_model_name = _mn
@@ -202,7 +257,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
                 enhanced_search = search_enhanced_params(
                     train_df, sample_features, n_trials=50, n_splits=3
                 )
-            save_enhanced_search_results(enhanced_search)
+            save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
             best_k_e = enhanced_search["best_params"]["k"]
             best_lambda_e = enhanced_search["best_params"]["lambda_reg"]
             best_w_main = enhanced_search["best_params"]["w_main"]
@@ -254,10 +309,10 @@ def _run_recommend(args: argparse.Namespace) -> None:
         from recommender.baseline import save_search_results as _save_baseline
 
         baseline_search["global_test_rmse"] = baseline_metrics["rmse"]
-        _save_baseline(baseline_search)
+        _save_baseline(baseline_search, path=dp.BASELINE_RESULTS)
 
         # Enhanced evaluation — pass pre-tuned enhanced params.
-        run_network_evaluation(
+        all_results = run_network_evaluation(
             data=train_df,
             include_communities=args.include_communities,
             sample_networks=999_999 if args.all_networks else args.sample_networks,
@@ -267,14 +322,64 @@ def _run_recommend(args: argparse.Namespace) -> None:
             w_user=best_w_user,
             baseline_k=best_k_b,
             baseline_lambda=best_lambda_b,
+            dataset=args.dataset,
         )
 
         for _artifact in [
-            Paths.DATA / "baseline_search_results.json",
-            Paths.DATA / "enhanced_search_results.json",
+            dp.BASELINE_RESULTS,
+            dp.ENHANCED_RESULTS,
         ]:
             if _artifact.exists():
                 mlflow.log_artifact(str(_artifact))
+
+    # --- plots ---------------------------------------------------------------
+    from visualization.model_plots import (
+        plot_hyperparameter_search_results,
+        plot_parameter_heatmap,
+        plot_convergence_analysis,
+        plot_metrics_comparison,
+        plot_alpha_rmse_analysis,
+        plot_alpha_delta_rmse,
+        plot_alpha_edges,
+    )
+
+    for _search, _prefix in [
+        (baseline_search, "baseline"),
+        (enhanced_search if sample_features is not None else None, "enhanced"),
+    ]:
+        if _search and _search.get("all_results"):
+            plot_hyperparameter_search_results(
+                _search, save_path=f"{_prefix}_hyper_search.png", dataset=args.dataset
+            )
+            plot_parameter_heatmap(
+                _search, save_path=f"{_prefix}_param_heatmap.png", dataset=args.dataset
+            )
+            plot_convergence_analysis(
+                _search, save_path=f"{_prefix}_convergence.png", dataset=args.dataset
+            )
+            plot_metrics_comparison(
+                _search, save_path=f"{_prefix}_metrics.png", dataset=args.dataset
+            )
+
+    global_rmse = baseline_metrics["rmse"]
+    for _mn, _rmse_list in all_results.items():
+        if _rmse_list:
+            plot_alpha_rmse_analysis(
+                model_name=_mn,
+                rmse_values=_rmse_list,
+                baseline_rmse=global_rmse,
+                save_plot=True,
+                dataset=args.dataset,
+            )
+            plot_alpha_delta_rmse(
+                model_name=_mn,
+                rmse_values=_rmse_list,
+                baseline_rmse=global_rmse,
+                save_plot=True,
+                dataset=args.dataset,
+            )
+
+    plot_alpha_edges(save_plot=True, dataset=args.dataset)
 
 
 def _run_hypertune(args: argparse.Namespace) -> None:
@@ -285,8 +390,9 @@ def _run_hypertune(args: argparse.Namespace) -> None:
         save_enhanced_search_results,
         load_network_features,
     )
-    from config import Models, MLflow as MlflowCfg, Paths
+    from config import Models, MLflow as MlflowCfg, DatasetPaths
 
+    dp = DatasetPaths(args.dataset)
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
@@ -299,13 +405,16 @@ def _run_hypertune(args: argparse.Namespace) -> None:
             }
         )
 
-        _, train_df, _ = load_and_split_dataset()
+        _, train_df, _ = load_and_split_dataset(dataset=args.dataset)
 
         sample_features = None
         sample_model_name = None
         for _mn in Models.ALL:
             sample_features = load_network_features(
-                _mn, 0, include_communities=args.include_communities
+                _mn,
+                0,
+                include_communities=args.include_communities,
+                dataset=args.dataset,
             )
             if sample_features is not None:
                 sample_model_name = _mn
@@ -322,19 +431,50 @@ def _run_hypertune(args: argparse.Namespace) -> None:
         enhanced_search = search_enhanced_params(
             train_df, sample_features, n_trials=50, n_splits=3
         )
-        save_enhanced_search_results(enhanced_search)
+        save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
 
-        _artifact = Paths.DATA / "enhanced_search_results.json"
+        _artifact = dp.ENHANCED_RESULTS
         if _artifact.exists():
             mlflow.log_artifact(str(_artifact))
+
+    # --- plots ---------------------------------------------------------------
+    from visualization.model_plots import (
+        plot_hyperparameter_search_results,
+        plot_parameter_heatmap,
+        plot_convergence_analysis,
+        plot_metrics_comparison,
+    )
+
+    if enhanced_search.get("all_results"):
+        plot_hyperparameter_search_results(
+            enhanced_search,
+            save_path="enhanced_hyper_search.png",
+            dataset=args.dataset,
+        )
+        plot_parameter_heatmap(
+            enhanced_search,
+            save_path="enhanced_param_heatmap.png",
+            dataset=args.dataset,
+        )
+        plot_convergence_analysis(
+            enhanced_search,
+            save_path="enhanced_convergence.png",
+            dataset=args.dataset,
+        )
+        plot_metrics_comparison(
+            enhanced_search,
+            save_path="enhanced_metrics.png",
+            dataset=args.dataset,
+        )
 
 
 def _run_shap(args: argparse.Namespace) -> None:
     import mlflow
     from analysis.shap_analysis import run_shap_analysis, save_shap_results
     from visualization.shap_plots import plot_all_shap
-    from config import MLflow as MlflowCfg, Paths
+    from config import MLflow as MlflowCfg, DatasetPaths
 
+    dp = DatasetPaths(args.dataset)
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
@@ -354,9 +494,11 @@ def _run_shap(args: argparse.Namespace) -> None:
             include_communities=args.include_communities,
             seed=args.seed,
             model_names=[args.model] if args.model else None,
+            params_path=dp.ENHANCED_RESULTS,
+            dataset=args.dataset,
         )
-        save_shap_results(results)
-        plot_all_shap()
+        save_shap_results(results, path=dp.SHAP_RESULTS)
+        plot_all_shap(dataset=args.dataset)
 
         for model_name, model_results in results.items():
             mlflow.log_metric(f"{model_name}_n_networks", model_results["n_networks"])
@@ -366,7 +508,7 @@ def _run_shap(args: argparse.Namespace) -> None:
                 safe_name = fname.replace(" ", "_").replace("/", "_")
                 mlflow.log_metric(f"shap_{model_name}_{safe_name}", fval)
 
-        _artifact = Paths.DATA / "shap_results.json"
+        _artifact = dp.SHAP_RESULTS
         if _artifact.exists():
             mlflow.log_artifact(str(_artifact))
 
@@ -426,8 +568,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--dataset",
-        default=None,
-        help="Ratings dataset filename inside data/ (auto-detected if omitted).",
+        choices=["movielens", "ciao", "epinions"],
+        default="movielens",
+        help="Dataset to use for the pipeline (reads from datasets/<name>/).",
     )
     parser.add_argument(
         "--n-alphas",

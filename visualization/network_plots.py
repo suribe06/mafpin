@@ -17,7 +17,7 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 
-from config import Paths, Models
+from config import Models, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +40,7 @@ def plot_centrality_distribution(
     model_name: str,
     network_id: str,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Histogram + KDE for a single centrality metric of one network.
@@ -51,7 +52,7 @@ def plot_centrality_distribution(
         save:        Write PNG to ``data/centrality_metrics/<model>/plots/``.
     """
     csv_path = (
-        Paths.CENTRALITY
+        DatasetPaths(dataset or Datasets.DEFAULT).CENTRALITY
         / model_name
         / f"centrality_metrics_{Models.SHORT.get(model_name, model_name)}_{network_id}.csv"
     )
@@ -82,12 +83,13 @@ def plot_centrality_distribution(
     plt.tight_layout()
 
     if save:
-        out_dir = Paths.PLOTS / "centrality" / model_name
+        out_dir = (
+            DatasetPaths(dataset or Datasets.DEFAULT).PLOTS / "centrality" / model_name
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"{metric}_{model_name}_{network_id}.png"
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {out_path}")
-    plt.show()
     plt.close()
 
 
@@ -95,6 +97,7 @@ def plot_all_centrality_distributions(
     model_name: str,
     network_id: str,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Seven-panel grid showing all centrality distributions for one network.
@@ -105,7 +108,7 @@ def plot_all_centrality_distributions(
         save:        Write PNG to ``plots/centrality/<model>/``.
     """
     csv_path = (
-        Paths.CENTRALITY
+        DatasetPaths(dataset or Datasets.DEFAULT).CENTRALITY
         / model_name
         / f"centrality_metrics_{Models.SHORT.get(model_name, model_name)}_{network_id}.csv"
     )
@@ -147,12 +150,13 @@ def plot_all_centrality_distributions(
 
     plt.tight_layout()
     if save:
-        out_dir = Paths.PLOTS / "centrality" / model_name
+        out_dir = (
+            DatasetPaths(dataset or Datasets.DEFAULT).PLOTS / "centrality" / model_name
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"all_centrality_{model_name}_{network_id}.png"
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {out_path}")
-    plt.show()
     plt.close()
 
 
@@ -165,6 +169,7 @@ def plot_cascades_timeline(
     cascade_file: str | None = None,
     n: int = 20,
     save: bool = True,
+    dataset: str | None = None,
 ) -> None:
     """
     Plot the first *n* cascades as event timelines.
@@ -180,7 +185,9 @@ def plot_cascades_timeline(
     """
     from pathlib import Path as _Path
 
-    path = _Path(cascade_file) if cascade_file else Paths.CASCADES
+    path = (
+        _Path(cascade_file) if cascade_file else DatasetPaths(Datasets.DEFAULT).CASCADES
+    )
     if not path.exists():
         print(f"Cascade file not found: {path}")
         return
@@ -221,12 +228,11 @@ def plot_cascades_timeline(
     plt.tight_layout()
 
     if save:
-        out_dir = Paths.PLOTS
+        out_dir = DatasetPaths(dataset or Datasets.DEFAULT).PLOTS
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / "cascades_timeline.png"
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {out_path}")
-    plt.show()
     plt.close()
 
 

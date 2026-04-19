@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from config import Paths, Models
+from config import Models, DatasetPaths, Datasets
 
 
 # ---------------------------------------------------------------------------
@@ -37,8 +37,8 @@ from config import Paths, Models
 # ---------------------------------------------------------------------------
 
 
-def _plots_dir() -> str:
-    out = Paths.PLOTS / "models"
+def _plots_dir(dataset: str | None = None) -> str:
+    out = DatasetPaths(dataset or Datasets.DEFAULT).PLOTS / "models"
     out.mkdir(parents=True, exist_ok=True)
     return str(out)
 
@@ -52,6 +52,7 @@ def plot_hyperparameter_search_results(
     search_results: dict,
     save_path: str | None = None,
     figsize: tuple = (15, 10),
+    dataset: str | None = None,
 ) -> None:
     """
     Six-panel overview of a hyperparameter search run.
@@ -75,8 +76,10 @@ def plot_hyperparameter_search_results(
     k_values = [r["k"] for r in results]
     lambda_values = [r["lambda_reg"] for r in results]
     rmse_values = [r["rmse"] for r in results]
-    mae_values = [r["mae"] for r in results]
-    r2_values = [r["r2"] for r in results]
+    mae_values = [r.get("mae") for r in results]
+    r2_values = [r.get("r2") for r in results]
+    has_mae = any(v is not None for v in mae_values)
+    has_r2 = any(v is not None for v in r2_values)
     best_rmse = search_results["best_params"].get("rmse", min(rmse_values))
 
     fig, axes = plt.subplots(2, 3, figsize=figsize)
@@ -103,14 +106,36 @@ def plot_hyperparameter_search_results(
     axes[0, 2].legend()
     axes[0, 2].grid(alpha=0.3)
 
-    # 4) MAE vs RMSE
-    axes[1, 0].scatter(rmse_values, mae_values, alpha=0.6, c="mediumpurple")
-    axes[1, 0].set(xlabel="RMSE", ylabel="MAE", title="MAE vs RMSE")
+    # 4) MAE vs RMSE (only when MAE is available)
+    if has_mae:
+        axes[1, 0].scatter(rmse_values, mae_values, alpha=0.6, c="mediumpurple")
+        axes[1, 0].set(xlabel="RMSE", ylabel="MAE", title="MAE vs RMSE")
+    else:
+        axes[1, 0].text(
+            0.5,
+            0.5,
+            "MAE not available",
+            ha="center",
+            va="center",
+            transform=axes[1, 0].transAxes,
+        )
+        axes[1, 0].set_title("MAE vs RMSE")
     axes[1, 0].grid(alpha=0.3)
 
-    # 5) R² vs RMSE
-    axes[1, 1].scatter(rmse_values, r2_values, alpha=0.6, c="darkorange")
-    axes[1, 1].set(xlabel="RMSE", ylabel="R²", title="R² vs RMSE")
+    # 5) R² vs RMSE (only when R² is available)
+    if has_r2:
+        axes[1, 1].scatter(rmse_values, r2_values, alpha=0.6, c="darkorange")
+        axes[1, 1].set(xlabel="RMSE", ylabel="R²", title="R² vs RMSE")
+    else:
+        axes[1, 1].text(
+            0.5,
+            0.5,
+            "R² not available",
+            ha="center",
+            va="center",
+            transform=axes[1, 1].transAxes,
+        )
+        axes[1, 1].set_title("R² vs RMSE")
     axes[1, 1].grid(alpha=0.3)
 
     # 6) Top-20 results with error bars (requires per-split std — graceful fallback)
@@ -126,10 +151,9 @@ def plot_hyperparameter_search_results(
 
     plt.tight_layout()
     if save_path:
-        full_path = f"{_plots_dir()}/{save_path}"
+        full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
@@ -138,6 +162,7 @@ def plot_parameter_heatmap(
     metric: str = "rmse",
     save_path: str | None = None,
     figsize: tuple = (12, 8),
+    dataset: str | None = None,
 ) -> None:
     """
     Heatmap of *metric* across the (k, λ) parameter space.
@@ -193,10 +218,9 @@ def plot_parameter_heatmap(
     plt.tight_layout()
 
     if save_path:
-        full_path = f"{_plots_dir()}/{save_path}"
+        full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
@@ -204,6 +228,7 @@ def plot_convergence_analysis(
     search_results: dict,
     save_path: str | None = None,
     figsize: tuple = (12, 6),
+    dataset: str | None = None,
 ) -> None:
     """
     Convergence plot: all trial RMSE values and running-best curve.
@@ -270,10 +295,9 @@ def plot_convergence_analysis(
 
     plt.tight_layout()
     if save_path:
-        full_path = f"{_plots_dir()}/{save_path}"
+        full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
@@ -281,6 +305,7 @@ def plot_metrics_comparison(
     search_results: dict,
     save_path: str | None = None,
     figsize: tuple = (15, 5),
+    dataset: str | None = None,
 ) -> None:
     """
     Side-by-side histograms of RMSE, MAE, and R².
@@ -296,36 +321,39 @@ def plot_metrics_comparison(
 
     results = search_results["all_results"]
     rmse_values = [r["rmse"] for r in results]
-    mae_values = [r["mae"] for r in results]
-    r2_values = [r["r2"] for r in results]
+    mae_values_raw = [r.get("mae") for r in results]
+    r2_values_raw = [r.get("r2") for r in results]
+    mae_values = [v for v in mae_values_raw if v is not None]
+    r2_values = [v for v in r2_values_raw if v is not None]
 
     best_idx = int(np.argmin(rmse_values))
     best_rmse = rmse_values[best_idx]
 
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    metrics_data = [("RMSE", rmse_values, "steelblue")]
+    if mae_values:
+        metrics_data.append(("MAE", mae_values, "seagreen"))
+    if r2_values:
+        metrics_data.append(("R²", r2_values, "darkorange"))
+
+    n_plots = len(metrics_data)
+    fig, axes = plt.subplots(1, n_plots, figsize=(figsize[0] * n_plots / 3, figsize[1]))
+    if n_plots == 1:
+        axes = [axes]
     fig.suptitle("Metrics Distribution Comparison", fontsize=16, fontweight="bold")
 
-    for ax, vals, label, colour in zip(
-        axes,
-        [rmse_values, mae_values, r2_values],
-        ["RMSE", "MAE", "R²"],
-        ["steelblue", "seagreen", "darkorange"],
-    ):
+    for ax, (label, vals, colour) in zip(axes, metrics_data):
         ax.hist(vals, bins=20, alpha=0.7, color=colour, edgecolor="black")
-        ref_val = vals[best_idx]
-        ax.axvline(
-            ref_val, color="red", linestyle="--", label=f"Best RMSE idx: {ref_val:.4f}"
-        )
+        ref_val = vals[best_idx] if label == "RMSE" else vals[0]
+        ax.axvline(ref_val, color="red", linestyle="--", label=f"Best: {ref_val:.4f}")
         ax.set(xlabel=label, ylabel="Frequency", title=f"{label} Distribution")
         ax.legend(fontsize=9)
         ax.grid(alpha=0.3)
 
     plt.tight_layout()
     if save_path:
-        full_path = f"{_plots_dir()}/{save_path}"
+        full_path = f"{_plots_dir(dataset)}/{save_path}"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
     print(f"\nRMSE: mean={np.mean(rmse_values):.4f}, best={best_rmse:.4f}")
@@ -338,14 +366,18 @@ def plot_metrics_comparison(
 # ---------------------------------------------------------------------------
 
 
-def _extract_alphas(model_name: str) -> np.ndarray:
+def _extract_alphas(model_name: str, dataset: str | None = None) -> np.ndarray:
     """
     Load the alpha column from ``data/inferred_networks/<model>/inferred_edges_<short>.csv``.
 
     Returns an empty array if the file is missing or malformed.
     """
     short = Models.SHORT.get(model_name, "")
-    fp = Paths.NETWORKS / model_name / f"inferred_edges_{short}.csv"
+    fp = (
+        DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS
+        / model_name
+        / f"inferred_edges_{short}.csv"
+    )
     if not fp.exists():
         print(f"Alpha file not found: {fp}")
         return np.array([])
@@ -364,6 +396,7 @@ def plot_alpha_rmse_analysis(
     save_plot: bool = True,
     figsize: tuple = (12, 8),
     global_baseline_rmse: float | None = None,
+    dataset: str | None = None,
 ) -> None:
     """
     Alpha vs RMSE line + scatter with best-alpha marker and baseline reference.
@@ -381,7 +414,7 @@ def plot_alpha_rmse_analysis(
                               When provided it is drawn as a second dashed line
                               for absolute reference.
     """
-    alpha_values = _extract_alphas(model_name)
+    alpha_values = _extract_alphas(model_name, dataset=dataset)
     if len(alpha_values) == 0 or len(alpha_values) != len(rmse_values):
         print("Mismatch between alpha values and RMSE values — cannot plot.")
         return
@@ -456,10 +489,9 @@ def plot_alpha_rmse_analysis(
     plt.tight_layout()
 
     if save_plot:
-        full_path = f"{_plots_dir()}/alpha_rmse_{model_name}.png"
+        full_path = f"{_plots_dir(dataset)}/alpha_rmse_{model_name}.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
     improvement = (baseline_rmse - best_rmse) / baseline_rmse * 100
@@ -476,6 +508,7 @@ def plot_alpha_delta_rmse(
     save_plot: bool = True,
     figsize: tuple = (12, 8),
     delta_pct_values: list[float] | None = None,
+    dataset: str | None = None,
 ) -> None:
     """
     Signed delta RMSE scatter: positive = better than baseline (blue), negative =
@@ -495,7 +528,7 @@ def plot_alpha_delta_rmse(
                           When ``None`` the delta is derived from *baseline_rmse*
                           and *rmse_values* (both must be on the same population).
     """
-    alpha_values = _extract_alphas(model_name)
+    alpha_values = _extract_alphas(model_name, dataset=dataset)
     if len(alpha_values) == 0 or len(alpha_values) != len(rmse_values):
         print("Mismatch between alpha values and RMSE values — cannot plot.")
         return
@@ -527,16 +560,16 @@ def plot_alpha_delta_rmse(
     plt.tight_layout()
 
     if save_plot:
-        full_path = f"{_plots_dir()}/alpha_delta_rmse_{model_name}.png"
+        full_path = f"{_plots_dir(dataset)}/alpha_delta_rmse_{model_name}.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
 def plot_alpha_edges(
     save_plot: bool = True,
     figsize: tuple = (18, 5),
+    dataset: str | None = None,
 ) -> None:
     """
     Three-subplot figure: one subplot per diffusion model showing alpha (x-axis)
@@ -556,7 +589,11 @@ def plot_alpha_edges(
     fig.suptitle("Alpha vs Inferred Edge Count", fontsize=15, fontweight="bold", y=1.02)
 
     for ax, (model_name, short, colour) in zip(axes, _MODEL_CFG):
-        csv = Paths.NETWORKS / model_name / f"inferred_edges_{short}.csv"
+        csv = (
+            DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS
+            / model_name
+            / f"inferred_edges_{short}.csv"
+        )
         if not csv.exists():
             ax.set_title(f"{model_name.capitalize()}\n(data not found)")
             ax.axis("off")
@@ -579,10 +616,9 @@ def plot_alpha_edges(
     plt.tight_layout()
 
     if save_plot:
-        full_path = f"{_plots_dir()}/alpha_edges.png"
+        full_path = f"{_plots_dir(dataset)}/alpha_edges.png"
         plt.savefig(full_path, dpi=300, bbox_inches="tight")
         print(f"Saved: {full_path}")
-    plt.show()
     plt.close()
 
 
@@ -635,17 +671,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Show plots interactively without saving.",
     )
+    _parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Dataset name (default: uses Datasets.DEFAULT).",
+    )
     _args = _parser.parse_args()
 
     _plots = set(_args.plot)
     _do_all = "all" in _plots
     _model_list = Models.ALL if "all" in _args.models else _args.models
     _save = not _args.no_save
+    _dataset = _args.dataset
 
     # ------------------------------------------------------------------
     # Baseline search results (hyperparam / metrics / convergence plots)
     # ------------------------------------------------------------------
-    _search_json = Paths.DATA / "baseline_search_results.json"
+    _search_json = DatasetPaths(_dataset or Datasets.DEFAULT).BASELINE_RESULTS
     _search_result: dict | None = None
     if _do_all or _plots & {"hyperparam", "metrics", "convergence", "heatmap"}:
         if _search_json.exists():
@@ -706,7 +748,11 @@ if __name__ == "__main__":
     if _do_all or _plots & {"alpha-rmse", "delta-rmse"}:
         for _model_name in _model_list:
             _short = Models.SHORT[_model_name]
-            _csv = Paths.NETWORKS / _model_name / f"inferred_edges_{_short}.csv"
+            _csv = (
+                DatasetPaths(_dataset or Datasets.DEFAULT).NETWORKS
+                / _model_name
+                / f"inferred_edges_{_short}.csv"
+            )
 
             if not _csv.exists():
                 print(f"Skipping {_model_name}: {_csv} not found.")
@@ -772,6 +818,7 @@ if __name__ == "__main__":
                     rmse_std_values=_std,
                     save_plot=_save,
                     global_baseline_rmse=_global_baseline_rmse,
+                    dataset=_dataset,
                 )
             if _do_all or "delta-rmse" in _plots:
                 plot_alpha_delta_rmse(
@@ -780,10 +827,11 @@ if __name__ == "__main__":
                     baseline_rmse=_baseline,
                     save_plot=_save,
                     delta_pct_values=_delta_pct,
+                    dataset=_dataset,
                 )
 
     if _do_all or "alpha-edges" in _plots:
         print("\n--- Alpha vs Inferred Edges (all models) ---")
-        plot_alpha_edges(save_plot=_save)
+        plot_alpha_edges(save_plot=_save, dataset=_dataset)
 
     sys.exit(0)
