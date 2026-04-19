@@ -246,7 +246,7 @@ def compute_shap_for_network(
     per_user_pred = test_filtered.groupby("UserId")["_pred"].mean()
 
     # --- Align features and predictions --------------------------------------
-    common_users = sorted(per_user_pred.index & scaled_features.index)
+    common_users = sorted(per_user_pred.index.intersection(scaled_features.index))
     if len(common_users) < min_users:
         return None
 
