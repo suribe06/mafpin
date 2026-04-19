@@ -111,8 +111,14 @@ def plot_hyperparameter_search_results(
         axes[1, 0].scatter(rmse_values, mae_values, alpha=0.6, c="mediumpurple")
         axes[1, 0].set(xlabel="RMSE", ylabel="MAE", title="MAE vs RMSE")
     else:
-        axes[1, 0].text(0.5, 0.5, "MAE not available", ha="center", va="center",
-                        transform=axes[1, 0].transAxes)
+        axes[1, 0].text(
+            0.5,
+            0.5,
+            "MAE not available",
+            ha="center",
+            va="center",
+            transform=axes[1, 0].transAxes,
+        )
         axes[1, 0].set_title("MAE vs RMSE")
     axes[1, 0].grid(alpha=0.3)
 
@@ -121,8 +127,14 @@ def plot_hyperparameter_search_results(
         axes[1, 1].scatter(rmse_values, r2_values, alpha=0.6, c="darkorange")
         axes[1, 1].set(xlabel="RMSE", ylabel="R²", title="R² vs RMSE")
     else:
-        axes[1, 1].text(0.5, 0.5, "R² not available", ha="center", va="center",
-                        transform=axes[1, 1].transAxes)
+        axes[1, 1].text(
+            0.5,
+            0.5,
+            "R² not available",
+            ha="center",
+            va="center",
+            transform=axes[1, 1].transAxes,
+        )
         axes[1, 1].set_title("R² vs RMSE")
     axes[1, 1].grid(alpha=0.3)
 
@@ -332,9 +344,7 @@ def plot_metrics_comparison(
     for ax, (label, vals, colour) in zip(axes, metrics_data):
         ax.hist(vals, bins=20, alpha=0.7, color=colour, edgecolor="black")
         ref_val = vals[best_idx] if label == "RMSE" else vals[0]
-        ax.axvline(
-            ref_val, color="red", linestyle="--", label=f"Best: {ref_val:.4f}"
-        )
+        ax.axvline(ref_val, color="red", linestyle="--", label=f"Best: {ref_val:.4f}")
         ax.set(xlabel=label, ylabel="Frequency", title=f"{label} Distribution")
         ax.legend(fontsize=9)
         ax.grid(alpha=0.3)
