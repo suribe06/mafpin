@@ -57,8 +57,12 @@ def _plots_dir(dataset: str | None = None) -> str:
     return str(out)
 
 
-def _load_results(results_path: str | Path | None) -> dict:
-    path = Path(results_path) if results_path else _SHAP_RESULTS_PATH
+def _load_results(results_path: str | Path | None, dataset: str | None = None) -> dict:
+    path = (
+        Path(results_path)
+        if results_path
+        else DatasetPaths(dataset or Datasets.DEFAULT).SHAP_RESULTS
+    )
     if not path.exists():
         raise FileNotFoundError(
             f"SHAP results not found at {path}. "
@@ -89,7 +93,7 @@ def plot_shap_importance_comparison(
                       default location under ``data/``.
         save:         When ``True``, write the figure to ``plots/shap/``.
     """
-    results = _load_results(results_path)
+    results = _load_results(results_path, dataset=dataset)
 
     models = list(results.keys())
     feature_names = results[models[0]]["feature_names"]
@@ -171,7 +175,7 @@ def plot_shap_beeswarm(
         save:             When ``True``, write to ``plots/shap/``.
         max_display_pts:  Maximum rows to plot (down-sampled when exceeded).
     """
-    results = _load_results(results_path)
+    results = _load_results(results_path, dataset=dataset)
 
     if model_name not in results:
         raise ValueError(
@@ -279,7 +283,7 @@ def plot_all_shap(
         results_path=results_path, save=save, dataset=dataset
     )
 
-    results = _load_results(results_path)
+    results = _load_results(results_path, dataset=dataset)
     for model_name in results:
         print(f"[shap_plots] Generating beeswarm for '{model_name}'…")
         plot_shap_beeswarm(

@@ -433,7 +433,7 @@ def calculate_centrality_for_all_models(
             if calculate_centrality_for_network(
                 nf,
                 communities_dir=dp.COMMUNITIES,
-                centrality_dir=dp.CENTRALITY,
+                centrality_dir=dp.CENTRALITY / model_name,
             ):
                 success_count += 1
 

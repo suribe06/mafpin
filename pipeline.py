@@ -277,7 +277,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
         from recommender.baseline import save_search_results as _save_baseline
 
         baseline_search["global_test_rmse"] = baseline_metrics["rmse"]
-        _save_baseline(baseline_search)
+        _save_baseline(baseline_search, path=dp.BASELINE_RESULTS)
 
         # Enhanced evaluation — pass pre-tuned enhanced params.
         run_network_evaluation(
@@ -383,6 +383,7 @@ def _run_shap(args: argparse.Namespace) -> None:
             include_communities=args.include_communities,
             seed=args.seed,
             model_names=[args.model] if args.model else None,
+            params_path=dp.ENHANCED_RESULTS,
             dataset=args.dataset,
         )
         save_shap_results(results, path=dp.SHAP_RESULTS)
