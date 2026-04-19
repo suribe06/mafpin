@@ -174,7 +174,12 @@ def main() -> None:
 
     cfg = Datasets.CONFIG[args.dataset]
     csv_path = Datasets.ROOT / args.dataset / cfg["file"]
-    cols: list[int] = [cfg["col_user"], cfg["col_item"], cfg["col_rating"], cfg["col_time"]]
+    cols: list[int] = [
+        cfg["col_user"],
+        cfg["col_item"],
+        cfg["col_rating"],
+        cfg["col_time"],
+    ]
     df = pd.read_csv(
         csv_path,
         sep=cfg["sep"],

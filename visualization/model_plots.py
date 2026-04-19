@@ -349,7 +349,11 @@ def _extract_alphas(model_name: str, dataset: str | None = None) -> np.ndarray:
     Returns an empty array if the file is missing or malformed.
     """
     short = Models.SHORT.get(model_name, "")
-    fp = DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS / model_name / f"inferred_edges_{short}.csv"
+    fp = (
+        DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS
+        / model_name
+        / f"inferred_edges_{short}.csv"
+    )
     if not fp.exists():
         print(f"Alpha file not found: {fp}")
         return np.array([])
@@ -563,7 +567,11 @@ def plot_alpha_edges(
     fig.suptitle("Alpha vs Inferred Edge Count", fontsize=15, fontweight="bold", y=1.02)
 
     for ax, (model_name, short, colour) in zip(axes, _MODEL_CFG):
-        csv = DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS / model_name / f"inferred_edges_{short}.csv"
+        csv = (
+            DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS
+            / model_name
+            / f"inferred_edges_{short}.csv"
+        )
         if not csv.exists():
             ax.set_title(f"{model_name.capitalize()}\n(data not found)")
             ax.axis("off")
@@ -719,7 +727,11 @@ if __name__ == "__main__":
     if _do_all or _plots & {"alpha-rmse", "delta-rmse"}:
         for _model_name in _model_list:
             _short = Models.SHORT[_model_name]
-            _csv = DatasetPaths(_dataset or Datasets.DEFAULT).NETWORKS / _model_name / f"inferred_edges_{_short}.csv"
+            _csv = (
+                DatasetPaths(_dataset or Datasets.DEFAULT).NETWORKS
+                / _model_name
+                / f"inferred_edges_{_short}.csv"
+            )
 
             if not _csv.exists():
                 print(f"Skipping {_model_name}: {_csv} not found.")

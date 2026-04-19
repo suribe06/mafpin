@@ -120,7 +120,9 @@ def _available_indices(model_name: str, dataset: str | None = None) -> list[int]
     )
 
 
-def _sample_indices(model_name: str, k: int, rng: random.Random, dataset: str | None = None) -> list[int]:
+def _sample_indices(
+    model_name: str, k: int, rng: random.Random, dataset: str | None = None
+) -> list[int]:
     """Sample up to *k* network indices without replacement."""
     available = _available_indices(model_name, dataset=dataset)
     if not available:

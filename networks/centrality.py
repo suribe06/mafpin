@@ -385,7 +385,10 @@ def calculate_centrality_for_network(
         )
 
     save_centrality_results(
-        user_ids, metrics, model_name, network_id,
+        user_ids,
+        metrics,
+        model_name,
+        network_id,
         output_dir=centrality_dir,
         pagerank_lph=pr_lph,
     )
@@ -491,7 +494,9 @@ def main() -> None:
             sys.exit(1)
         network_files = sorted(model_dir.glob("inferred-network-*.txt"))
         success_count = sum(
-            1 for nf in network_files if calculate_centrality_for_network(
+            1
+            for nf in network_files
+            if calculate_centrality_for_network(
                 nf,
                 communities_dir=dp.COMMUNITIES,
                 centrality_dir=dp.CENTRALITY,

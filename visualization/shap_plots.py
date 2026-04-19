@@ -275,12 +275,16 @@ def plot_all_shap(
         save:         When ``True``, write figures to ``plots/shap/``.
     """
     print("[shap_plots] Generating SHAP importance comparison chart…")
-    plot_shap_importance_comparison(results_path=results_path, save=save, dataset=dataset)
+    plot_shap_importance_comparison(
+        results_path=results_path, save=save, dataset=dataset
+    )
 
     results = _load_results(results_path)
     for model_name in results:
         print(f"[shap_plots] Generating beeswarm for '{model_name}'…")
-        plot_shap_beeswarm(model_name, results_path=results_path, save=save, dataset=dataset)
+        plot_shap_beeswarm(
+            model_name, results_path=results_path, save=save, dataset=dataset
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -182,7 +182,9 @@ def plot_cascades_timeline(
     """
     from pathlib import Path as _Path
 
-    path = _Path(cascade_file) if cascade_file else DatasetPaths(Datasets.DEFAULT).CASCADES
+    path = (
+        _Path(cascade_file) if cascade_file else DatasetPaths(Datasets.DEFAULT).CASCADES
+    )
     if not path.exists():
         print(f"Cascade file not found: {path}")
         return

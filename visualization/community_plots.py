@@ -79,7 +79,11 @@ def _load_centrality_csv(
 
 def _load_alpha_csv(model_name: str, dataset: str | None = None) -> pd.DataFrame | None:
     short = Models.SHORT[model_name]
-    fp = DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS / model_name / f"inferred_edges_{short}.csv"
+    fp = (
+        DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS
+        / model_name
+        / f"inferred_edges_{short}.csv"
+    )
     if not fp.exists():
         return None
     df = pd.read_csv(fp, sep="|").reset_index(drop=True)
@@ -284,7 +288,9 @@ def plot_num_communities_dist(
 # ---------------------------------------------------------------------------
 
 
-def plot_alpha_vs_lph(n_networks: int = 100, save: bool = True, dataset: str | None = None) -> None:
+def plot_alpha_vs_lph(
+    n_networks: int = 100, save: bool = True, dataset: str | None = None
+) -> None:
     """
     3-row × 2-column grid showing how the alpha parameter affects LPH.
 
@@ -352,7 +358,9 @@ def plot_alpha_vs_lph(n_networks: int = 100, save: bool = True, dataset: str | N
 # ---------------------------------------------------------------------------
 
 
-def plot_alpha_vs_num_communities(n_networks: int = 100, save: bool = True, dataset: str | None = None) -> None:
+def plot_alpha_vs_num_communities(
+    n_networks: int = 100, save: bool = True, dataset: str | None = None
+) -> None:
     """
     Three-panel column showing alpha (log x-axis) vs mean community count.
 
@@ -468,7 +476,8 @@ def plot_lph_vs_centrality(
 
     if save:
         path = (
-            f"{_plots_dir(dataset)}/" f"lph_vs_centrality_{model_name}_{network_index:03d}.png"
+            f"{_plots_dir(dataset)}/"
+            f"lph_vs_centrality_{model_name}_{network_index:03d}.png"
         )
         plt.savefig(path, dpi=150)
         print(f"Saved: {path}")

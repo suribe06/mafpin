@@ -96,8 +96,9 @@ def _run_cascade(args: argparse.Namespace) -> None:
 
 def _run_delta(_args: argparse.Namespace) -> None:
     from networks.delta import compute_median_delta, alpha_centers_from_delta
+    from config import DatasetPaths
 
-    delta = compute_median_delta()
+    delta = compute_median_delta(DatasetPaths(_args.dataset).CASCADES)
     print(f"Median delta: {delta:.4f} days")
     centers = alpha_centers_from_delta(delta)
     for model, info in centers.items():
@@ -113,11 +114,13 @@ def _run_inference(args: argparse.Namespace) -> None:
     )
     from config import DatasetPaths, Datasets
 
-    dp = DatasetPaths(args.dataset if hasattr(args, 'dataset') and args.dataset else Datasets.DEFAULT)
+    dp = DatasetPaths(
+        args.dataset if hasattr(args, "dataset") and args.dataset else Datasets.DEFAULT
+    )
     model = args.model
     model_index_map = {"exponential": 0, "powerlaw": 1, "rayleigh": 2}
     if model:
-        _ = compute_median_delta()  # kept for reference
+        _ = compute_median_delta(dp.CASCADES)  # kept for reference
         _ = alpha_centers_from_delta(_)  # kept for reference
         _ = log_alpha_grid  # kept for reference
         infer_networks(
@@ -141,13 +144,17 @@ def _run_inference(args: argparse.Namespace) -> None:
 def _run_centrality(args: argparse.Namespace) -> None:
     from networks.centrality import calculate_centrality_for_all_models
 
-    calculate_centrality_for_all_models(dataset=args.dataset if hasattr(args, 'dataset') else None)
+    calculate_centrality_for_all_models(
+        dataset=args.dataset if hasattr(args, "dataset") else None
+    )
 
 
 def _run_communities(args: argparse.Namespace) -> None:
     from networks.communities import calculate_communities_for_all_models
 
-    calculate_communities_for_all_models(dataset=args.dataset if hasattr(args, 'dataset') else None)
+    calculate_communities_for_all_models(
+        dataset=args.dataset if hasattr(args, "dataset") else None
+    )
 
 
 def _run_recommend(args: argparse.Namespace) -> None:
@@ -186,7 +193,9 @@ def _run_recommend(args: argparse.Namespace) -> None:
         sample_model_name = None
         for _mn in Models.ALL:
             sample_features = load_network_features(
-                _mn, 0, include_communities=args.include_communities,
+                _mn,
+                0,
+                include_communities=args.include_communities,
                 dataset=args.dataset,
             )
             if sample_features is not None:
@@ -216,9 +225,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
                 enhanced_search = search_enhanced_params(
                     train_df, sample_features, n_trials=50, n_splits=3
                 )
-            save_enhanced_search_results(
-                enhanced_search, path=dp.ENHANCED_RESULTS
-            )
+            save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
             best_k_e = enhanced_search["best_params"]["k"]
             best_lambda_e = enhanced_search["best_params"]["lambda_reg"]
             best_w_main = enhanced_search["best_params"]["w_main"]
@@ -323,7 +330,9 @@ def _run_hypertune(args: argparse.Namespace) -> None:
         sample_model_name = None
         for _mn in Models.ALL:
             sample_features = load_network_features(
-                _mn, 0, include_communities=args.include_communities,
+                _mn,
+                0,
+                include_communities=args.include_communities,
                 dataset=args.dataset,
             )
             if sample_features is not None:

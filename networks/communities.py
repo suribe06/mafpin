@@ -327,6 +327,7 @@ def calculate_communities_for_network(
     algorithm: str = "demon",
     epsilon: float = Defaults.EPSILON,
     min_community: int = Defaults.MIN_COM,
+    output_dir: str | Path | None = None,
 ) -> bool:
     """
     Detect communities and compute LPH for a single network file.
@@ -367,7 +368,15 @@ def calculate_communities_for_network(
     lph = compute_local_pluralistic_homophily(G, membership)
     lph_paper = compute_lph_paper(G, membership)
 
-    save_community_results(user_ids, lph, lph_paper, membership, model_name, network_id)
+    save_community_results(
+        user_ids,
+        lph,
+        lph_paper,
+        membership,
+        model_name,
+        network_id,
+        output_dir=output_dir,
+    )
     return True
 
 
@@ -502,8 +511,11 @@ def main() -> None:
             sys.exit(1)
         network_files = sorted(model_dir.glob("inferred-network-*.txt"))
         success_count = sum(
-            1 for nf in network_files if calculate_communities_for_network(
-                nf, **kwargs,
+            1
+            for nf in network_files
+            if calculate_communities_for_network(
+                nf,
+                **kwargs,
                 output_dir=dp.COMMUNITIES / args.model,
             )
         )
