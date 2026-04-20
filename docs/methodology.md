@@ -34,7 +34,23 @@ The cascade **header** (self-loop lines that declare node existence) lists the f
 
 Cascades with only one user are skipped; they carry no diffusion signal.
 
-Source: `networks/cascades.py`, `config.Split`, `config.Datasets`
+### 1.1 Cascade User Statistics
+
+After the cascade file is written, a second pass computes three **per-user temporal influence statistics** from the cascade timeline.  These are saved once per dataset to `data/<dataset>/cascade_user_stats.csv` and later merged into the Enhanced CMF side-information matrix.
+
+For each user $u$ appearing in cascade $c$, let $\text{pos}(u, c)$ be the **1-indexed temporal rank** of $u$ inside cascade $c$ (rank 1 = seed, i.e. earliest adopter in that item's adoption sequence).  Let $B_u$ be the set of cascades that contain $u$.
+
+| Column | Definition | Interpretation |
+| --- | --- | --- |
+| `cascade_breadth` | $\|B_u\|$ — number of distinct cascades user $u$ participates in | Activity level; how broadly a user rates across items |
+| `mean_cascade_position` | $\frac{1}{\|B_u\|} \sum_{c \in B_u} \text{pos}(u, c)$ | Average adoption rank; lower = earlier adopter on average |
+| `min_cascade_position` | $\min_{c \in B_u} \text{pos}(u, c)$ | Best (earliest) rank ever observed; `1` means the user was the seed in at least one cascade |
+
+**Reliability threshold**: `mean_cascade_position` and `min_cascade_position` are set to `NaN` for users who appear in fewer than 5 cascades, because positional estimates from very few observations are unreliable.  The `NaN` values are replaced with `0.0` when the feature matrix is assembled by `load_network_features()`.
+
+**Alignment with centrality IDs**: The compact `UserId` keys used in `cascade_user_stats.csv` are derived by sorting all node IDs declared in the cascade header and assigning 0-based indices — the same logic as `_build_mapper` in `networks/network_io.py`.  This ensures a direct join with the centrality-metric CSVs without any re-mapping.
+
+Source: `networks/cascades.py :: compute_cascade_user_stats`, `config.DatasetPaths.CASCADE_USER_STATS`
 
 ---
 
