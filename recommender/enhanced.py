@@ -82,21 +82,27 @@ def load_network_features(
     model_name: str,
     network_index: int,
     include_communities: bool = True,
+    include_cascade_stats: bool = True,
     dataset: str | None = None,
 ) -> pd.DataFrame | None:
     """
-    Load centrality (and optionally community) features for one inferred network.
+    Load centrality (and optionally community and cascade-stats) features for
+    one inferred network.
 
     Returns a raw (unscaled) DataFrame indexed by ``UserId``.  Scaling is
     intentionally deferred to :func:`evaluate_cmf_with_user_attributes` where
     it is fitted on training users only, preventing test-set leakage (M-2).
 
     Args:
-        model_name:          Diffusion model name (exponential / powerlaw / rayleigh).
-        network_index:       Zero-based network index (selects the CSV by filename).
-        include_communities: If ``True``, merge LPH and ``num_communities`` from the
-                             corresponding community CSV.
-        dataset:             Dataset name.  Defaults to ``Datasets.DEFAULT``.
+        model_name:             Diffusion model name (exponential / powerlaw / rayleigh).
+        network_index:          Zero-based network index (selects the CSV by filename).
+        include_communities:    If ``True``, merge LPH and ``num_communities`` from the
+                                corresponding community CSV.
+        include_cascade_stats:  If ``True``, merge ``mean_cascade_position``,
+                                ``min_cascade_position``, and ``cascade_breadth``
+                                from ``cascade_user_stats.csv``.  The file is
+                                shared across all networks for the same dataset.
+        dataset:                Dataset name.  Defaults to ``Datasets.DEFAULT``.
 
     Returns:
         Raw feature DataFrame indexed by ``UserId``, or ``None`` if the file is
@@ -154,6 +160,25 @@ def load_network_features(
                 df = df.merge(
                     com_raw[["UserId"] + binary_cols], on="UserId", how="left"
                 )
+
+    if include_cascade_stats:
+        cascade_stats_csv = dp.CASCADE_USER_STATS
+        if cascade_stats_csv.exists():
+            cascade_stats = pd.read_csv(cascade_stats_csv)
+            df = df.merge(
+                cascade_stats[
+                    [
+                        "UserId",
+                        "mean_cascade_position",
+                        "min_cascade_position",
+                        "cascade_breadth",
+                    ]
+                ],
+                on="UserId",
+                how="left",
+            )
+        # If the file is absent (cascade step not yet run) we silently skip —
+        # the feature matrix remains valid without cascade columns.
 
     return df.set_index("UserId").fillna(0.0)
 
