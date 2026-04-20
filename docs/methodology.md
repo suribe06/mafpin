@@ -68,12 +68,17 @@ $$m = \sqrt{\frac{2 \ln 2}{\alpha}} \quad \Rightarrow \quad \alpha_{\text{center
 
 #### Power-law
 
-$$m = 2^{1/\alpha}\,\Delta_{\min} \quad \Rightarrow \quad \alpha = \frac{\ln 2}{\ln(\tilde{\Delta}/\Delta_{\min})}$$
+The power-law (Pareto) transmission density used by NetInf is:
 
-However, for typical datasets this value falls below 1, while NetInf only supports $\alpha \geq 1$.
-Therefore, in practice a fixed linear grid is used:
+$$f(\Delta t;\,\alpha) = (\alpha - 1)\cdot \Delta t^{-\alpha}, \quad \Delta t \geq 1, \quad \alpha > 1$$
 
-$$\alpha \in [1,\ 3] \quad \text{or} \quad [1,\ 5]$$
+Unlike the exponential and Rayleigh parameters, **α is a dimensionless shape exponent** — it is not a rate in any time unit, so it does not scale with whether timestamps are stored in seconds, hours, or days. For this reason no data-driven centre is derived from the median Δ; instead a fixed linear sweep is used:
+
+$$\alpha \in [1.1,\ 5.0]$$
+
+**Why the lower bound is 1.1, not 1.0:** At α = 1 the integrand becomes $t^{-1}$, whose integral $\int_1^{\infty} t^{-1}\,dt$ diverges — the distribution is non-normalizable and the likelihood is undefined. NetInf may accept α = 1 without raising an error, but the result is numerically meaningless. The bound 1.1 enforces a valid density with a finite mean (mean exists when α > 2; variance exists when α > 3).
+
+**Why the upper bound is 5.0:** Real social-influence cascades rarely exhibit exponents above 3–4. The paper's synthetic-network experiments (Gomez-Rodriguez et al. 2011, Section 5.2) use α ∈ {1.5, 2.0, 2.5}. Sweeping to 5.0 gives comfortable margin while keeping runtime tractable.
 
 ### 2.3 Log-Scale Grid (Exponential & Rayleigh)
 
