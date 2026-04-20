@@ -120,7 +120,8 @@ class Defaults:
     # Network inference
     N_ALPHAS = 100  # number of alpha values in the log-spaced grid
     RANGE_R = 100.0  # multiplicative range factor: grid spans [center/r, center*r]
-    MAX_ITER = 5000  # maximum NetInf iterations per network
+    MAX_ITER = 5000  # fallback k (edges) when k_avg_degree is not used
+    K_AVG_DEGREE = 2  # k = avg_degree × N  (paper: real nets ≈ 1–4 out-edges per node)
 
     # Community detection
     EPSILON = 0.25  # Demon merge threshold (lower → more communities)
@@ -159,7 +160,7 @@ class Split:
 
     TEST_SIZE = 0.2  # fraction of ratings held out for testing
     RANDOM_STATE = 42  # seed for train_test_split (random strategy only)
-    STRATEGY = "random"  # "random" or "temporal"
+    STRATEGY = "temporal"  # "random" or "temporal"
 
 
 # ---------------------------------------------------------------------------
