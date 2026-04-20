@@ -1,13 +1,13 @@
 """
 Centrality metrics computation using SNAP.
 
-For each inferred network (a NetInf ``.txt`` output file), seven node-level
+For each inferred network (a NetInf ``.txt`` output file), eleven node-level
 centrality measures are computed and saved as a CSV file.
 
 Centrality measures
 -------------------
-degree, betweenness, closeness, eigenvector, pagerank, clustering_coefficient,
-eccentricity
+degree, in_degree, out_degree, betweenness, closeness, eigenvector,
+pagerank, clustering_coefficient, eccentricity, hub_score, auth_score
 
 Each measure is computed with the SNAP library (snap-stanford).  Because SNAP
 returns node-keyed dictionaries via its own container types, the results are
@@ -21,8 +21,9 @@ normalised LPH scores from Barraza et al. (2025).
 Outputs saved in ``data/<dataset>/centrality_metrics/<model>/``:
 
 * ``centrality_metrics_<model>_<index>.csv``
-  Columns: ``UserId, degree, betweenness, closeness, eigenvector,
-  pagerank, clustering, eccentricity[, pagerank_lph]``
+  Columns: ``UserId, degree, in_degree, out_degree, betweenness, closeness,
+  eigenvector, pagerank, clustering, eccentricity, hub_score, auth_score
+  [, pagerank_lph]``
 
   ``pagerank_lph`` is present only when the corresponding community CSV exists.
 
@@ -81,6 +82,59 @@ def calculate_degree(G) -> dict[int, float]:
     for node in G.Nodes():
         deg[node.GetId()] = float(node.GetDeg()) / denom
     return deg
+
+
+def calculate_in_degree(G) -> dict[int, float]:
+    """Normalised in-degree centrality (in_degree / (N-1)) for every node in *G*.
+
+    In a directed NetInf influence graph, in-degree counts incoming influence
+    edges — the number of users who tend to influence this node.  High
+    in-degree marks **influence sinks** (followers / late adopters).
+    """
+    n_nodes = G.GetNodes()
+    denom = max(n_nodes - 1, 1)
+    in_deg: dict[int, float] = {}
+    for node in G.Nodes():
+        in_deg[node.GetId()] = float(node.GetInDeg()) / denom
+    return in_deg
+
+
+def calculate_out_degree(G) -> dict[int, float]:
+    """Normalised out-degree centrality (out_degree / (N-1)) for every node in *G*.
+
+    In a directed NetInf influence graph, out-degree counts outgoing influence
+    edges — the number of users this node tends to influence.  High out-degree
+    marks **influence sources** (taste-makers / early adopters).
+    """
+    n_nodes = G.GetNodes()
+    denom = max(n_nodes - 1, 1)
+    out_deg: dict[int, float] = {}
+    for node in G.Nodes():
+        out_deg[node.GetId()] = float(node.GetOutDeg()) / denom
+    return out_deg
+
+
+def calculate_hits(G) -> tuple[dict[int, float], dict[int, float]]:
+    """HITS hub and authority scores via ``snap.GetHits``.
+
+    HITS (Hyperlink-Induced Topic Search, Kleinberg 1999) computes two
+    complementary scores for each node in a directed graph:
+
+    * **Hub score** — high when the node points to many authoritative nodes.
+      In a diffusion network a high-hub user propagates influence toward
+      authoritative taste-makers; hubs are *aggregators* of influence.
+    * **Authority score** — high when the node is pointed to by many high-hub
+      nodes.  In a diffusion network a high-authority user is a *canonical
+      taste-maker* whose preferences many others follow.
+
+    Returns:
+        hub_scores:   Dict mapping node_id → hub score (H).
+        auth_scores:  Dict mapping node_id → authority score (A).
+    """
+    hub_hash = snap.TIntFltH()  # type: ignore[attr-defined]
+    auth_hash = snap.TIntFltH()  # type: ignore[attr-defined]
+    snap.GetHits(G, hub_hash, auth_hash)  # type: ignore[attr-defined]
+    return _snap_hash_to_dict(hub_hash), _snap_hash_to_dict(auth_hash)
 
 
 def calculate_betweenness(G) -> dict[int, float]:
@@ -271,19 +325,24 @@ def compute_pagerank_lph(
 
 def compute_all_centrality(G) -> dict[str, dict[int, float]]:
     """
-    Compute all seven centrality measures for graph *G*.
+    Compute all centrality measures for graph *G*.
 
     Returns:
         Dict mapping metric name → {node_id: value}.
     """
+    hub_scores, auth_scores = calculate_hits(G)
     return {
         "degree": calculate_degree(G),
+        "in_degree": calculate_in_degree(G),
+        "out_degree": calculate_out_degree(G),
         "betweenness": calculate_betweenness(G),
         "closeness": calculate_closeness(G),
         "eigenvector": calculate_eigenvector(G),
         "pagerank": calculate_pagerank(G),
         "clustering": calculate_clustering(G),
         "eccentricity": calculate_eccentricity(G),
+        "hub_score": hub_scores,
+        "auth_score": auth_scores,
     }
 
 
@@ -321,12 +380,16 @@ def save_centrality_results(
         row = {
             "UserId": uid,
             "degree": metrics["degree"].get(uid, 0.0),
+            "in_degree": metrics["in_degree"].get(uid, 0.0),
+            "out_degree": metrics["out_degree"].get(uid, 0.0),
             "betweenness": metrics["betweenness"].get(uid, 0.0),
             "closeness": metrics["closeness"].get(uid, 0.0),
             "eigenvector": metrics["eigenvector"].get(uid, 0.0),
             "pagerank": metrics["pagerank"].get(uid, 0.0),
             "clustering": metrics["clustering"].get(uid, 0.0),
             "eccentricity": metrics["eccentricity"].get(uid, 0.0),
+            "hub_score": metrics["hub_score"].get(uid, 0.0),
+            "auth_score": metrics["auth_score"].get(uid, 0.0),
         }
         if pagerank_lph is not None:
             row["pagerank_lph"] = pagerank_lph.get(uid, 0.0)

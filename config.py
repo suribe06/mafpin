@@ -42,6 +42,7 @@ class DatasetPaths:
         base = Paths.DATA / dataset
         self.BASE = base
         self.CASCADES = base / "cascades.txt"
+        self.CASCADE_USER_STATS = base / "cascade_user_stats.csv"
         self.NETWORKS = base / "inferred_networks"
         self.CENTRALITY = base / "centrality_metrics"
         self.COMMUNITIES = base / "communities"
