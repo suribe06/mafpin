@@ -93,6 +93,10 @@ def _run_cascade(args: argparse.Namespace) -> None:
         output_file=DatasetPaths(ds_name).CASCADES,
     )
 
+    from networks.cascades import compute_cascade_user_stats
+
+    compute_cascade_user_stats(dataset=ds_name)
+
     from visualization.network_plots import plot_cascades_timeline
 
     plot_cascades_timeline(
