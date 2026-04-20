@@ -62,10 +62,14 @@ from config import DatasetPaths, Datasets, Models, Defaults
 from recommender.data import evaluate_single_split, split_data_single
 
 # Scaler type alias used inside the per-split loop.
+# WARNING: "normalizer" uses sklearn.preprocessing.Normalizer, which normalises
+# each *sample* (row) to unit norm, NOT each *feature* (column).  This is
+# semantically incorrect for feature scaling and should not be the first choice.
+# Prefer "standard" (StandardScaler) or "minmax" (MinMaxScaler).
 _SCALERS = {
     "standard": StandardScaler,
     "minmax": MinMaxScaler,
-    "normalizer": Normalizer,
+    "normalizer": Normalizer,  # row-normalisation — see warning above
 }
 
 
@@ -117,6 +121,36 @@ def load_network_features(
             if "lph_score" in com_raw.columns:
                 com_cols.append("lph_score")
             df = df.merge(com_raw[com_cols], on="UserId", how="left")
+
+            # Binary community-membership features: one column per community in
+            # the top-K most-populated communities.  Each column is 1 when the
+            # user belongs to that community, 0 otherwise.  This allows the CMF
+            # model to distinguish which community a user belongs to, not just
+            # how many they belong to (which is captured by num_communities).
+            if "community_ids" in com_raw.columns:
+                TOP_K_COMMUNITIES = 20  # encode at most the 20 largest communities
+                # Parse semicolon-separated lists into sets of community ids
+                parsed = (
+                    com_raw["community_ids"]
+                    .fillna("")
+                    .apply(
+                        lambda s: set(map(int, filter(None, s.split(";"))))
+                    )
+                )
+                # Count occurrences to find the most populated communities
+                from collections import Counter
+                community_counts: Counter = Counter()
+                for cids in parsed:
+                    community_counts.update(cids)
+                top_communities = [cid for cid, _ in community_counts.most_common(TOP_K_COMMUNITIES)]
+
+                # Build binary feature columns
+                for cid in top_communities:
+                    col = f"community_{cid}"
+                    com_raw[col] = parsed.apply(lambda cids, c=cid: int(c in cids))
+
+                binary_cols = [f"community_{cid}" for cid in top_communities]
+                df = df.merge(com_raw[["UserId"] + binary_cols], on="UserId", how="left")
 
     return df.set_index("UserId").fillna(0.0)
 
@@ -524,6 +558,7 @@ def run_network_evaluation(
     baseline_k: int | None = None,
     baseline_lambda: float | None = None,
     dataset: str | None = None,
+    seed: int = 42,
 ) -> dict[str, list[float]]:
     """
     Evaluate a random sample of networks for all three diffusion models.
@@ -558,6 +593,9 @@ def run_network_evaluation(
                              baseline is skipped (``rmse_baseline`` = nan).
         baseline_lambda:     L2 regularisation for the paired plain-CMF baseline.
         dataset:             Dataset name.  Defaults to ``Datasets.DEFAULT``.
+        seed:                Random seed for reproducible network sampling.
+                             Uses ``np.random.default_rng(seed)`` so results
+                             are identical across re-runs with the same seed.
 
     Returns:
         Dict mapping model name → list of mean enhanced RMSE values (one per
@@ -587,6 +625,13 @@ def run_network_evaluation(
                 f"\nSearching best hyperparameters (Optuna TPE — k, lambda_reg, "
                 f"w_main, w_user) using first {sample_model_name} network …"
             )
+            import mlflow as _mlflow_tune
+
+            if _mlflow_tune.active_run():
+                _mlflow_tune.log_param(
+                    "enhanced_search_tuning_model", sample_model_name or "unknown"
+                )
+                _mlflow_tune.log_param("enhanced_search_tuning_network_index", 0)
             enhanced_search = search_enhanced_params(
                 data, sample_features, n_trials=50, n_splits=3
             )
@@ -618,10 +663,11 @@ def run_network_evaluation(
             continue
 
         indices = list(range(len(csvs)))
+        rng = np.random.default_rng(seed)
         sampled = (
             indices[:sample_networks]
             if sample_networks >= len(indices)
-            else sorted(np.random.choice(indices, sample_networks, replace=False))
+            else sorted(rng.choice(indices, sample_networks, replace=False).tolist())
         )
 
         print(f"\n{'='*55}")

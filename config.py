@@ -148,10 +148,18 @@ class Split:
     * Cascade generation (NetInf input) sees only training interactions.
     * CMF training and feature scaling never touch held-out ratings.
     * Results are reproducible across pipeline re-runs.
+
+    ``STRATEGY`` controls the split method:
+    * ``"random"``   — shuffled split (sklearn ``train_test_split``); fast but
+      may place earlier interactions in the test set.
+    * ``"temporal"`` — last ``TEST_SIZE`` fraction of each user's interactions
+      (by timestamp) are held out; guarantees test ratings are always *later*
+      than training ratings, simulating realistic deployment.
     """
 
     TEST_SIZE = 0.2  # fraction of ratings held out for testing
-    RANDOM_STATE = 42  # seed for train_test_split — change to re-randomise
+    RANDOM_STATE = 42  # seed for train_test_split (random strategy only)
+    STRATEGY = "random"  # "random" or "temporal"
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ run_complete_example
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -168,6 +169,12 @@ def search_best_params(
         Dict with keys ``best_params`` (dict) and ``all_results``
         (list of dicts, one per combination).
     """
+    warnings.warn(
+        "search_best_params is deprecated and will be removed in a future version. "
+        "Use search_baseline_params (Optuna, 50 trials) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if param_grid is None:
         param_grid = {
             "k": stats.randint(5, 51),

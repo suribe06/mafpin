@@ -141,7 +141,7 @@ def calculate_eccentricity(G) -> dict[int, float]:
 
 
 def pagerank_custom_beta(
-    G: nx.Graph,
+    G: nx.DiGraph,
     alpha: float,
     beta: dict[int, float],
 ) -> dict[int, float]:
@@ -161,7 +161,10 @@ def pagerank_custom_beta(
     zero and the result is re-normalised to sum to 1.
 
     Args:
-        G:      Directed NetworkX graph.
+        G:      Directed NetworkX graph (``nx.DiGraph``), as returned by
+                :func:`networks.network_io.load_as_networkx`.  ``A.sum(axis=1)``
+                gives the out-degree of each node, consistent with the Newman
+                Eq. 7.18 formulation.
         alpha:  Damping factor (same role as in standard PageRank).
         beta:   Mapping node_id → intrinsic centrality value.  Nodes missing
                 from the dict receive ``(1 − alpha) / n`` as default.
@@ -372,6 +375,13 @@ def calculate_centrality_for_network(
 
     print(f"Processing {network_file.name} (model={model_name}, id={network_id})")
     G, user_ids = load_as_snap(network_file)
+
+    # Guard: skip degenerate (edgeless) networks — centrality on an edgeless
+    # graph produces all-zero features that dilute the side-information signal.
+    if G.GetEdges() == 0:
+        print(f"  Warning: no edges in {network_file.name}, skipping.")
+        return False
+
     metrics = compute_all_centrality(G)
 
     pr_lph = compute_pagerank_lph(

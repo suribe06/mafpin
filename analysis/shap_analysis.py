@@ -53,6 +53,7 @@ import pandas as pd
 import shap
 from cmfrec import CMF  # type: ignore[import-untyped]
 from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
 from config import DatasetPaths, Datasets, Models
@@ -63,14 +64,14 @@ from recommender.enhanced import load_network_features
 # Constants
 # ---------------------------------------------------------------------------
 
-_ENHANCED_PARAMS_PATH = DatasetPaths(Datasets.DEFAULT).ENHANCED_RESULTS
-_SHAP_RESULTS_PATH = DatasetPaths(Datasets.DEFAULT).SHAP_RESULTS
-_SHAP_MATRICES_DIR = DatasetPaths(Datasets.DEFAULT).SHAP_MATRICES
-
+# WARNING: "normalizer" uses sklearn.preprocessing.Normalizer, which normalises
+# each *sample* (row) to unit norm, NOT each *feature* (column).  This is
+# semantically incorrect for feature scaling and should not be the first choice.
+# Prefer "standard" (StandardScaler) or "minmax" (MinMaxScaler).
 _SCALERS = {
     "standard": StandardScaler,
     "minmax": MinMaxScaler,
-    "normalizer": Normalizer,
+    "normalizer": Normalizer,  # row-normalisation — see warning above
 }
 
 
@@ -79,13 +80,16 @@ _SCALERS = {
 # ---------------------------------------------------------------------------
 
 
-def load_enhanced_params(path: Path | None = None) -> dict:
+def load_enhanced_params(path: Path | None = None, dataset: str | None = None) -> dict:
     """
     Load the best enhanced CMF hyperparameters saved by the ``recommend`` step.
 
     Args:
-        path: Override JSON path.  Defaults to
-              ``data/enhanced_search_results.json``.
+        path:    Override JSON path.  Defaults to the dataset-specific
+                 ``enhanced_search_results.json`` resolved via
+                 :class:`~config.DatasetPaths`.
+        dataset: Dataset name used to resolve the default path when *path* is
+                 not provided.  Defaults to ``Datasets.DEFAULT``.
 
     Returns:
         Dict with keys ``k``, ``lambda_reg``, ``w_main``, ``w_user``.
@@ -93,7 +97,7 @@ def load_enhanced_params(path: Path | None = None) -> dict:
     Raises:
         FileNotFoundError: If the JSON has not been created yet.
     """
-    p = path or _ENHANCED_PARAMS_PATH
+    p = path or DatasetPaths(dataset or Datasets.DEFAULT).ENHANCED_RESULTS
     if not p.exists():
         raise FileNotFoundError(
             f"Enhanced hyperparameters not found at {p}.\n"
@@ -199,7 +203,8 @@ def compute_shap_for_network(
     transform: str = "standard",
     surrogate_n_estimators: int = 100,
     surrogate_random_state: int = 42,
-    min_users: int = 10,
+    min_users: int = 30,
+    surrogate_r2_threshold: float = 0.05,
 ) -> tuple[np.ndarray, list[str]] | None:
     """
     Train enhanced CMF on one (model, network) pair and compute SHAP values.
@@ -219,8 +224,12 @@ def compute_shap_for_network(
         transform:              Feature scaling method.
         surrogate_n_estimators: Trees in the GBT surrogate.
         surrogate_random_state: Seed for the surrogate.
-        min_users:              Minimum users required; returns ``None`` if
-                                fewer are available.
+        min_users:              Minimum users required (≥30 recommended);
+                                returns ``None`` if fewer are available.
+        surrogate_r2_threshold: Minimum held-out R² for the surrogate to be
+                                considered reliable.  Networks with a lower
+                                surrogate R² are skipped to avoid reporting
+                                SHAP values based on an overfit model.
 
     Returns:
         ``(shap_values, feature_names)`` where ``shap_values`` has shape
@@ -254,11 +263,26 @@ def compute_shap_for_network(
     y = per_user_pred.loc[common_users].values
     feature_names = list(scaled_features.columns)
 
-    # --- GBT surrogate trained on CMF predictions ----------------------------
+    # --- GBT surrogate with held-out quality check ---------------------------
+    # Fit on 80% of users, evaluate on the remaining 20% to guard against
+    # trivial overfitting when n_users is small.  Skip this network if the
+    # surrogate cannot explain even a small fraction of variance on the
+    # held-out set (R² < surrogate_r2_threshold).
     surrogate = GradientBoostingRegressor(
         n_estimators=surrogate_n_estimators,
         random_state=surrogate_random_state,
     )
+    val_split = max(1, int(0.8 * len(common_users)))
+    if val_split < len(common_users):  # enough data for a held-out set
+        surrogate.fit(X[:val_split], y[:val_split])
+        surrogate_r2 = float(r2_score(y[val_split:], surrogate.predict(X[val_split:])))
+        if surrogate_r2 < surrogate_r2_threshold:
+            print(
+                f"  surrogate R²={surrogate_r2:.3f} below threshold "
+                f"{surrogate_r2_threshold} — skipping network {network_index:03d}."
+            )
+            return None
+    # Refit on full data before computing SHAP values
     surrogate.fit(X, y)
 
     # TreeSHAP: exact, O(n_trees * n_features), fast
@@ -312,7 +336,7 @@ def run_shap_analysis(
                 "network_indices": list[int],
             }
     """
-    params = load_enhanced_params(params_path)
+    params = load_enhanced_params(params_path, dataset=dataset)
     _, train_df, test_df = load_and_split_dataset(dataset=dataset)
     dp = DatasetPaths(dataset or Datasets.DEFAULT)
 
@@ -404,16 +428,22 @@ def run_shap_analysis(
 # ---------------------------------------------------------------------------
 
 
-def save_shap_results(results: dict, path: Path | None = None) -> None:
+def save_shap_results(
+    results: dict,
+    path: Path | None = None,
+    dataset: str | None = None,
+) -> None:
     """
     Save *results* from :func:`run_shap_analysis` to a JSON file.
 
     Args:
         results: Output of :func:`run_shap_analysis`.
-        path:    Override destination.  Defaults to
-                 ``data/shap_results.json``.
+        path:    Override destination.  Defaults to the dataset-specific
+                 ``shap_results.json`` resolved via :class:`~config.DatasetPaths`.
+        dataset: Dataset name used to resolve the default path when *path* is
+                 not provided.  Defaults to ``Datasets.DEFAULT``.
     """
-    dest = path or _SHAP_RESULTS_PATH
+    dest = path or DatasetPaths(dataset or Datasets.DEFAULT).SHAP_RESULTS
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, "w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)

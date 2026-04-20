@@ -85,6 +85,13 @@ def generate_cascades_from_df(
     num_items = interactions["ItemId"].nunique()
     print(f"Found {num_items} unique items and {num_users} unique users")
 
+    # Fixed user-ID offset that keeps item and user namespaces disjoint in the
+    # NetInf node namespace.  A fixed constant (rather than num_items) is
+    # required so that the mapping is stable across datasets and across train /
+    # test subsets that may have different numbers of unique items — which would
+    # silently shift the user-ID range and break any subsequent join on UserId.
+    USER_ID_OFFSET = 1_000_000
+
     # Build the user mapping over the FULL user-ID space when provided.
     # This guarantees that cascade node IDs are consistent with the
     # LabelEncoder-assigned IDs used by the recommender (C-3 fix).
@@ -96,13 +103,11 @@ def generate_cascades_from_df(
     num_users_total = len(users_for_mapping)
 
     # Map original IDs to consecutive integers.
-    # Users are offset past items so that item and user IDs are disjoint in
-    # the NetInf node namespace.
     item_mapper = dict(zip(np.unique(interactions["ItemId"]), range(int(num_items))))
     user_mapper = dict(
         zip(
             users_for_mapping,
-            range(int(num_items), int(num_items) + num_users_total),
+            range(USER_ID_OFFSET, USER_ID_OFFSET + num_users_total),
         )
     )
 
