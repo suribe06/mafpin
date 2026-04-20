@@ -59,7 +59,7 @@ from cmfrec import CMF  # type: ignore[import-untyped]
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
 from config import DatasetPaths, Datasets, Models, Defaults
-from recommender.data import evaluate_single_split, split_data_single
+from recommender.data import evaluate_ranking, evaluate_single_split, split_data_single
 
 # Scaler type alias used inside the per-split loop.
 # WARNING: "normalizer" uses sklearn.preprocessing.Normalizer, which normalises
@@ -133,16 +133,17 @@ def load_network_features(
                 parsed = (
                     com_raw["community_ids"]
                     .fillna("")
-                    .apply(
-                        lambda s: set(map(int, filter(None, s.split(";"))))
-                    )
+                    .apply(lambda s: set(map(int, filter(None, s.split(";")))))
                 )
                 # Count occurrences to find the most populated communities
                 from collections import Counter
+
                 community_counts: Counter = Counter()
                 for cids in parsed:
                     community_counts.update(cids)
-                top_communities = [cid for cid, _ in community_counts.most_common(TOP_K_COMMUNITIES)]
+                top_communities = [
+                    cid for cid, _ in community_counts.most_common(TOP_K_COMMUNITIES)
+                ]
 
                 # Build binary feature columns
                 for cid in top_communities:
@@ -150,7 +151,9 @@ def load_network_features(
                     com_raw[col] = parsed.apply(lambda cids, c=cid: int(c in cids))
 
                 binary_cols = [f"community_{cid}" for cid in top_communities]
-                df = df.merge(com_raw[["UserId"] + binary_cols], on="UserId", how="left")
+                df = df.merge(
+                    com_raw[["UserId"] + binary_cols], on="UserId", how="left"
+                )
 
     return df.set_index("UserId").fillna(0.0)
 
@@ -172,6 +175,8 @@ def evaluate_cmf_with_user_attributes(
     transform: str = "standard",
     baseline_k: int | None = None,
     baseline_lambda: float | None = None,
+    compute_ranking: bool = False,
+    ranking_k: int = 10,
 ) -> list[dict]:
     """
     Evaluate enhanced CMF via repeated random train/test splits.
@@ -204,10 +209,17 @@ def evaluate_cmf_with_user_attributes(
                           baseline is skipped and ``rmse_baseline`` is ``nan``.
         baseline_lambda:  L2 regularisation for the paired baseline.  Same origin
                           as *baseline_k*.
+        compute_ranking:  When ``True``, compute NDCG@K, Precision@K, Recall@K,
+                          and MRR via :func:`recommender.data.evaluate_ranking`
+                          and include them in each result dict.  Set to ``False``
+                          (default) during hyperparameter search to reduce cost.
+        ranking_k:        Cut-off for rank-based metrics.  Defaults to 10.
 
     Returns:
         List of per-split result dicts with keys ``rmse_enhanced``,
-        ``rmse_baseline``, and ``improvement`` (baseline − enhanced).
+        ``rmse_baseline``, ``improvement`` (baseline − enhanced), and
+        (when *compute_ranking* is ``True``) ``ndcg_at_k``, ``precision_at_k``,
+        ``recall_at_k``, ``mrr``.
     """
     if transform not in _SCALERS:
         raise ValueError(
@@ -275,13 +287,17 @@ def evaluate_cmf_with_user_attributes(
         else:
             baseline_rmse = float("nan")
 
-        results.append(
-            {
-                "rmse_enhanced": enhanced_rmse,
-                "rmse_baseline": baseline_rmse,
-                "improvement": baseline_rmse - enhanced_rmse,
-            }
-        )
+        result: dict = {
+            "rmse_enhanced": enhanced_rmse,
+            "rmse_baseline": baseline_rmse,
+            "improvement": baseline_rmse - enhanced_rmse,
+        }
+
+        if compute_ranking:
+            ranking = evaluate_ranking(enhanced_model, train_df, test_df, k=ranking_k)
+            result.update(ranking)
+
+        results.append(result)
 
     return results
 
@@ -450,6 +466,8 @@ def evaluate_single_network(
     n_splits: int = 5,
     baseline_k: int | None = None,
     baseline_lambda: float | None = None,
+    compute_ranking: bool = False,
+    ranking_k: int = 10,
     dataset: str | None = None,
 ) -> list[dict]:
     """
@@ -494,6 +512,8 @@ def evaluate_single_network(
         transform=transform,
         baseline_k=baseline_k,
         baseline_lambda=baseline_lambda,
+        compute_ranking=compute_ranking,
+        ranking_k=ranking_k,
     )
 
 
@@ -521,7 +541,13 @@ def _save_rmses(
         return
 
     df = pd.read_csv(results_file, sep="|")
-    for col in ("rmse_mean", "rmse_std", "baseline_rmse_mean", "improvement_pct"):
+    _ranking_cols = ("ndcg_at_k", "precision_at_k", "recall_at_k", "mrr")
+    for col in (
+        "rmse_mean",
+        "rmse_std",
+        "baseline_rmse_mean",
+        "improvement_pct",
+    ) + _ranking_cols:
         if col not in df.columns:
             df[col] = np.nan
 
@@ -537,6 +563,13 @@ def _save_rmses(
             df.loc[network_index, "improvement_pct"] = (
                 (mean_baseline - mean_enhanced) / mean_baseline
             ) * 100.0
+
+        # Ranking metrics (present only when compute_ranking=True was used)
+        for col in _ranking_cols:
+            col_vals = [r[col] for r in split_results if col in r]
+            if col_vals:
+                df.loc[network_index, col] = float(np.mean(col_vals))
+
         df.to_csv(results_file, sep="|", index=False)
 
 
@@ -557,6 +590,8 @@ def run_network_evaluation(
     w_user: float | None = None,
     baseline_k: int | None = None,
     baseline_lambda: float | None = None,
+    compute_ranking: bool = False,
+    ranking_k: int = 10,
     dataset: str | None = None,
     seed: int = 42,
 ) -> dict[str, list[float]]:
@@ -592,6 +627,9 @@ def run_network_evaluation(
                              baseline Optuna search.  When ``None``, the paired
                              baseline is skipped (``rmse_baseline`` = nan).
         baseline_lambda:     L2 regularisation for the paired plain-CMF baseline.
+        compute_ranking:     When ``True``, compute and store NDCG@K, Precision@K,
+                             Recall@K, and MRR for each evaluated network.
+        ranking_k:           Cut-off for rank-based metrics.  Defaults to 10.
         dataset:             Dataset name.  Defaults to ``Datasets.DEFAULT``.
         seed:                Random seed for reproducible network sampling.
                              Uses ``np.random.default_rng(seed)`` so results
@@ -689,6 +727,9 @@ def run_network_evaluation(
                 n_splits=n_splits,
                 baseline_k=baseline_k,
                 baseline_lambda=baseline_lambda,
+                compute_ranking=compute_ranking,
+                ranking_k=ranking_k,
+                dataset=dataset,
             )
             if split_results:
                 mean_enhanced = float(
