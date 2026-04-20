@@ -1,6 +1,6 @@
 # Centrality Metrics
 
-Seven per-node centrality metrics are computed using **SNAP-py** for each inferred diffusion network.
+Eleven per-node centrality metrics are computed using **SNAP-py** for each inferred diffusion network.
 
 ---
 
@@ -10,8 +10,24 @@ Seven per-node centrality metrics are computed using **SNAP-py** for each inferr
 
 $$C_D(v) = \frac{\deg(v)}{|V| - 1}$$
 
-Proportion of network nodes that $v$ is directly connected to.  
+Proportion of network nodes that $v$ is directly connected to (total degree, in + out).  
 High values indicate **hubs** — highly connected nodes that may spread influence quickly.
+
+---
+
+### In-Degree Centrality
+
+$$C_{D^-}(v) = \frac{\deg^-(v)}{|V| - 1}$$
+
+Normalised count of **incoming** influence edges.  In NetInf's directed graph an edge $u \to v$ means $u$ tends to influence $v$, so high in-degree marks **influence sinks** — users who follow others' tastes (late adopters).
+
+---
+
+### Out-Degree Centrality
+
+$$C_{D^+}(v) = \frac{\deg^+(v)}{|V| - 1}$$
+
+Normalised count of **outgoing** influence edges.  High out-degree marks **influence sources** — taste-makers whose ratings are adopted by others (early adopters).
 
 ---
 
@@ -69,6 +85,22 @@ Low eccentricity indicates nodes near the **centre of the graph**.
 
 ---
 
+### Hub Score (HITS)
+
+$$H(v) \propto \sum_{u \,:\, v \to u} A(u)$$
+
+From the HITS algorithm (Kleinberg 1999). A node's hub score is proportional to the sum of authority scores of the nodes it points to. In an influence graph, **high-hub users propagate influence toward canonical taste-makers** — they are aggregators or connectors.
+
+---
+
+### Authority Score (HITS)
+
+$$A(v) \propto \sum_{u \,:\, u \to v} H(u)$$
+
+A node's authority score is proportional to the sum of hub scores of nodes that point to it. **High-authority users are canonical taste-makers** pointed to by many high-hub nodes. Complementary to PageRank: authority captures prestige in the directed opinion-propagation sense, whereas PageRank captures overall visitation probability.
+
+---
+
 ## Storage Format
 
 For each network, results are saved as:
@@ -77,7 +109,7 @@ For each network, results are saved as:
 data/centrality_metrics/<model>/centrality_metrics_<short>_<id>.csv
 ```
 
-Columns: `user_id`, `degree`, `betweenness`, `closeness`, `eigenvector`, `pagerank`, `clustering`, `eccentricity`.
+Columns: `UserId`, `degree`, `in_degree`, `out_degree`, `betweenness`, `closeness`, `eigenvector`, `pagerank`, `clustering`, `eccentricity`, `hub_score`, `auth_score` (and optionally `pagerank_lph` when the community step has been run first).
 
 ---
 

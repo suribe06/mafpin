@@ -114,19 +114,25 @@ Source: `networks/inference.py`
 
 ## 4. Centrality Metrics
 
-Seven per-node metrics are computed with SNAP-py for each inferred network:
+Eleven per-node metrics are computed with SNAP-py for each inferred network:
 
-| Metric | Description |
-| --- | --- |
-| Degree | Fraction of connected neighbours (normalised) |
-| Betweenness | Fraction of shortest paths passing through the node |
-| Closeness | Inverse of mean shortest path to all other nodes |
-| Eigenvector | Importance weighted by neighbour importance |
-| PageRank | Random-walk stationary distribution |
-| Clustering | Fraction of closed triangles among neighbours |
-| Eccentricity | Maximum shortest path length from the node |
+| Metric | Column | Description |
+| --- | --- | --- |
+| Degree | `degree` | Fraction of connected neighbours (normalised total degree) |
+| In-Degree | `in_degree` | Normalised in-degree — influence sinks / late adopters |
+| Out-Degree | `out_degree` | Normalised out-degree — influence sources / taste-makers |
+| Betweenness | `betweenness` | Fraction of shortest paths passing through the node |
+| Closeness | `closeness` | Inverse of mean shortest path to all other nodes |
+| Eigenvector | `eigenvector` | Importance weighted by neighbour importance |
+| PageRank | `pagerank` | Random-walk stationary distribution |
+| Clustering | `clustering` | Fraction of closed triangles among neighbours |
+| Eccentricity | `eccentricity` | Maximum shortest path length from the node |
+| Hub Score | `hub_score` | HITS hub: points to authoritative nodes (aggregators) |
+| Authority Score | `auth_score` | HITS authority: pointed to by many hubs (canonical taste-makers) |
 
 Results are saved to `data/centrality_metrics/<model>/centrality_metrics_<short>_<id>.csv`.
+
+See [centrality_metrics.md](centrality_metrics.md) for full formulas and interpretations.
 
 Source: `networks/centrality.py`
 
@@ -156,8 +162,13 @@ $$\min_{U, V}\ \|R - UV^\top\|_F^2 + \lambda(\|U\|_F^2 + \|V\|_F^2)$$
 
 **Enhanced CMF** — the baseline augmented with a user side-information matrix **S** built from:
 
-- Seven centrality metrics computed over the inferred diffusion network.
+- Eleven centrality metrics computed over the inferred diffusion network (`degree`, `in_degree`, `out_degree`, `betweenness`, `closeness`, `eigenvector`, `pagerank`, `clustering`, `eccentricity`, `hub_score`, `auth_score`).
 - Optionally: community membership count and LPH score.
+- Optionally: cascade temporal statistics shared across all networks for the dataset:
+  - `mean_cascade_position` — average 1-indexed temporal position of the user across cascades (lower = earlier adopter).
+  - `min_cascade_position` — earliest position ever observed (1 = seed in at least one cascade).
+  - `cascade_breadth` — number of distinct cascades the user appears in.
+  - Users appearing in fewer than 5 cascades have NaN positional stats; these are filled with 0.0 downstream.
 
 Features are standardised (or min–max / L2-normalised, configurable) and passed to `cmfrec.CMF` as `U=S`. Scaling is fitted on **training users only** within each fold, preventing leakage.
 
