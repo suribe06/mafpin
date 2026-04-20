@@ -160,9 +160,15 @@ def calculate_closeness(G) -> dict[int, float]:
 
 
 def calculate_eigenvector(G) -> dict[int, float]:
-    """Eigenvector centrality via ``snap.GetEigenVectorCentr``."""
+    """Eigenvector centrality via ``snap.GetEigenVectorCentr``.
+
+    ``GetEigenVectorCentr`` requires an undirected graph (``PUNGraph``), so
+    the directed NetInf graph is symmetrised first.  Node IDs are preserved;
+    edge directions are dropped.
+    """
+    ug = snap.ConvertGraph(snap.PUNGraph, G)  # type: ignore[attr-defined]
     eig_hash = snap.TIntFltH()  # type: ignore[attr-defined]
-    snap.GetEigenVectorCentr(G, eig_hash)  # type: ignore[attr-defined]
+    snap.GetEigenVectorCentr(ug, eig_hash)  # type: ignore[attr-defined]
     return _snap_hash_to_dict(eig_hash)
 
 
