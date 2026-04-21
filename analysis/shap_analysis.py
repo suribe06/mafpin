@@ -205,6 +205,7 @@ def compute_shap_for_network(
     surrogate_random_state: int = 42,
     min_users: int = 30,
     surrogate_r2_threshold: float = 0.05,
+    dataset: str | None = None,
 ) -> tuple[np.ndarray, list[str]] | None:
     """
     Train enhanced CMF on one (model, network) pair and compute SHAP values.
@@ -230,12 +231,15 @@ def compute_shap_for_network(
                                 considered reliable.  Networks with a lower
                                 surrogate R² are skipped to avoid reporting
                                 SHAP values based on an overfit model.
+        dataset:                Dataset name.  Defaults to ``Datasets.DEFAULT``.
 
     Returns:
         ``(shap_values, feature_names)`` where ``shap_values`` has shape
         ``(n_users, n_features)``, or ``None`` if data is insufficient.
     """
-    features = load_network_features(model_name, network_index, include_communities)
+    features = load_network_features(
+        model_name, network_index, include_communities, dataset=dataset
+    )
     if features is None:
         return None
 
@@ -371,6 +375,7 @@ def run_shap_analysis(
                 params,
                 include_communities=include_communities,
                 transform=transform,
+                dataset=dataset,
             )
             if result is None:
                 print("skipped (insufficient data).")
