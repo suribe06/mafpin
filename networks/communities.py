@@ -356,6 +356,12 @@ def calculate_communities_for_network(
 
     G, user_ids = load_as_networkx(network_file)
 
+    # Guard: skip degenerate (edgeless) networks — community detection on an
+    # edgeless graph produces meaningless results and all-zero LPH scores.
+    if G.number_of_edges() == 0:
+        print(f"  Warning: no edges in {network_file.name}, skipping.")
+        return False
+
     try:
         communities = detect_overlapping_communities(
             G, algorithm=algorithm, epsilon=epsilon, min_community=min_community

@@ -45,6 +45,8 @@ from networks.delta import (
     compute_median_delta,
     alpha_centers_from_delta,
     log_alpha_grid,
+    count_cascade_nodes,
+    compute_k_from_nodes,
 )
 
 
@@ -98,6 +100,7 @@ def infer_networks(
     n: int = Defaults.N_ALPHAS,
     model: int = 0,
     max_iter: int = Defaults.MAX_ITER,
+    k_avg_degree: float | None = Defaults.K_AVG_DEGREE,
     name_output: str = "inferred-network",
     r: float = Defaults.RANGE_R,
     networks_dir: Path | None = None,
@@ -108,15 +111,29 @@ def infer_networks(
     The NetInf binary is expected at ``Paths.NETINF_BIN``.  All output files
     are written under ``networks_dir / <model_name>``.
 
+    The edge budget k (NetInf ``-e`` flag) is derived dynamically from the
+    cascade file when *k_avg_degree* is set::
+
+        k = round(k_avg_degree * N)
+
+    where N is the number of nodes in the cascade file.  This matches the
+    paper's real-data setup (Gomez-Rodriguez et al. 2011, Section 5.2) where
+    the inferred graph is sparse: roughly ``k ≈ avg_degree × N`` edges,
+    corresponding to an average out-degree of 1–4.  If *k_avg_degree* is
+    ``None``, *max_iter* is used instead.
+
     Args:
-        cascades_file: Path to the cascades input file.  Defaults to
+        cascades_file:  Path to the cascades input file.  Defaults to
             ``DatasetPaths(Datasets.DEFAULT).CASCADES``.
-        n:            Number of alpha grid points.
-        model:        Model index — 0 (exponential), 1 (powerlaw), 2 (rayleigh).
-        max_iter:     Maximum NetInf iterations per run.
-        name_output:  Base name for per-alpha output files.
-        r:            Multiplicative range factor for the alpha grid.
-        networks_dir: Root directory for output networks.  Defaults to
+        n:              Number of alpha grid points.
+        model:          Model index — 0 (exponential), 1 (powerlaw), 2 (rayleigh).
+        max_iter:       Fallback edge budget k when *k_avg_degree* is ``None``.
+        k_avg_degree:   Target average out-degree used to compute k.  Defaults
+            to ``Defaults.K_AVG_DEGREE`` (2).  Set to ``None`` to use
+            *max_iter* directly.
+        name_output:    Base name for per-alpha output files.
+        r:              Multiplicative range factor for the alpha grid.
+        networks_dir:   Root directory for output networks.  Defaults to
             ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
 
     Returns:
@@ -142,6 +159,20 @@ def infer_networks(
         print(f"Error: NetInf binary not found at {Paths.NETINF_BIN}")
         return False
 
+    # -- Determine edge budget k (NetInf -e flag) ----------------------------
+    if k_avg_degree is not None:
+        try:
+            n_nodes = count_cascade_nodes(cascades_file)
+            k = compute_k_from_nodes(n_nodes, avg_degree=k_avg_degree)
+            print(f"Edge budget k = {k_avg_degree} × {n_nodes} nodes = {k} edges")
+        except (FileNotFoundError, ValueError) as exc:
+            print(
+                f"Warning: could not compute dynamic k ({exc}); falling back to max_iter={max_iter}"
+            )
+            k = max_iter
+    else:
+        k = max_iter
+
     # -- Compute alpha grid --------------------------------------------------
     print("Computing median delta from cascades …")
     try:
@@ -159,8 +190,21 @@ def infer_networks(
         alpha_center = alpha_centers["exponential"]["alpha0"]
         alpha_values = log_alpha_grid(float(alpha_center), r=r, n=n)  # type: ignore[arg-type]
         print(f"Exponential α_center = {alpha_center:.6e} days⁻¹")
-    elif model == 1:  # powerlaw — dimensionless exponent, linear sweep
-        alpha_values = np.linspace(1.0, 5.0, n)
+    elif model == 1:
+        # Power-law model: f(Δt; α) = (α − 1) · Δt^{−α}  (Pareto distribution).
+        # α is a dimensionless shape exponent — it does NOT scale with the time
+        # unit, so unlike exponential/Rayleigh no data-driven centre is needed.
+        #
+        # Lower bound is 1.1 (not 1.0): at α = 1 the Pareto density is
+        # f(t) ∝ t^{-1}, whose integral diverges — the distribution is
+        # non-normalizable, so the likelihood is undefined.  NetInf may accept
+        # α = 1 without error, but the result is numerically meaningless.
+        #
+        # Upper bound 5.0: social-influence cascades rarely have exponents above
+        # 3–4 (Gomez-Rodriguez et al. 2011, Section 5.2 real-data experiments
+        # use α ∈ {1.5, 2.0, 2.5}).  Sweeping to 5.0 gives margin while keeping
+        # runtime tractable.
+        alpha_values = np.linspace(1.1, 5.0, n)
     else:  # rayleigh
         alpha_center = alpha_centers["rayleigh"]["alpha0"]
         alpha_values = log_alpha_grid(float(alpha_center), r=r, n=n)  # type: ignore[arg-type]
@@ -187,7 +231,7 @@ def infer_networks(
             f"-i:{cascades_file}",
             f"-o:{output_stem}",
             f"-m:{model}",
-            f"-e:{max_iter}",
+            f"-e:{k}",
             f"-a:{alpha}",
         ]
 
@@ -278,6 +322,7 @@ def infer_networks_all_models(
     cascades_file: str | Path | None = None,
     n: int = Defaults.N_ALPHAS,
     max_iter: int = Defaults.MAX_ITER,
+    k_avg_degree: float | None = Defaults.K_AVG_DEGREE,
     name_output: str = "inferred-network",
     r: float = Defaults.RANGE_R,
     networks_dir: Path | None = None,
@@ -288,11 +333,13 @@ def infer_networks_all_models(
     Args:
         cascades_file: Path to cascades file.  Defaults to
             ``DatasetPaths(Datasets.DEFAULT).CASCADES``.
-        n:             Number of alpha grid points.
-        max_iter:      Maximum NetInf iterations per run.
-        name_output:   Base name for output files.
-        r:             Range factor for the log alpha grid.
-        networks_dir:  Root directory for output networks.  Defaults to
+        n:              Number of alpha grid points.
+        max_iter:       Fallback edge budget k when *k_avg_degree* is ``None``.
+        k_avg_degree:   Target average out-degree used to compute k.  Defaults
+            to ``Defaults.K_AVG_DEGREE`` (2).
+        name_output:    Base name for output files.
+        r:              Range factor for the log alpha grid.
+        networks_dir:   Root directory for output networks.  Defaults to
             ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
 
     Returns:
@@ -308,6 +355,7 @@ def infer_networks_all_models(
             n=n,
             model=idx,
             max_iter=max_iter,
+            k_avg_degree=k_avg_degree,
             name_output=name_output,
             r=r,
             networks_dir=networks_dir,
@@ -357,7 +405,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-iter",
         type=int,
         default=Defaults.MAX_ITER,
-        help="Maximum NetInf iterations per network.",
+        help="Fallback edge budget k when --k-fraction is disabled.",
+    )
+    parser.add_argument(
+        "--k-avg-degree",
+        type=float,
+        default=Defaults.K_AVG_DEGREE,
+        help="k = avg_degree × N edges per network (0 to disable; paper default: 2).",
     )
     parser.add_argument(
         "--range-r",
@@ -380,12 +434,14 @@ def main() -> None:
     dp = DatasetPaths(args.dataset)
     cascades_file = args.cascades or dp.CASCADES
     networks_dir = dp.NETWORKS
+    k_avg_degree = args.k_avg_degree if args.k_avg_degree > 0 else None
 
     if args.all:
         results = infer_networks_all_models(
             cascades_file=cascades_file,
             n=args.n_alphas,
             max_iter=args.max_iter,
+            k_avg_degree=k_avg_degree,
             name_output=args.name_output,
             r=args.range_r,
             networks_dir=networks_dir,
@@ -399,6 +455,7 @@ def main() -> None:
             n=args.n_alphas,
             model=model_idx,
             max_iter=args.max_iter,
+            k_avg_degree=k_avg_degree,
             name_output=args.name_output,
             r=args.range_r,
             networks_dir=networks_dir,

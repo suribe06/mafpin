@@ -93,6 +93,10 @@ def _run_cascade(args: argparse.Namespace) -> None:
         output_file=DatasetPaths(ds_name).CASCADES,
     )
 
+    from networks.cascades import compute_cascade_user_stats
+
+    compute_cascade_user_stats(dataset=ds_name)
+
     from visualization.network_plots import plot_cascades_timeline
 
     plot_cascades_timeline(
@@ -136,6 +140,7 @@ def _run_inference(args: argparse.Namespace) -> None:
             n=args.n_alphas,
             model=model_index_map[model],
             max_iter=args.max_iter,
+            k_avg_degree=args.k_avg_degree if args.k_avg_degree > 0 else None,
             name_output=str(dp.NETWORKS / model),
             r=Defaults.RANGE_R,
             networks_dir=dp.NETWORKS,
@@ -144,6 +149,7 @@ def _run_inference(args: argparse.Namespace) -> None:
         infer_networks_all_models(
             n=args.n_alphas,
             max_iter=args.max_iter,
+            k_avg_degree=args.k_avg_degree if args.k_avg_degree > 0 else None,
             networks_dir=dp.NETWORKS,
             cascades_file=dp.CASCADES,
         )
@@ -322,6 +328,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
             w_user=best_w_user,
             baseline_k=best_k_b,
             baseline_lambda=best_lambda_b,
+            compute_ranking=True,
             dataset=args.dataset,
         )
 
@@ -341,6 +348,8 @@ def _run_recommend(args: argparse.Namespace) -> None:
         plot_alpha_rmse_analysis,
         plot_alpha_delta_rmse,
         plot_alpha_edges,
+        plot_ranking_metrics_per_alpha,
+        plot_ranking_metrics_comparison,
     )
 
     for _search, _prefix in [
@@ -380,6 +389,10 @@ def _run_recommend(args: argparse.Namespace) -> None:
             )
 
     plot_alpha_edges(save_plot=True, dataset=args.dataset)
+
+    for _mn in Models.ALL:
+        plot_ranking_metrics_per_alpha(_mn, save_plot=True, dataset=args.dataset)
+    plot_ranking_metrics_comparison(save_plot=True, dataset=args.dataset)
 
 
 def _run_hypertune(args: argparse.Namespace) -> None:
@@ -584,7 +597,14 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=Defaults.MAX_ITER,
         dest="max_iter",
-        help="Maximum NetInf iterations per alpha.",
+        help="Fallback edge budget k when --k-fraction is disabled.",
+    )
+    parser.add_argument(
+        "--k-avg-degree",
+        type=float,
+        default=Defaults.K_AVG_DEGREE,
+        dest="k_avg_degree",
+        help="k = avg_degree × N edges per network (0 to disable; paper default: 2).",
     )
     parser.add_argument(
         "--include-communities",

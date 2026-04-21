@@ -128,6 +128,69 @@ def alpha_centers_from_delta(delta_days: float) -> dict:
     }
 
 
+def count_cascade_nodes(cascade_file: str | Path | None = None) -> int:
+    """
+    Count the number of unique nodes declared in a NetInf cascade file.
+
+    The file format has two blocks separated by a blank line.  The first block
+    contains one ``id,name`` line per node.  Counting these lines gives N, from
+    which the maximum number of directed edges in the inferred network can be
+    derived as N*(N-1).
+
+    Args:
+        cascade_file: Path to the cascades file.  Defaults to
+            ``DatasetPaths(Datasets.DEFAULT).CASCADES``.
+
+    Returns:
+        Integer number of nodes N.
+
+    Raises:
+        FileNotFoundError: If the cascade file does not exist.
+        ValueError: If no node lines are found before the first blank line.
+    """
+    if cascade_file is None:
+        cascade_file = DatasetPaths(Datasets.DEFAULT).CASCADES
+    cascade_file = Path(cascade_file)
+
+    if not cascade_file.exists():
+        raise FileNotFoundError(f"Cascade file not found: {cascade_file}")
+
+    n_nodes = 0
+    with open(cascade_file, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            if not raw_line.strip():
+                break  # blank line separates the two blocks
+            n_nodes += 1
+
+    if n_nodes == 0:
+        raise ValueError("No node lines found in cascade file.")
+
+    return n_nodes
+
+
+def compute_k_from_nodes(n_nodes: int, avg_degree: float = 2.0) -> int:
+    """
+    Estimate the NetInf edge budget k as ``avg_degree × N``.
+
+    The NetInf paper's real-data experiments (Gomez-Rodriguez et al. 2011,
+    Section 5.2) infer networks whose edge count is roughly *linear* in the
+    number of nodes N — equivalent to an average out-degree of 1–4.  Using
+    ``k = avg_degree × N`` keeps the budget tractable for any dataset size
+    and matches the sparsity regime studied in the paper.  A quadratic
+    formula (fraction of N²) would give millions of edges for large N and
+    is inconsistent with the paper's experimental setup.
+
+    Args:
+        n_nodes:    Number of unique nodes N.
+        avg_degree: Target average out-degree (default 2, matching the
+            paper's typical synthetic-network density).
+
+    Returns:
+        Integer edge budget k (at least 1).
+    """
+    return max(1, round(avg_degree * n_nodes))
+
+
 def log_alpha_grid(
     alpha0: float,
     r: float = Defaults.RANGE_R,

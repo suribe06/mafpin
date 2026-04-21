@@ -96,6 +96,11 @@ def plot_shap_importance_comparison(
     results = _load_results(results_path, dataset=dataset)
 
     models = list(results.keys())
+    if not models:
+        print(
+            "[shap_plots] No SHAP results available — skipping importance comparison chart."
+        )
+        return
     feature_names = results[models[0]]["feature_names"]
 
     # (n_models, n_features) matrix of mean |SHAP|
@@ -284,6 +289,9 @@ def plot_all_shap(
     )
 
     results = _load_results(results_path, dataset=dataset)
+    if not results:
+        print("[shap_plots] No SHAP results available — skipping beeswarm plots.")
+        return
     for model_name in results:
         print(f"[shap_plots] Generating beeswarm for '{model_name}'…")
         plot_shap_beeswarm(

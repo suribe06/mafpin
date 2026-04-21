@@ -80,21 +80,24 @@ def load_as_snap(
     network_file: str | Path,
 ) -> tuple[object, list[int]]:
     """
-    Load a NetInf network file as an undirected SNAP graph.
+    Load a NetInf network file as a **directed** SNAP graph.
+
+    NetInf infers directed influence edges (u → v means u tends to
+    influence v).  Using a directed graph (``snap.TNGraph``) preserves
+    the semantic meaning of PageRank, betweenness, and in-degree metrics.
 
     Args:
         network_file: Path to the ``.txt`` network file.
 
     Returns:
-        G:        Undirected SNAP graph with compacted node IDs.
+        G:        Directed SNAP graph with compacted node IDs.
         user_ids: Ordered list of node IDs present in the graph.
     """
     nodes, edges = parse_network_file(network_file)
     mapper = _build_mapper(nodes)
 
-    G = snap.TUNGraph.New()  # type: ignore[attr-defined]
+    G = snap.TNGraph.New()  # type: ignore[attr-defined]  # directed graph
     user_ids = list(mapper.values())
-    # SNAP TUNGraph requires node IDs >= 0; 0-based mapper satisfies this.
     for u in user_ids:
         G.AddNode(u)
     for i, j in edges:
@@ -111,21 +114,26 @@ def load_as_snap(
 
 def load_as_networkx(
     network_file: str | Path,
-) -> tuple[nx.Graph, list[int]]:
+) -> tuple[nx.DiGraph, list[int]]:
     """
-    Load a NetInf network file as an undirected NetworkX graph.
+    Load a NetInf network file as a **directed** NetworkX graph.
+
+    NetInf infers directed influence edges (u → v means u tends to
+    influence v).  Using ``nx.DiGraph`` preserves edge directionality for
+    PageRank, betweenness, and community algorithms that support directed
+    graphs.
 
     Args:
         network_file: Path to the ``.txt`` network file.
 
     Returns:
-        G:        Undirected NetworkX graph with compacted node IDs.
+        G:        Directed NetworkX graph with compacted node IDs.
         user_ids: Ordered list of node IDs present in the graph.
     """
     nodes, edges = parse_network_file(network_file)
     mapper = _build_mapper(nodes)
 
-    G = nx.Graph()
+    G = nx.DiGraph()  # directed graph
     user_ids = list(mapper.values())
     G.add_nodes_from(user_ids)
     for i, j in edges:

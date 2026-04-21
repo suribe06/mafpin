@@ -42,6 +42,7 @@ class DatasetPaths:
         base = Paths.DATA / dataset
         self.BASE = base
         self.CASCADES = base / "cascades.txt"
+        self.CASCADE_USER_STATS = base / "cascade_user_stats.csv"
         self.NETWORKS = base / "inferred_networks"
         self.CENTRALITY = base / "centrality_metrics"
         self.COMMUNITIES = base / "communities"
@@ -120,7 +121,8 @@ class Defaults:
     # Network inference
     N_ALPHAS = 100  # number of alpha values in the log-spaced grid
     RANGE_R = 100.0  # multiplicative range factor: grid spans [center/r, center*r]
-    MAX_ITER = 5000  # maximum NetInf iterations per network
+    MAX_ITER = 5000  # fallback k (edges) when k_avg_degree is not used
+    K_AVG_DEGREE = 2  # k = avg_degree × N  (paper: real nets ≈ 1–4 out-edges per node)
 
     # Community detection
     EPSILON = 0.25  # Demon merge threshold (lower → more communities)
@@ -148,10 +150,18 @@ class Split:
     * Cascade generation (NetInf input) sees only training interactions.
     * CMF training and feature scaling never touch held-out ratings.
     * Results are reproducible across pipeline re-runs.
+
+    ``STRATEGY`` controls the split method:
+    * ``"random"``   — shuffled split (sklearn ``train_test_split``); fast but
+      may place earlier interactions in the test set.
+    * ``"temporal"`` — last ``TEST_SIZE`` fraction of each user's interactions
+      (by timestamp) are held out; guarantees test ratings are always *later*
+      than training ratings, simulating realistic deployment.
     """
 
     TEST_SIZE = 0.2  # fraction of ratings held out for testing
-    RANDOM_STATE = 42  # seed for train_test_split — change to re-randomise
+    RANDOM_STATE = 42  # seed for train_test_split (random strategy only)
+    STRATEGY = "temporal"  # "random" or "temporal"
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,23 @@ The cascade **header** (self-loop lines that declare node existence) lists the f
 
 Cascades with only one user are skipped; they carry no diffusion signal.
 
-Source: `networks/cascades.py`, `config.Split`, `config.Datasets`
+### 1.1 Cascade User Statistics
+
+After the cascade file is written, a second pass computes three **per-user temporal influence statistics** from the cascade timeline.  These are saved once per dataset to `data/<dataset>/cascade_user_stats.csv` and later merged into the Enhanced CMF side-information matrix.
+
+For each user $u$ appearing in cascade $c$, let $\text{pos}(u, c)$ be the **1-indexed temporal rank** of $u$ inside cascade $c$ (rank 1 = seed, i.e. earliest adopter in that item's adoption sequence).  Let $B_u$ be the set of cascades that contain $u$.
+
+| Column | Definition | Interpretation |
+| --- | --- | --- |
+| `cascade_breadth` | $\|B_u\|$ — number of distinct cascades user $u$ participates in | Activity level; how broadly a user rates across items |
+| `mean_cascade_position` | $\frac{1}{\|B_u\|} \sum_{c \in B_u} \text{pos}(u, c)$ | Average adoption rank; lower = earlier adopter on average |
+| `min_cascade_position` | $\min_{c \in B_u} \text{pos}(u, c)$ | Best (earliest) rank ever observed; `1` means the user was the seed in at least one cascade |
+
+**Reliability threshold**: `mean_cascade_position` and `min_cascade_position` are set to `NaN` for users who appear in fewer than 5 cascades, because positional estimates from very few observations are unreliable.  The `NaN` values are replaced with `0.0` when the feature matrix is assembled by `load_network_features()`.
+
+**Alignment with centrality IDs**: The compact `UserId` keys used in `cascade_user_stats.csv` are derived by sorting all node IDs declared in the cascade header and assigning 0-based indices — the same logic as `_build_mapper` in `networks/network_io.py`.  This ensures a direct join with the centrality-metric CSVs without any re-mapping.
+
+Source: `networks/cascades.py :: compute_cascade_user_stats`, `config.DatasetPaths.CASCADE_USER_STATS`
 
 ---
 
@@ -68,12 +84,17 @@ $$m = \sqrt{\frac{2 \ln 2}{\alpha}} \quad \Rightarrow \quad \alpha_{\text{center
 
 #### Power-law
 
-$$m = 2^{1/\alpha}\,\Delta_{\min} \quad \Rightarrow \quad \alpha = \frac{\ln 2}{\ln(\tilde{\Delta}/\Delta_{\min})}$$
+The power-law (Pareto) transmission density used by NetInf is:
 
-However, for typical datasets this value falls below 1, while NetInf only supports $\alpha \geq 1$.
-Therefore, in practice a fixed linear grid is used:
+$$f(\Delta t;\,\alpha) = (\alpha - 1)\cdot \Delta t^{-\alpha}, \quad \Delta t \geq 1, \quad \alpha > 1$$
 
-$$\alpha \in [1,\ 3] \quad \text{or} \quad [1,\ 5]$$
+Unlike the exponential and Rayleigh parameters, **α is a dimensionless shape exponent** — it is not a rate in any time unit, so it does not scale with whether timestamps are stored in seconds, hours, or days. For this reason no data-driven centre is derived from the median Δ; instead a fixed linear sweep is used:
+
+$$\alpha \in [1.1,\ 5.0]$$
+
+**Why the lower bound is 1.1, not 1.0:** At α = 1 the integrand becomes $t^{-1}$, whose integral $\int_1^{\infty} t^{-1}\,dt$ diverges — the distribution is non-normalizable and the likelihood is undefined. NetInf may accept α = 1 without raising an error, but the result is numerically meaningless. The bound 1.1 enforces a valid density with a finite mean (mean exists when α > 2; variance exists when α > 3).
+
+**Why the upper bound is 5.0:** Real social-influence cascades rarely exhibit exponents above 3–4. The paper's synthetic-network experiments (Gomez-Rodriguez et al. 2011, Section 5.2) use α ∈ {1.5, 2.0, 2.5}. Sweeping to 5.0 gives comfortable margin while keeping runtime tractable.
 
 ### 2.3 Log-Scale Grid (Exponential & Rayleigh)
 
@@ -109,19 +130,25 @@ Source: `networks/inference.py`
 
 ## 4. Centrality Metrics
 
-Seven per-node metrics are computed with SNAP-py for each inferred network:
+Eleven per-node metrics are computed with SNAP-py for each inferred network:
 
-| Metric | Description |
-| --- | --- |
-| Degree | Fraction of connected neighbours (normalised) |
-| Betweenness | Fraction of shortest paths passing through the node |
-| Closeness | Inverse of mean shortest path to all other nodes |
-| Eigenvector | Importance weighted by neighbour importance |
-| PageRank | Random-walk stationary distribution |
-| Clustering | Fraction of closed triangles among neighbours |
-| Eccentricity | Maximum shortest path length from the node |
+| Metric | Column | Description |
+| --- | --- | --- |
+| Degree | `degree` | Fraction of connected neighbours (normalised total degree) |
+| In-Degree | `in_degree` | Normalised in-degree — influence sinks / late adopters |
+| Out-Degree | `out_degree` | Normalised out-degree — influence sources / taste-makers |
+| Betweenness | `betweenness` | Fraction of shortest paths passing through the node |
+| Closeness | `closeness` | Inverse of mean shortest path to all other nodes |
+| Eigenvector | `eigenvector` | Importance weighted by neighbour importance |
+| PageRank | `pagerank` | Random-walk stationary distribution |
+| Clustering | `clustering` | Fraction of closed triangles among neighbours |
+| Eccentricity | `eccentricity` | Maximum shortest path length from the node |
+| Hub Score | `hub_score` | HITS hub: points to authoritative nodes (aggregators) |
+| Authority Score | `auth_score` | HITS authority: pointed to by many hubs (canonical taste-makers) |
 
 Results are saved to `data/centrality_metrics/<model>/centrality_metrics_<short>_<id>.csv`.
+
+See [centrality_metrics.md](centrality_metrics.md) for full formulas and interpretations.
 
 Source: `networks/centrality.py`
 
@@ -151,8 +178,13 @@ $$\min_{U, V}\ \|R - UV^\top\|_F^2 + \lambda(\|U\|_F^2 + \|V\|_F^2)$$
 
 **Enhanced CMF** — the baseline augmented with a user side-information matrix **S** built from:
 
-- Seven centrality metrics computed over the inferred diffusion network.
+- Eleven centrality metrics computed over the inferred diffusion network (`degree`, `in_degree`, `out_degree`, `betweenness`, `closeness`, `eigenvector`, `pagerank`, `clustering`, `eccentricity`, `hub_score`, `auth_score`).
 - Optionally: community membership count and LPH score.
+- Optionally: cascade temporal statistics shared across all networks for the dataset:
+  - `mean_cascade_position` — average 1-indexed temporal position of the user across cascades (lower = earlier adopter).
+  - `min_cascade_position` — earliest position ever observed (1 = seed in at least one cascade).
+  - `cascade_breadth` — number of distinct cascades the user appears in.
+  - Users appearing in fewer than 5 cascades have NaN positional stats; these are filled with 0.0 downstream.
 
 Features are standardised (or min–max / L2-normalised, configurable) and passed to `cmfrec.CMF` as `U=S`. Scaling is fitted on **training users only** within each fold, preventing leakage.
 
