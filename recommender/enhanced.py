@@ -58,7 +58,7 @@ import pandas as pd
 from cmfrec import CMF  # type: ignore[import-untyped]
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
-from config import DatasetPaths, Datasets, Models, Defaults
+from config import DatasetPaths, Datasets, Models, Defaults, SideUserFeatures
 from recommender.data import evaluate_ranking, evaluate_single_split, split_data_single
 
 # Scaler type alias used inside the per-split loop.
@@ -84,6 +84,7 @@ def load_network_features(
     include_communities: bool = True,
     include_cascade_stats: bool = True,
     dataset: str | None = None,
+    feature_config: "dict[str, bool] | None" = None,
 ) -> pd.DataFrame | None:
     """
     Load centrality (and optionally community and cascade-stats) features for
@@ -103,6 +104,12 @@ def load_network_features(
                                 from ``cascade_user_stats.csv``.  The file is
                                 shared across all networks for the same dataset.
         dataset:                Dataset name.  Defaults to ``Datasets.DEFAULT``.
+        feature_config:         Dict mapping feature name → ``bool``.  Columns whose
+                                key is ``False`` are dropped from the final DataFrame.
+                                Use the special key ``"community_binary"`` to toggle
+                                all dynamically-generated ``community_<id>`` columns.
+                                Defaults to ``None``, which uses
+                                :attr:`config.SideUserFeatures.FEATURES`.
 
     Returns:
         Raw feature DataFrame indexed by ``UserId``, or ``None`` if the file is
@@ -180,7 +187,21 @@ def load_network_features(
         # If the file is absent (cascade step not yet run) we silently skip —
         # the feature matrix remains valid without cascade columns.
 
-    return df.set_index("UserId").fillna(0.0)
+    df = df.set_index("UserId").fillna(0.0)
+
+    # Apply per-feature filter from SideUserFeatures (or caller-supplied dict).
+    cfg = feature_config if feature_config is not None else SideUserFeatures.FEATURES
+    disabled = {k for k, v in cfg.items() if not v}
+    cols_to_drop = [
+        col
+        for col in df.columns
+        if col in disabled
+        or (col.startswith("community_") and "community_binary" in disabled)
+    ]
+    if cols_to_drop:
+        df = df.drop(columns=cols_to_drop)
+
+    return df
 
 
 # ---------------------------------------------------------------------------

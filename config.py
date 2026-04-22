@@ -179,3 +179,54 @@ class MLflow:
 
     EXPERIMENT_NAME = "mafpin"
     TRACKING_URI = str(ROOT / "mlruns")
+
+
+# ---------------------------------------------------------------------------
+# Side-user feature selection
+# ---------------------------------------------------------------------------
+
+
+class SideUserFeatures:
+    """Toggle individual side-user features for the enhanced CMF model.
+
+    Set a feature to ``False`` to exclude it from the user-attribute matrix
+    passed to :class:`cmfrec.CMF`.  The filter is applied at the end of
+    :func:`recommender.enhanced.load_network_features`, so disabling a feature
+    here has no effect on which CSV files are read — only on which columns are
+    kept in the returned DataFrame.
+
+    Feature groups
+    --------------
+    Centrality metrics  — loaded from ``centrality_metrics_<model>_<idx>.csv``
+    Community features  — loaded from ``communities_<model>_<idx>.csv``
+    Cascade statistics  — loaded from ``cascade_user_stats.csv``
+
+    ``community_binary`` is a special key that controls the dynamically-generated
+    binary membership columns (``community_<id>``).  Setting it to ``False``
+    drops all such columns regardless of how many communities were encoded.
+    """
+
+    FEATURES: "dict[str, bool]" = {
+        # --- Centrality metrics ---
+        "degree": True,
+        "in_degree": False,
+        "out_degree": False,
+        "betweenness": True,
+        "closeness": True,
+        "eigenvector": True,
+        "pagerank": True,
+        "clustering": True,
+        "eccentricity": True,
+        "hub_score": False,
+        "auth_score": False,
+        "pagerank_lph": True,
+        # --- Community features ---
+        "local_pluralistic_hom": True,
+        "num_communities": False,
+        "lph_score": True,
+        "community_binary": False,  # binary community_<id> membership columns
+        # --- Cascade statistics ---
+        "mean_cascade_position": False,
+        "min_cascade_position": False,
+        "cascade_breadth": False,
+    }
