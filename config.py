@@ -224,6 +224,9 @@ class SideUserFeatures:
         "local_pluralistic_hom": True,
         "num_communities": False,
         "lph_score": True,
+        "s_v": True,          # s(v): neighborhood alignment count (Eq. 3, Barraza 2025)
+        "delta_v": True,      # δv: local dissimilarity (Eq. 4, Barraza 2025)
+        "is_boundary": True,  # binary boundary flag (h̃v ≤ p-th percentile)
         "community_binary": False,  # binary community_<id> membership columns
         # --- Cascade statistics ---
         "mean_cascade_position": False,
