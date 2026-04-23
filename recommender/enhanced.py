@@ -223,6 +223,7 @@ def evaluate_cmf_with_user_attributes(
     baseline_lambda: float | None = None,
     compute_ranking: bool = False,
     ranking_k: int = 10,
+    cmf_nthreads: int = -1,
 ) -> list[dict]:
     """
     Evaluate enhanced CMF via repeated random train/test splits.
@@ -313,6 +314,7 @@ def evaluate_cmf_with_user_attributes(
             lambda_=lambda_reg,
             w_main=w_main,
             w_user=w_user,
+            nthreads=cmf_nthreads,
             verbose=False,
         )
         enhanced_model.fit(X=train_df, U=u_matrix)
@@ -326,7 +328,11 @@ def evaluate_cmf_with_user_attributes(
         # search over enhanced hyperparameters) the paired baseline is skipped.
         if baseline_k is not None and baseline_lambda is not None:
             baseline_model = CMF(
-                method="als", k=baseline_k, lambda_=baseline_lambda, verbose=False
+                method="als",
+                k=baseline_k,
+                lambda_=baseline_lambda,
+                nthreads=cmf_nthreads,
+                verbose=False,
             )
             baseline_model.fit(X=train_df)
             baseline_rmse = evaluate_single_split(baseline_model, test_df)["rmse"]
@@ -515,6 +521,7 @@ def evaluate_single_network(
     compute_ranking: bool = False,
     ranking_k: int = 10,
     dataset: str | None = None,
+    cmf_nthreads: int = -1,
 ) -> list[dict]:
     """
     Load features and evaluate CMF for one (model, index) pair.
@@ -560,6 +567,7 @@ def evaluate_single_network(
         baseline_lambda=baseline_lambda,
         compute_ranking=compute_ranking,
         ranking_k=ranking_k,
+        cmf_nthreads=cmf_nthreads,
     )
 
 
@@ -620,6 +628,81 @@ def _save_rmses(
 
 
 # ---------------------------------------------------------------------------
+# Parallel worker (must be at module level to be picklable)
+# ---------------------------------------------------------------------------
+
+# Module-level cache populated once per worker process via the pool initializer.
+# This avoids pickling the full ratings DataFrame once per task (~100× per run)
+# and keeps IPC traffic to a few kilobytes per task instead of megabytes.
+_WORKER_DATA: "pd.DataFrame | None" = None
+_WORKER_SHARED: "dict | None" = None
+
+
+def _worker_init(data: "pd.DataFrame", shared_kwargs: dict) -> None:
+    """Pool initializer: cache the shared data/kwargs in the worker process.
+
+    Also pins BLAS libraries (OpenBLAS, MKL, OMP) to a single thread per
+    worker.  Without this, each of the N worker processes would use all
+    available BLAS threads (= #cores), producing N×N thread oversubscription
+    that stalls the machine.
+
+    On Linux (fork start method) environment variables set here are too late
+    — BLAS is already initialised in the parent.  We therefore call
+    :func:`threadpoolctl.threadpool_limits` which reconfigures the live BLAS
+    runtime in the worker.
+
+    Finally, SIGINT is set to be ignored in the worker so that Ctrl+C in the
+    parent shell does not leave workers running C/OpenMP code (which would
+    otherwise keep the CPU at 100% after the parent exits).  The parent
+    process catches KeyboardInterrupt and terminates the pool explicitly.
+    """
+    import os
+    import signal
+
+    # Ignore Ctrl+C in workers; let the parent handle it and tear down the pool.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Belt-and-braces: set env vars too, in case a spawn-mode pool is used
+    # or a lib reads them lazily.
+    for var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+    ):
+        os.environ[var] = "1"
+
+    # The real fix on Linux: cap already-loaded BLAS thread pools at runtime.
+    try:
+        from threadpoolctl import threadpool_limits
+
+        threadpool_limits(limits=1)
+    except ImportError:
+        pass
+
+    global _WORKER_DATA, _WORKER_SHARED  # noqa: PLW0603
+    _WORKER_DATA = data
+    _WORKER_SHARED = shared_kwargs
+
+
+def _eval_network_worker(packed: "tuple[int, dict]") -> "tuple[int, list[dict]]":
+    """Top-level worker for :class:`concurrent.futures.ProcessPoolExecutor`.
+
+    Receives a ``(network_index, extra_kwargs)`` tuple; the heavy ``data``
+    DataFrame and other shared kwargs are read from the per-worker module
+    cache populated by :func:`_worker_init`.
+    """
+    net_idx, extra = packed
+    if _WORKER_DATA is not None and _WORKER_SHARED is not None:
+        kwargs = {**_WORKER_SHARED, **extra, "data": _WORKER_DATA}
+    else:
+        # Fallback for sequential path where kwargs include everything.
+        kwargs = extra
+    return net_idx, evaluate_single_network(**kwargs)
+
+
+# ---------------------------------------------------------------------------
 # Batch evaluation
 # ---------------------------------------------------------------------------
 
@@ -640,6 +723,7 @@ def run_network_evaluation(
     ranking_k: int = 10,
     dataset: str | None = None,
     seed: int = 42,
+    n_jobs: int = 1,
 ) -> dict[str, list[float]]:
     """
     Evaluate a random sample of networks for all three diffusion models.
@@ -680,6 +764,13 @@ def run_network_evaluation(
         seed:                Random seed for reproducible network sampling.
                              Uses ``np.random.default_rng(seed)`` so results
                              are identical across re-runs with the same seed.
+        n_jobs:              Number of parallel worker processes for evaluating
+                             networks.  ``1`` (default) runs sequentially.
+                             ``-1`` uses all available CPU cores.  Each worker
+                             loads its own copy of the feature CSV and trains
+                             an independent CMF model, so there are no shared
+                             writes until results are collected in the main
+                             process.
 
     Returns:
         Dict mapping model name → list of mean enhanced RMSE values (one per
@@ -758,25 +849,135 @@ def run_network_evaluation(
         print(f"Model: {model_name.upper()} — sampling {len(sampled)} networks")
         print("=" * 55)
 
-        for net_idx in sampled:
-            print(f"\n  Network {net_idx:03d}")
-            split_results = evaluate_single_network(
-                data,
-                model_name,
-                net_idx,
-                k=best_k,
-                lambda_reg=best_lambda,
-                w_main=best_w_main,
-                w_user=best_w_user,
-                transform=transform,
-                include_communities=include_communities,
-                n_splits=n_splits,
-                baseline_k=baseline_k,
-                baseline_lambda=baseline_lambda,
-                compute_ranking=compute_ranking,
-                ranking_k=ranking_k,
-                dataset=dataset,
+        # Build shared kwargs for all workers (everything except net_idx).
+        # `data` is kept separate so it can be passed once per worker via the
+        # pool initializer instead of once per task.
+        # When running in parallel, force cmfrec to use 1 thread per worker
+        # to prevent OpenMP oversubscription (cmfrec.CMF(nthreads=-1) by
+        # default spawns ~#cores OpenMP threads per call; N workers × N
+        # threads saturates the machine).
+        _shared: dict = {
+            "model_name": model_name,
+            "k": best_k,
+            "lambda_reg": best_lambda,
+            "w_main": best_w_main,
+            "w_user": best_w_user,
+            "transform": transform,
+            "include_communities": include_communities,
+            "n_splits": n_splits,
+            "baseline_k": baseline_k,
+            "baseline_lambda": baseline_lambda,
+            "compute_ranking": compute_ranking,
+            "ranking_k": ranking_k,
+            "dataset": dataset,
+            "cmf_nthreads": -1 if n_jobs == 1 else 1,
+        }
+
+        from tqdm import tqdm
+
+        if n_jobs == 1:
+            # Sequential — original behaviour.
+            network_results: dict[int, list[dict]] = {}
+            pbar = tqdm(
+                sampled,
+                desc=f"{model_name[:4].upper()} networks",
+                unit="net",
+                dynamic_ncols=True,
             )
+            for net_idx in pbar:
+                pbar.set_postfix(net=f"{net_idx:03d}")
+                _, split_results = _eval_network_worker(
+                    (
+                        net_idx,
+                        {**_shared, "data": data, "network_index": net_idx},
+                    )
+                )
+                network_results[net_idx] = split_results
+                if split_results:
+                    mean_e = float(np.mean([r["rmse_enhanced"] for r in split_results]))
+                    pbar.set_postfix(net=f"{net_idx:03d}", rmse=f"{mean_e:.4f}")
+        else:
+            # Parallel — one worker process per CPU (reused across tasks).
+            # The heavy `data` DataFrame is pickled ONCE per worker via the
+            # initializer, not once per task.
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            import os
+            import signal
+
+            cpu_count = os.cpu_count() or 1
+            max_workers = cpu_count if n_jobs == -1 else min(n_jobs, cpu_count)
+            # Don't spawn more workers than tasks (wastes startup time).
+            max_workers = min(max_workers, len(sampled))
+
+            # Tiny per-task payload — just the network index.
+            worker_args = [(net_idx, {"network_index": net_idx}) for net_idx in sampled]
+            network_results = {}
+            pbar = tqdm(
+                total=len(sampled),
+                desc=f"{model_name[:4].upper()} networks ({max_workers}p)",
+                unit="net",
+                dynamic_ncols=True,
+            )
+
+            def _kill_pool_children(pool: "ProcessPoolExecutor") -> None:
+                """Force-kill worker processes with SIGKILL.
+
+                Necessary because ``pool.shutdown()`` waits for workers to
+                finish, which they won't do promptly while inside a cmfrec
+                C call.  We read ``pool._processes`` (private API) because
+                Python's stdlib exposes no public way to terminate workers.
+                """
+                procs = getattr(pool, "_processes", None) or {}
+                for proc in list(procs.values()):
+                    try:
+                        proc.kill()  # SIGKILL
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+
+            pool = ProcessPoolExecutor(
+                max_workers=max_workers,
+                initializer=_worker_init,
+                initargs=(data, _shared),
+            )
+            futures: dict = {}
+            try:
+                futures = {
+                    pool.submit(_eval_network_worker, arg): arg[0]
+                    for arg in worker_args
+                }
+                for future in as_completed(futures):
+                    net_idx, split_results = future.result()
+                    network_results[net_idx] = split_results
+                    pbar.update(1)
+                    if split_results:
+                        mean_e = float(
+                            np.mean([r["rmse_enhanced"] for r in split_results])
+                        )
+                        pbar.set_postfix(
+                            last_net=f"{net_idx:03d}", rmse=f"{mean_e:.4f}"
+                        )
+            except KeyboardInterrupt:
+                pbar.close()
+                print(
+                    "\n[interrupt] Ctrl+C received — terminating worker pool …",
+                    flush=True,
+                )
+                # Cancel anything still queued so workers stop picking up work.
+                for fut in futures:
+                    fut.cancel()
+                # Force-kill children that are stuck in native code.
+                _kill_pool_children(pool)
+                pool.shutdown(wait=False, cancel_futures=True)
+                # Re-raise so the pipeline exits and no further steps run.
+                raise
+            finally:
+                pool.shutdown(wait=True)
+                # Ensure SIGINT in parent is back to default behaviour.
+                signal.signal(signal.SIGINT, signal.default_int_handler)
+            pbar.close()
+
+        for net_idx in sampled:
+            split_results = network_results.get(net_idx, [])
             if split_results:
                 mean_enhanced = float(
                     np.mean([r["rmse_enhanced"] for r in split_results])

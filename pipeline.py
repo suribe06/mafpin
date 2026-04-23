@@ -72,11 +72,11 @@ def _run_cascade(args: argparse.Namespace) -> None:
     cfg = Datasets.CONFIG[ds_name]
     csv_path = Datasets.ROOT / ds_name / cfg["file"]
     cols = [cfg["col_user"], cfg["col_item"], cfg["col_rating"], cfg["col_time"]]
-    df = pd.read_csv(
+    df = pd.read_csv(  # type: ignore[call-overload]
         csv_path,
         sep=cfg["sep"],
         header=cfg["header"],
-        usecols=cols,
+        usecols=cols,  # type: ignore[call-overload]
         engine="python",
     )
     df.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
@@ -240,6 +240,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
                 sample_model_name = _mn
                 break
 
+        enhanced_search = None
         if sample_features is not None:
             # Independent Optuna search for the baseline (k, lambda_reg).
             print(
@@ -330,6 +331,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
             baseline_lambda=best_lambda_b,
             compute_ranking=True,
             dataset=args.dataset,
+            n_jobs=args.n_jobs,
         )
 
         for _artifact in [
@@ -637,6 +639,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=42,
         help="Random seed for network sampling in SHAP analysis.",
+    )
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=1,
+        dest="n_jobs",
+        help=(
+            "Number of parallel worker processes for the recommend step. "
+            "1 = sequential (default). -1 = all available CPU cores."
+        ),
     )
     return parser
 
