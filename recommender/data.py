@@ -86,9 +86,9 @@ def load_dataset(
             path,
             sep=cfg["sep"],
             header=cfg["header"],
-            usecols=cols,
+            usecols=cols,  # type: ignore[call-overload]
             engine="python",
-        )  # type: ignore[call-overload]
+        )
         data.columns = pd.Index(col_names)
 
     user_enc = LabelEncoder()

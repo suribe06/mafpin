@@ -673,7 +673,7 @@ def plot_ranking_metrics_per_alpha(
     available = [
         (col, label, colour)
         for col, label, colour in _RANKING_METRICS
-        if col in df.columns and not df[col].isna().all()
+        if col in df.columns and not bool(df[col].isna().all())
     ]
     if not available:
         print(
@@ -745,7 +745,7 @@ def plot_ranking_metrics_comparison(
         df = pd.read_csv(csv, sep="|")
         model_means[model_name] = {}
         for col, _, _ in _RANKING_METRICS:
-            if col in df.columns and not df[col].isna().all():
+            if col in df.columns and not bool(df[col].isna().all()):
                 model_means[model_name][col] = float(df[col].mean(skipna=True))
 
     if not model_means:
