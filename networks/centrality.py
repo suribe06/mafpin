@@ -447,7 +447,7 @@ def calculate_centrality_for_network(
 
     # Guard: skip degenerate (edgeless) networks — centrality on an edgeless
     # graph produces all-zero features that dilute the side-information signal.
-    if G.GetEdges() == 0:
+    if G.GetEdges() == 0:  # type: ignore[attr-defined]
         print(f"  Warning: no edges in {network_file.name}, skipping.")
         return False
 
@@ -503,18 +503,28 @@ def calculate_centrality_for_all_models(
             summary[model_name] = 0
             continue
 
+        from tqdm import tqdm
+
         print(f"\n{'='*50}")
         print(f"Model: {model_name.upper()} — {len(network_files)} networks")
         print("=" * 50)
 
         success_count = 0
-        for nf in network_files:
+        pbar = tqdm(
+            network_files,
+            desc=f"{model_name[:4].upper()} centrality",
+            unit="net",
+            dynamic_ncols=True,
+        )
+        for nf in pbar:
+            pbar.set_postfix(file=nf.stem[-6:])
             if calculate_centrality_for_network(
                 nf,
                 communities_dir=dp.COMMUNITIES,
                 centrality_dir=dp.CENTRALITY / model_name,
             ):
                 success_count += 1
+        pbar.close()
 
         summary[model_name] = success_count
         print(f"Completed: {success_count}/{len(network_files)}")

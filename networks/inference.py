@@ -222,9 +222,18 @@ def infer_networks(
     edges_count: list[int] = []
     successful_runs: int = 0
 
-    for idx, alpha in enumerate(alpha_values):
+    from tqdm import tqdm
+
+    pbar = tqdm(
+        enumerate(alpha_values),
+        total=n,
+        desc=f"{model_name[:4].upper()} alpha sweep",
+        unit="net",
+        dynamic_ncols=True,
+    )
+    for idx, alpha in pbar:
         output_stem = f"{name_output}-{model_suffix}-{idx:03d}"
-        print(f"  [{idx+1:3d}/{n}] alpha={alpha:.2e}", end="  ")
+        pbar.set_postfix(alpha=f"{alpha:.2e}")
 
         cmd = [
             str(Paths.NETINF_BIN),
@@ -254,7 +263,7 @@ def infer_networks(
         output_file = netinf_cwd / f"{output_stem}.txt"
 
         if result.returncode != 0 or not output_file.exists():
-            print(f"FAILED (rc={result.returncode})")
+            pbar.write(f"  [{idx:03d}] FAILED (rc={result.returncode})")
             edges_count.append(0)
             continue
 
@@ -271,9 +280,9 @@ def infer_networks(
                     if in_edges:
                         edge_count += 1
             edges_count.append(edge_count)
-            print(f"edges={edge_count}")
+            pbar.set_postfix(alpha=f"{alpha:.2e}", edges=edge_count)
         except Exception as exc:  # pylint: disable=broad-except
-            print(f"parse error: {exc}")
+            pbar.write(f"  [{idx:03d}] parse error: {exc}")
             edges_count.append(0)
 
         # Relocate network file

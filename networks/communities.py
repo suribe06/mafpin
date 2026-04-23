@@ -421,21 +421,31 @@ def calculate_communities_for_all_models(
             summary[model_name] = 0
             continue
 
+        from tqdm import tqdm
+
         print(f"\n{'='*50}")
         print(f"Model: {model_name.upper()} — {len(network_files)} networks")
         print("=" * 50)
 
-        success_count = sum(
-            1
-            for nf in network_files
+        success_count = 0
+        pbar = tqdm(
+            network_files,
+            desc=f"{model_name[:4].upper()} communities",
+            unit="net",
+            dynamic_ncols=True,
+        )
+        for nf in pbar:
+            pbar.set_postfix(file=nf.stem[-6:])
             if calculate_communities_for_network(
                 nf,
                 algorithm=algorithm,
                 epsilon=epsilon,
                 min_community=min_community,
                 output_dir=dp.COMMUNITIES / model_name,
-            )
-        )
+            ):
+                success_count += 1
+        pbar.close()
+
         summary[model_name] = success_count
         print(f"Completed: {success_count}/{len(network_files)}")
 
