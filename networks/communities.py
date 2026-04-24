@@ -253,7 +253,7 @@ def compute_lph_paper(
     membership: dict[int, set[int]],
 ) -> tuple[
     dict[int, float],  # h̃v scores
-    dict[int, int],    # s(v) neighborhood alignment
+    dict[int, int],  # s(v) neighborhood alignment
     dict[int, float],  # δv local dissimilarity
 ]:
     """
@@ -332,10 +332,7 @@ def compute_boundary_indicator(
 
     scores = list(lph_scores.values())
     threshold = float(pd.Series(scores).quantile(percentile / 100.0))
-    return {
-        node: int(score <= threshold)
-        for node, score in lph_scores.items()
-    }
+    return {node: int(score <= threshold) for node, score in lph_scores.items()}
 
 
 def save_community_results(
@@ -398,9 +395,15 @@ def save_community_results(
                 "community_ids": ";".join(map(str, coms)),
                 "local_pluralistic_hom": lph.get(uid, 0.0),
                 "s_v": s_values.get(uid) if s_values is not None else float("nan"),
-                "delta_v": delta_values.get(uid) if delta_values is not None else float("nan"),
+                "delta_v": (
+                    delta_values.get(uid) if delta_values is not None else float("nan")
+                ),
                 "lph_score": lph_paper.get(uid, 0.0),
-                "is_boundary": boundary_indicator.get(uid) if boundary_indicator is not None else float("nan"),
+                "is_boundary": (
+                    boundary_indicator.get(uid)
+                    if boundary_indicator is not None
+                    else float("nan")
+                ),
             }
         )
 
@@ -488,7 +491,9 @@ def calculate_communities_for_network(
     membership = compute_node_community_membership(user_ids, communities)
     lph = compute_local_pluralistic_homophily(G, membership)
     lph_scores, s_values, delta_values = compute_lph_paper(G, membership)
-    boundary_indicator = compute_boundary_indicator(lph_scores, percentile=boundary_percentile)
+    boundary_indicator = compute_boundary_indicator(
+        lph_scores, percentile=boundary_percentile
+    )
 
     save_community_results(
         user_ids,
