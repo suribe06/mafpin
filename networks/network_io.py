@@ -179,3 +179,89 @@ def parse_network_filename(filename: str) -> tuple[str, str]:
 
     model_name = Models.FROM_SHORT.get(model_short, model_short)
     return model_name, network_id
+
+
+# ---------------------------------------------------------------------------
+# Directed → undirected conversion
+# ---------------------------------------------------------------------------
+
+#: Supported symmetrization methods and brief descriptions.
+SYMMETRIZATION_METHODS: dict[str, str] = {
+    "union": (
+        "Add an undirected edge u–v if u→v OR v→u exists (edge-union). "
+        "This is the most permissive method and preserves the most connections."
+    ),
+    "intersection": (
+        "Add an undirected edge u–v only if BOTH u→v AND v→u exist (edge-intersection). "
+        "This is the most conservative method; retains only mutually confirmed links."
+    ),
+}
+
+
+def directed_to_undirected(
+    G: nx.DiGraph,
+    method: str = "union",
+) -> nx.Graph:
+    """
+    Convert a directed NetworkX graph to an undirected one.
+
+    Two symmetrization strategies are supported:
+
+    ``"union"`` *(default)*
+        An undirected edge ``{u, v}`` is added whenever **at least one**
+        directed edge exists between *u* and *v* (i.e. ``u→v`` **or**
+        ``v→u``).  This is the recommended starting point for the Barraza
+        et al. (2025) Local Pluralistic Homophily metric, which is defined
+        for undirected graphs.
+
+    ``"intersection"``
+        An undirected edge ``{u, v}`` is added only when **both**
+        ``u→v`` **and** ``v→u`` are present, i.e. mutual confirmation is
+        required.  This yields a sparser graph and models stronger
+        bidirectional influence.
+
+    All nodes from *G* are preserved in the output regardless of method so
+    that node-level metrics remain defined for isolated vertices.
+
+    Args:
+        G:      Directed NetworkX graph (e.g. from :func:`load_as_networkx`).
+        method: Symmetrization strategy — ``"union"`` or ``"intersection"``.
+
+    Returns:
+        Undirected ``nx.Graph`` with the same node set as *G*.
+
+    Raises:
+        ValueError: If *method* is not one of the supported options.
+
+    Examples:
+        >>> import networkx as nx
+        >>> DG = nx.DiGraph()
+        >>> DG.add_edges_from([(1, 2), (2, 1), (1, 3)])
+        >>> UG = directed_to_undirected(DG, method="union")
+        >>> sorted(UG.edges())
+        [(1, 2), (1, 3)]
+        >>> UG2 = directed_to_undirected(DG, method="intersection")
+        >>> sorted(UG2.edges())
+        [(1, 2)]
+    """
+    if method not in SYMMETRIZATION_METHODS:
+        raise ValueError(
+            f"Unknown symmetrization method: {method!r}. "
+            f"Choose from: {sorted(SYMMETRIZATION_METHODS)}"
+        )
+
+    UG = nx.Graph()
+    UG.add_nodes_from(G.nodes())
+
+    if method == "union":
+        # Edge exists if u→v OR v→u (or both)
+        for u, v in G.edges():
+            UG.add_edge(u, v)
+
+    elif method == "intersection":
+        # Edge exists only if u→v AND v→u both present
+        for u, v in G.edges():
+            if G.has_edge(v, u):
+                UG.add_edge(u, v)
+
+    return UG

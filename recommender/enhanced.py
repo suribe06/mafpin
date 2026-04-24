@@ -131,8 +131,9 @@ def load_network_features(
         if community_csv.exists():
             com_raw = pd.read_csv(community_csv)
             com_cols = ["UserId", "local_pluralistic_hom", "num_communities"]
-            if "lph_score" in com_raw.columns:
-                com_cols.append("lph_score")
+            for _opt_col in ("lph_score", "s_v", "delta_v", "is_boundary"):
+                if _opt_col in com_raw.columns:
+                    com_cols.append(_opt_col)
             df = df.merge(com_raw[com_cols], on="UserId", how="left")
 
             # Binary community-membership features: one column per community in
