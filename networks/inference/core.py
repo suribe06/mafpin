@@ -1,40 +1,11 @@
 """
-Network inference via the NetInf algorithm.
-
-For each alpha value in a log-spaced grid, the NetInf binary is invoked as a
-subprocess.  The binary infers a directed influence network from cascade data
-using one of three probabilistic diffusion models:
-
-    0 – exponential
-    1 – powerlaw
-    2 – rayleigh
-
-The alpha magnitude controls the decay rate of the model.  A symmetric grid
-centred on a data-driven value (derived from the median inter-event delta in
-``cascades.txt``) is used so that the sweep covers meaningfully diverse
-network densities.
-
-Outputs saved in ``data/<dataset>/inferred_networks/<model>/``:
-
-* ``inferred-network-<short>-<index>.txt`` – NetInf network file per alpha
-* ``edge_info/``                            – edge detail files from NetInf
-* ``inferred_edges_<short>.csv``           – alpha | edges table (pipe-sep)
-* ``alpha_grid_info_<short>.csv``          – grid provenance metadata
-
-Usage (CLI)::
-
-    python -m networks.inference --model exponential
-    python -m networks.inference --all
-    python -m networks.inference --help
+Core NetInf invocation: run the binary for a single model across an alpha grid.
 """
 
 from __future__ import annotations
 
-import argparse
-import glob
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -48,51 +19,10 @@ from networks.delta import (
     count_cascade_nodes,
     compute_k_from_nodes,
 )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _create_output_dirs(
-    model_name: str, networks_dir: Path | None = None
-) -> tuple[Path, Path]:
-    """
-    Create ``<networks_dir>/<model>`` and its ``edge_info`` sub-directory.
-
-    Args:
-        model_name:   Diffusion model name.
-        networks_dir: Root directory for inferred networks.  Defaults to
-            ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
-
-    Returns:
-        Tuple of (model_dir, edge_info_dir) as Path objects.
-    """
-    root = networks_dir or DatasetPaths(Datasets.DEFAULT).NETWORKS
-    model_dir = root / model_name
-    edge_info_dir = model_dir / "edge_info"
-    model_dir.mkdir(parents=True, exist_ok=True)
-    edge_info_dir.mkdir(parents=True, exist_ok=True)
-    return model_dir, edge_info_dir
-
-
-def _cleanup_leftover_edge_info(model_suffix: str, edge_info_dir: Path) -> None:
-    """
-    Move any remaining ``*-<suffix>-*-edge.info`` files from cwd into *edge_info_dir*.
-
-    NetInf sometimes leaves files in the working directory when it exits early.
-    """
-    for leftover in glob.glob(f"*-{model_suffix}-*-edge.info"):
-        try:
-            shutil.move(leftover, edge_info_dir / Path(leftover).name)
-        except Exception as exc:  # pylint: disable=broad-except
-            print(f"  Warning: could not move {leftover}: {exc}")
-
-
-# ---------------------------------------------------------------------------
-# Core inference
-# ---------------------------------------------------------------------------
+from networks.inference.subprocess_utils import (
+    _create_output_dirs,
+    _cleanup_leftover_edge_info,
+)
 
 
 def infer_networks(
@@ -249,9 +179,7 @@ def infer_networks(
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=str(
-                    Paths.NETINF_BIN.parent
-                ),  # run from networks/ where binary lives
+                cwd=str(Paths.NETINF_BIN.parent),
                 check=False,
             )
         except Exception as exc:  # pylint: disable=broad-except
@@ -325,152 +253,3 @@ def infer_networks(
     print(f"Results   : {results_file}")
     print(f"Grid info : {grid_info_file}")
     return True
-
-
-def infer_networks_all_models(
-    cascades_file: str | Path | None = None,
-    n: int = Defaults.N_ALPHAS,
-    max_iter: int = Defaults.MAX_ITER,
-    k_avg_degree: float | None = Defaults.K_AVG_DEGREE,
-    name_output: str = "inferred-network",
-    r: float = Defaults.RANGE_R,
-    networks_dir: Path | None = None,
-) -> dict[str, bool]:
-    """
-    Run network inference for all three diffusion models.
-
-    Args:
-        cascades_file: Path to cascades file.  Defaults to
-            ``DatasetPaths(Datasets.DEFAULT).CASCADES``.
-        n:              Number of alpha grid points.
-        max_iter:       Fallback edge budget k when *k_avg_degree* is ``None``.
-        k_avg_degree:   Target average out-degree used to compute k.  Defaults
-            to ``Defaults.K_AVG_DEGREE`` (2).
-        name_output:    Base name for output files.
-        r:              Range factor for the log alpha grid.
-        networks_dir:   Root directory for output networks.  Defaults to
-            ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
-
-    Returns:
-        Dict mapping model name → success flag.
-    """
-    results: dict[str, bool] = {}
-    for idx, model_name in enumerate(Models.ALL):
-        print(f"\n{'='*60}")
-        print(f"Model: {model_name.upper()}")
-        print("=" * 60)
-        results[model_name] = infer_networks(
-            cascades_file=cascades_file,
-            n=n,
-            model=idx,
-            max_iter=max_iter,
-            k_avg_degree=k_avg_degree,
-            name_output=name_output,
-            r=r,
-            networks_dir=networks_dir,
-        )
-    return results
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Infer diffusion networks from cascade data using NetInf.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--model",
-        choices=Models.ALL,
-        help="Run inference for a single diffusion model.",
-    )
-    group.add_argument(
-        "--all",
-        action="store_true",
-        help="Run inference for all three models.",
-    )
-    parser.add_argument(
-        "--dataset",
-        choices=Datasets.ALL,
-        default=Datasets.DEFAULT,
-        help="Dataset whose cascades/networks to use (default: %(default)s).",
-    )
-    parser.add_argument(
-        "--cascades",
-        default=None,
-        help="Override path to the cascades file.",
-    )
-    parser.add_argument(
-        "--n-alphas",
-        type=int,
-        default=Defaults.N_ALPHAS,
-        help="Number of alpha values in the grid.",
-    )
-    parser.add_argument(
-        "--max-iter",
-        type=int,
-        default=Defaults.MAX_ITER,
-        help="Fallback edge budget k when --k-fraction is disabled.",
-    )
-    parser.add_argument(
-        "--k-avg-degree",
-        type=float,
-        default=Defaults.K_AVG_DEGREE,
-        help="k = avg_degree × N edges per network (0 to disable; paper default: 2).",
-    )
-    parser.add_argument(
-        "--range-r",
-        type=float,
-        default=Defaults.RANGE_R,
-        help="Multiplicative range factor for the log alpha grid.",
-    )
-    parser.add_argument(
-        "--name-output",
-        default="inferred-network",
-        help="Base name for per-alpha output files.",
-    )
-    return parser
-
-
-def main() -> None:
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    dp = DatasetPaths(args.dataset)
-    cascades_file = args.cascades or dp.CASCADES
-    networks_dir = dp.NETWORKS
-    k_avg_degree = args.k_avg_degree if args.k_avg_degree > 0 else None
-
-    if args.all:
-        results = infer_networks_all_models(
-            cascades_file=cascades_file,
-            n=args.n_alphas,
-            max_iter=args.max_iter,
-            k_avg_degree=k_avg_degree,
-            name_output=args.name_output,
-            r=args.range_r,
-            networks_dir=networks_dir,
-        )
-        any_failed = any(not v for v in results.values())
-        sys.exit(1 if any_failed else 0)
-    else:
-        model_idx = Models.ALL.index(args.model)
-        success = infer_networks(
-            cascades_file=cascades_file,
-            n=args.n_alphas,
-            model=model_idx,
-            max_iter=args.max_iter,
-            k_avg_degree=k_avg_degree,
-            name_output=args.name_output,
-            r=args.range_r,
-            networks_dir=networks_dir,
-        )
-        sys.exit(0 if success else 1)
-
-
-if __name__ == "__main__":
-    main()
