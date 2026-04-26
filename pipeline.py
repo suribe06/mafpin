@@ -609,11 +609,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="k = avg_degree × N edges per network (0 to disable; paper default: 2).",
     )
     parser.add_argument(
-        "--include-communities",
-        action="store_true",
+        "--no-communities",
+        action="store_false",
         dest="include_communities",
-        help="Include community membership features in the enhanced CMF.",
+        help="Exclude community membership features from the enhanced CMF.",
     )
+    parser.set_defaults(include_communities=True)
     parser.add_argument(
         "--sample-networks",
         type=int,
