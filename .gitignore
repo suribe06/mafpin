@@ -5,6 +5,10 @@ __pycache__/
 
 # C extensions
 *.so
+a.out
+
+# Phase 6 pre-patch originals (local backups, not for VCS)
+*.phase6.orig
 
 # Distribution / packaging
 .Python

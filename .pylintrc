@@ -1,2 +1,4 @@
+[MASTER]
+ignore=cmfrec-master
+
 [MESSAGES CONTROL]
-disable=C0415
