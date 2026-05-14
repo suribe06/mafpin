@@ -17,7 +17,7 @@ The smoke-test report will be expanded step by step:
 1. Run the smoke test over all four social modes with the same network index. Status: completed below.
 2. Sweep `lambda_social` over a small log grid such as `0.001`, `0.01`, `0.1`, `1.0`. Status: completed below.
 3. Repeat on 10 random network indices for each diffusion model: exponential, powerlaw, and rayleigh. Status: completed below.
-4. Add user attributes back with a constrained grid over `w_user` and `lambda_reg`.
+4. Add user attributes back with a constrained grid over `w_user` and `lambda_reg`. Status: completed below.
 5. Promote the best stable settings into the full study pipeline.
 
 ## Command
@@ -88,6 +88,25 @@ python -m visualization.model_plots.social_regularization --dataset movielens --
 ```
 
 For Ciao, the same commands were run with `--dataset ciao`; Step 3 again used the Ciao Step 2 winner, `boundary_downweight` with `lambda_social=0.001`.
+
+The Step 4 user-attribute grid used the Step 2/3 social setting, `boundary_downweight` with `lambda_social=0.001`, and swept a constrained grid over `lambda_reg` and `w_user`:
+
+```bash
+conda run -n mafpin python -m recommender.enhanced.social_smoke_test \
+  --user-attribute-grid \
+  --dataset movielens \
+  --model exponential \
+  --network-index 0 \
+  --social-mode boundary_downweight \
+  --lambda-social 0.001 \
+  --max-ratings 5000 \
+  --k 8 \
+  --maxiter 20 \
+  --nthreads 1 \
+  --overwrite
+```
+
+For Ciao, the same Step 4 command was run with `--dataset ciao`.
 
 ## Dataset: MovieLens
 
@@ -234,6 +253,40 @@ Plots:
 
 ![R2 over sampled networks](../../plots/movielens/models/social_regularization/social_network_r2.png)
 
+### MovieLens Step 4: User-Attribute Grid
+
+Step 4 adds user attributes back into the patched social-regularized objective. It fixes the social configuration to `boundary_downweight` with `lambda_social=0.001` and sweeps:
+
+```text
+lambda_reg: 1.0, 3.0, 10.0
+w_user: 0.01, 0.05, 0.10
+```
+
+Result summary:
+
+| `lambda_reg` | `w_user` | RMSE | MAE | R2 | Baseline sane | Social sane |
+| ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `1.0` | `0.01` | `0.881127` | `0.686927` | `0.167372` | `false` | `true` |
+| `1.0` | `0.05` | `0.881396` | `0.686123` | `0.166863` | `false` | `true` |
+| `1.0` | `0.10` | `0.884214` | `0.687056` | `0.161528` | `true` | `true` |
+| `3.0` | `0.01` | `0.861362` | `0.675527` | `0.204307` | `false` | `true` |
+| `3.0` | `0.05` | `0.858254` | `0.672438` | `0.210039` | `false` | `true` |
+| `3.0` | `0.10` | `0.860909` | `0.674127` | `0.205144` | `false` | `true` |
+| `10.0` | `0.01` | `0.873900` | `0.691947` | `0.180975` | `true` | `true` |
+| `10.0` | `0.05` | `0.874075` | `0.692022` | `0.180647` | `false` | `true` |
+| `10.0` | `0.10` | `0.873227` | `0.691386` | `0.182236` | `true` | `true` |
+
+The best MovieLens Step 4 social-regularized result is `lambda_reg=3.0`, `w_user=0.05` (`RMSE=0.858254`, `MAE=0.672438`, `R2=0.210039`). This is substantially better than the no-user-attribute Step 3 scale around `RMSE=0.8738` and `R2=0.181`, suggesting that user attributes become useful once regularization is relaxed from `lambda_reg=10.0` to `3.0`.
+
+The no-social controls diverged for several grid cells, while all social-regularized fits remained rating-scale sane. For this smoke-test step, the social metrics are therefore useful for selecting a candidate setting, but invalid no-social controls should not be used as effect-size estimates.
+
+Step 4 artifacts:
+
+```text
+data/movielens/social_smoke_results/user_attribute_grid/user_attribute_grid_summary.csv
+data/movielens/social_smoke_results/user_attribute_grid/*.json
+```
+
 ## Dataset: Ciao
 
 ### Configuration
@@ -366,6 +419,35 @@ Plots:
 
 ![Ciao R2 over sampled networks](../../plots/ciao/models/social_regularization/social_network_r2.png)
 
+### Step 4: User-Attribute Grid
+
+The Ciao Step 4 grid used the same constrained values as MovieLens and the same `boundary_downweight`, `lambda_social=0.001` social configuration.
+
+Result summary:
+
+| `lambda_reg` | `w_user` | RMSE | MAE | R2 | Baseline sane | Social sane |
+| ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `1.0` | `0.01` | invalid | invalid | invalid | `true` | `false` |
+| `1.0` | `0.05` | `0.972431` | `0.728258` | `0.059025` | `false` | `true` |
+| `1.0` | `0.10` | `0.972062` | `0.729531` | `0.059739` | `true` | `true` |
+| `3.0` | `0.01` | `0.914638` | `0.700985` | `0.167548` | `true` | `true` |
+| `3.0` | `0.05` | invalid | invalid | invalid | `false` | `false` |
+| `3.0` | `0.10` | `0.910226` | `0.695675` | `0.175560` | `true` | `true` |
+| `10.0` | `0.01` | `0.933734` | `0.725955` | `0.132425` | `true` | `true` |
+| `10.0` | `0.05` | `0.933735` | `0.725957` | `0.132423` | `true` | `true` |
+| `10.0` | `0.10` | `0.933481` | `0.725756` | `0.132896` | `true` | `true` |
+
+The best rating-scale sane Ciao Step 4 result is `lambda_reg=3.0`, `w_user=0.10` (`RMSE=0.910226`, `MAE=0.695675`, `R2=0.175560`). This again points to `lambda_reg=3.0` as the useful side-user region, with Ciao preferring a stronger side-user weight than MovieLens.
+
+Ciao still shows intermittent L-BFGS divergence in both baseline and social-regularized fits. The invalid cells should be excluded from aggregate comparisons and either retried or handled with a stricter optimizer fallback before this grid is promoted into the full study.
+
+Step 4 artifacts:
+
+```text
+data/ciao/social_smoke_results/user_attribute_grid/user_attribute_grid_summary.csv
+data/ciao/social_smoke_results/user_attribute_grid/*.json
+```
+
 ## Diagnostics
 
 | Diagnostic | Result |
@@ -379,10 +461,12 @@ Plots:
 
 - This is a small smoke test, not a full experimental result.
 - The test filters to warm users and warm items so it validates the social regularizer rather than cold-start behavior.
-- User attributes are disabled here to isolate Phase 6.
+- User attributes are disabled in Steps 1-3 to isolate Phase 6, then enabled explicitly in Step 4.
 - The Step 1 result covers one diffusion model, one network index, and four social weighting modes per dataset.
 - The Step 2 result covers the same model and network index with four `lambda_social` values per mode per dataset.
 - The Step 3 result covers 10 sampled network indices per diffusion model per dataset, but still uses one social mode and one `lambda_social` value per dataset.
+- The Step 4 result adds user attributes back on one dataset/model/network setting per dataset and uses a constrained 3-by-3 grid over `lambda_reg` and `w_user`.
 - The observed differences between social modes are far smaller than what would be needed for a model-quality claim.
 - Ciao Step 3 can show intermittent L-BFGS divergence. In the overwrite rerun, the originally suspicious `exponential` network `60` was sane, while `rayleigh` network `6` diverged in the raw sweep but was sane in an isolated rerun. The by-model aggregate excludes invalid rows according to the sanity checks described above.
+- Step 4 confirms that side-user attributes can improve the smoke-test metrics, but it also keeps exposing occasional L-BFGS divergence. Invalid baseline or social rows are marked by the sanity checks and should be excluded from interpretation.
 - The Step 3 network plots connect sampled network indices for readability only; the x-axis is not a temporal or ordered training trajectory.
