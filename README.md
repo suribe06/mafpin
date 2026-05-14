@@ -15,6 +15,8 @@ The core hypothesis is that user centrality metrics and community structure in i
 | [docs/centrality_metrics.md](docs/centrality_metrics.md) | All seven centrality metrics with formulas |
 | [docs/usage.md](docs/usage.md) | Step-by-step CLI and Python API guide |
 | [docs/hyperparameter_tuning.md](docs/hyperparameter_tuning.md) | Optuna TPE search, parameter ranges, two-baseline strategy |
+| [docs/social_regularization.md](docs/social_regularization.md) | Phase 6 boundary-guided social regularization module reference |
+| [docs/reports/social_smoke_test.md](docs/reports/social_smoke_test.md) | Phase 6 social regularization smoke-test report |
 | [docs/visualization.md](docs/visualization.md) | Plot reference: alpha-RMSE, delta-RMSE, community and network plots |
 
 ## Quick Start
@@ -25,6 +27,9 @@ python3.9 -m venv .venv && source .venv/bin/activate
 
 # 2. Install dependencies
 pip install -r requirements.txt
+
+# 2b. Build the local cmfrec Cython extensions
+cd cmfrec-master && python setup.py build_ext --inplace && cd ..
 
 # 3. Run the full pipeline
 python pipeline.py --all
@@ -61,6 +66,7 @@ mafpin/
 ├── pipeline.py             # Unified CLI entry point
 ├── networks/               # Cascade generation, inference, centrality, communities
 ├── recommender/            # Dataset utilities, baseline CMF, enhanced CMF
+├── cmfrec-master/          # Local cmfrec source compiled in place
 ├── analysis/               # Post-hoc analyses (SHAP feature importance)
 ├── visualization/          # Plot functions (model, network, community)
 ├── data/                   # Raw data + generated artefacts
