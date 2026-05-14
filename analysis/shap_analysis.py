@@ -51,13 +51,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import shap
-from cmfrec import CMF  # type: ignore[import-untyped]
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
 from config import DatasetPaths, Datasets, Models
 from recommender.data import load_and_split_dataset
+from recommender._cmfrec import CMF
 from recommender.enhanced import load_network_features
 
 # ---------------------------------------------------------------------------

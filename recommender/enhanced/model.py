@@ -4,11 +4,10 @@ CMF model training and evaluation with user-side attributes.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
-from cmfrec import CMF  # type: ignore[import-untyped]
 
 from config import Defaults
+from recommender._cmfrec import CMF
 from recommender.data import evaluate_ranking, evaluate_single_split, split_data_single
 from recommender.enhanced.features import _SCALERS
 

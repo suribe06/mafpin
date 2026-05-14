@@ -1,0 +1,19 @@
+{
+  "exclude": [
+    "cmfrec-master",
+    "cmfrec-master/**",
+    "cmfrec",
+    "cmfrec/**",
+    "**/*.phase6.orig",
+    "data",
+    "datasets",
+    "mlruns",
+    "plots"
+  ],
+  "ignore": [
+    "cmfrec-master",
+    "cmfrec-master/**",
+    "cmfrec",
+    "cmfrec/**"
+  ]
+}

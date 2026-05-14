@@ -32,10 +32,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-from cmfrec import CMF  # type: ignore[import-untyped]
 
 from config import DatasetPaths, Datasets, Defaults
-
+from recommender._cmfrec import CMF
 
 # ---------------------------------------------------------------------------
 # Persistence helpers
@@ -66,7 +65,6 @@ from recommender.data import (
     split_data_single,
     evaluate_single_split,
 )
-
 
 # ---------------------------------------------------------------------------
 # Model training

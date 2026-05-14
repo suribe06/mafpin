@@ -8,7 +8,7 @@
 | snap-stanford | 6.0.0 |
 | networkx | ≥ 3.0 |
 | cdlib | 0.4.0 |
-| cmfrec | 3.5.1 |
+| cmfrec | Local source in `cmfrec-master/` |
 | pandas | ≥ 2.0 |
 | numpy | ≥ 1.24 |
 | scikit-learn | ≥ 1.3 |
@@ -20,7 +20,12 @@
 
 ```bash
 pip install -r requirements.txt
+cd cmfrec-master && python setup.py build_ext --inplace && cd ..
 ```
+
+`cmfrec` is intentionally not installed from PyPI. The repository imports the
+local `cmfrec-master/` source tree so Phase 6 can patch the C/Cython code and
+compile it in place.
 
 ## SNAP-Stanford Note
 
@@ -31,6 +36,7 @@ Use a dedicated virtual environment:
 python3.9 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cd cmfrec-master && python setup.py build_ext --inplace && cd ..
 ```
 
 On **macOS** with Apple Silicon, SNAP wheels are not available.  
@@ -64,4 +70,10 @@ print("SNAP OK — nodes:", G.GetNodes())
 ```python
 import cdlib
 print("cdlib version:", cdlib.__version__)
+```
+
+```python
+import cmfrec, inspect
+print(inspect.getfile(cmfrec))
+# should point to .../mafpin/cmfrec-master/cmfrec/__init__.py
 ```
