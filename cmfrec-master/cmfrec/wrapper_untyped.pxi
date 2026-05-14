@@ -39,7 +39,9 @@ cdef extern from "cmfrec.h":
         int nthreads, bint prefer_onepass,
         bint verbose, int_t print_every, bint handle_interrupt,
         int_t *niter, int_t *nfev,
-        real_t *B_plus_bias
+        real_t *B_plus_bias,
+        int_t social_row[], int_t social_col[], real_t *social_val,
+        size_t social_nnz, real_t lambda_social
     ) noexcept nogil
 
     int_t fit_offsets_explicit_lbfgs_internal(
@@ -596,7 +598,11 @@ def call_fit_collective_explicit_lbfgs(
         bint verbose=1, int_t print_every=10,
         int_t n_corr_pairs=5, int_t maxiter=400,
         int nthreads=1, bint prefer_onepass=0,
-        int_t seed=1, bint handle_interrupt=1
+        int_t seed=1, bint handle_interrupt=1,
+        np.ndarray[int_t, ndim=1] social_row=np.empty(0, dtype=ctypes.c_int),
+        np.ndarray[int_t, ndim=1] social_col=np.empty(0, dtype=ctypes.c_int),
+        np.ndarray[real_t, ndim=1] social_val=np.empty(0, dtype=c_real_t),
+        real_t lambda_social=0.
     ):
 
     cdef real_t *ptr_Xfull = NULL
@@ -671,6 +677,18 @@ def call_fit_collective_explicit_lbfgs(
     if lam_unique.shape[0]:
         ptr_lam_unique = &lam_unique[0]
 
+    if social_row.shape[0] != social_col.shape[0] or social_row.shape[0] != social_val.shape[0]:
+        raise ValueError("'social_row', 'social_col', and 'social_val' must have the same length.")
+    cdef int_t *ptr_social_row = NULL
+    cdef int_t *ptr_social_col = NULL
+    cdef real_t *ptr_social_val = NULL
+    cdef size_t social_nnz = 0
+    if social_row.shape[0] > 0 and lambda_social != 0.:
+        ptr_social_row = &social_row[0]
+        ptr_social_col = &social_col[0]
+        ptr_social_val = &social_val[0]
+        social_nnz = <size_t>social_row.shape[0]
+
     cdef size_t nvars = <size_t>max(m, m_u, m_ubin) * <size_t>(k_user+k+k_main) \
                         + <size_t>max(n, n_i, n_ibin) * <size_t>(k_item+k+k_main)
     if user_bias:
@@ -719,7 +737,9 @@ def call_fit_collective_explicit_lbfgs(
             nthreads, prefer_onepass,
             verbose, print_every, handle_interrupt,
             &niter, &nfev,
-            ptr_B_plus_bias
+            ptr_B_plus_bias,
+            ptr_social_row, ptr_social_col, ptr_social_val,
+            social_nnz, lambda_social
         )
 
     if retval == 1:
