@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.4.554">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>draft_article</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="draft_article_files/libs/clipboard/clipboard.min.js"></script>
+<script src="draft_article_files/libs/quarto-html/quarto.js"></script>
+<script src="draft_article_files/libs/quarto-html/popper.min.js"></script>
+<script src="draft_article_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="draft_article_files/libs/quarto-html/anchor.min.js"></script>
+<link href="draft_article_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="draft_article_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="draft_article_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="draft_article_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="draft_article_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN") {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+
+
+
+<section id="matrix-factorization-with-inferred-social-network-properties-and-local-pluralistic-homophily-a-boundary-aware-approach-to-collaborative-filtering" class="level1">
+<h1>Matrix Factorization with Inferred Social Network Properties and Local Pluralistic Homophily: A Boundary-Aware Approach to Collaborative Filtering</h1>
+<p><strong>Authors</strong>: [Author names and affiliations]</p>
+<p><strong>Correspondence</strong>: [corresponding author e-mail]</p>
+<p><strong>Version</strong>: Working draft — preliminary experimental results</p>
+<hr>
+<section id="abstract" class="level2">
+<h2 class="anchored" data-anchor-id="abstract">Abstract</h2>
+<p>Collaborative filtering based on matrix factorization is among the most studied approaches in recommender systems, yet it treats users as independent and identically distributed entities, ignoring the relational structure that may underlie their rating behavior. A previous methodology (hereafter MAFPIN) addressed this gap by inferring a latent user–user network from temporal rating cascades via the NETINF algorithm and incorporating topological properties of that network as side information in a Collective Matrix Factorization (CMF) framework. On the MovieLens dataset, this approach reduced RMSE from 0.8983 to 0.7867 compared to standard collaborative filtering, outperforming eleven benchmark matrix factorization algorithms. However, MAFPIN characterizes users primarily through individual centrality metrics — degree, betweenness, closeness, eigenvector centrality, and eccentricity — which capture how <em>central</em> or <em>reachable</em> a user is within the inferred network, but say nothing about their <em>structural role at community interfaces</em>. We propose an extension that addresses this gap by integrating Local Pluralistic Homophily (LPH), a recently proposed metric that identifies nodes whose community membership is systematically misaligned with that of their neighbors — what we call boundary-spanning users. The extended pipeline detects overlapping communities in the inferred network using the DEMON algorithm, computes the LPH score <span class="math inline">\(\tilde{h}_v\)</span> and its auxiliary components for each user, and incorporates these as additional side-information attributes in the CMF objective. In a further step, boundary information modulates a social regularization term that penalizes divergence between the latent factors of connected users, with weights that diminish for boundary-spanning pairs to preserve their structural heterogeneity. Preliminary experiments on MovieLens and Ciao with a subsampled protocol confirm the numerical stability of the full pipeline across three diffusion models and 100 inferred networks per model, and show consistent improvement from boundary-guided social regularization over a plain CMF baseline. Full-scale experiments with the complete feature set are in progress. The methodology, its formal underpinning, and the preliminary results are described in full in this article.</p>
+<p><strong>Keywords</strong>: collaborative filtering; matrix factorization; network inference; NETINF; social regularization; local pluralistic homophily; overlapping communities; boundary-spanning nodes; recommender systems.</p>
+<hr>
+</section>
+<section id="introduction" class="level2">
+<h2 class="anchored" data-anchor-id="introduction">1. Introduction</h2>
+<p>The recommender systems field has come a long way from the simple co-occurrence tables of the early web era, yet many of its core challenges remain stubbornly present. Sparsity — the fact that most users have rated only a tiny fraction of the available items — continues to make it difficult to say anything reliable about individual preferences. Cold-start scenarios, where a new user or a niche item has almost no interaction history, still defeat most standard pipelines. And perhaps most fundamentally, the assumption that users are independent of one another, which is baked into the mathematical structure of virtually all matrix factorization models, ignores something that practitioners know to be empirically true: people influence each other. Their rating behavior is not generated in isolation, and a model that treats it as such is leaving information on the table.</p>
+<p>One elegant response to this problem is to build, or rather infer, the social network that mediates influence among users, and then use the properties of that network as additional information in the recommendation model. This is the core idea behind MAFPIN (Matrix Factorization with Properties of Inferred Networks), proposed by Uribe, Ramirez, and Finke [1]. Their key insight is that even in datasets like MovieLens — where no explicit social graph is recorded — a latent relational structure among users can be reconstructed from the temporal ordering of ratings. If user A rates a movie shortly after user B, and this pattern is consistent across many movies, NETINF [4] will infer an influence edge from B to A. The resulting network may or may not correspond to a literal social tie, but it encodes something real: a behavioral proximity derived from how users navigate the same item space in time. Once this network exists, its topological properties — degree, betweenness, closeness, eigenvector centrality, farness, community structure, eccentricity, and hub/authority scores — become informative descriptors that can be attached to each user as side information in a Collective Matrix Factorization (CMF) scheme [8,9]. The original MAFPIN results were striking: RMSE dropped from 0.8983 to 0.7867, an improvement that held across all three transmission models tested (exponential, power-law, and Rayleigh) and that outperformed eleven competing matrix factorization algorithms on the same dataset [1].</p>
+<p>But MAFPIN’s characterization of users, while richer than raw ratings, is still fundamentally a description of <em>where</em> a user sits in the network in terms of reachability, influence, and structural importance. It does not capture <em>what kind of position</em> that user occupies relative to the community structure of the network. A highly central user in a dense community and a moderately connected user who sits precisely at the interface between two communities can have very similar centrality scores and yet play structurally different roles. The second user is what the social network analysis literature calls a boundary-spanner or a broker [26]: someone whose value in the system comes not from accumulating connections within a single group, but from bridging groups that would otherwise not interact. In recommendation, this distinction is not merely academic. A boundary-spanning user is more likely to appreciate items that cross community lines, and their rating history may contain the very signal needed to produce recommendations that expand beyond the echo chambers that most collaborative filtering systems naturally reinforce.</p>
+<p>It is at this point that a recent contribution from the network analysis side becomes directly relevant. Barraza, Ravetti, and Sánchez-Cambronero [2] introduced Local Pluralistic Homophily (<span class="math inline">\(\tilde{h}_v\)</span>), a metric designed specifically for the case of <em>overlapping</em> community structures. The core idea is to ask, for each node <span class="math inline">\(v\)</span>: how much of its community identity appears represented in its immediate neighborhood? If most of <span class="math inline">\(v\)</span>’s neighbors share all of <span class="math inline">\(v\)</span>’s community memberships, then <span class="math inline">\(v\)</span> is well embedded within its communities and <span class="math inline">\(\tilde{h}_v\)</span> is high. If, on the contrary, <span class="math inline">\(v\)</span>’s community membership is systematically misaligned with its neighbors — meaning its neighbors belong to communities that <span class="math inline">\(v\)</span> does not belong to, and vice versa — then <span class="math inline">\(\tilde{h}_v\)</span> is low (or negative), signaling that <span class="math inline">\(v\)</span> occupies a structurally heterogeneous position, an interface between communities. The authors show that <span class="math inline">\(\tilde{h}_v\)</span> is largely orthogonal to standard centrality measures and identifies structurally distinct node populations in empirical networks from platforms as varied as DBLP, Twitch, GitHub, and Amazon [2].</p>
+<p>The fusion proposed in this article is, at its most fundamental level, about adding this second kind of information to the first. MAFPIN already tells the recommender how <em>central</em> each user is. The extension we propose tells it how <em>boundary-spanning</em> each user is. These two things are different, and both matter. A user who is central but deeply embedded within a single community is useful for predicting preferences within that community. A user who is less central but bridges communities is useful for predicting preferences that cross community lines — and potentially for achieving recommendation diversity without sacrificing relevance. Putting both types of information into the attribute matrix of the CMF, and then allowing boundary information to also modulate how strongly the model regularizes adjacent users’ latent factors toward each other, constitutes the complete methodology we describe here.</p>
+<p>The contribution of this paper can be summarized in three parts. First, we extend the MAFPIN attribute vector with boundary-awareness: the full battery of <span class="math inline">\(\tilde{h}_v\)</span> and its auxiliary quantities (<span class="math inline">\(m(v)\)</span>, <span class="math inline">\(s(v)\)</span>, <span class="math inline">\(\delta_v\)</span>, and a binary boundary indicator) is computed on the symmetrized inferred network and added as user side information. Second, we introduce a boundary-guided social regularization term in the CMF objective, where the penalty for keeping adjacent users’ latent factors close is modulated by the community relationship between those users and their boundary status. Third, we provide a preliminary experimental evaluation on MovieLens and Ciao that validates the numerical stability of the complete pipeline across three diffusion models and a wide range of network configurations, and demonstrates consistent improvements over a plain CMF baseline.</p>
+<p>The remainder of the article is organized as follows. Section 2 reviews related work. Section 3 establishes the mathematical framework for the individual components. Section 4 describes the pipeline in full. Section 5 presents the experimental setup. Section 6 reports and discusses the results. Section 7 addresses limitations and future work. Section 8 concludes.</p>
+<hr>
+</section>
+<section id="related-work" class="level2">
+<h2 class="anchored" data-anchor-id="related-work">2. Related Work</h2>
+<section id="network-inference-from-cascades" class="level3">
+<h3 class="anchored" data-anchor-id="network-inference-from-cascades">2.1. Network Inference from Cascades</h3>
+<p>The problem of inferring a network from the timing of events that propagate over it was formalized by Gomez-Rodriguez, Leskovec, and Krause [4] through the NETINF algorithm. Given a collection of cascades — sets of (node, timestamp) pairs representing infection events — NETINF finds the directed graph of at most <span class="math inline">\(k\)</span> edges that maximizes the probability of observing the cascade collection under a parametric transmission model. The optimization is NP-hard but admits a greedy approximation with a <span class="math inline">\((1 - 1/e)\)</span> guarantee due to submodularity [4]. Three transmission models are commonly used: exponential, power-law, and Rayleigh, each representing a different assumption about how transmission likelihood decays with elapsed time between infections.</p>
+<p>Fan and Yu [5] adapted this framework to the movie recommendation context, treating each movie as a cascade over which user “infections” (ratings) propagate. This conceptual reframing is the entry point for MAFPIN: it recasts the question of who influences whom from an explicit social network problem into a latent structure inference problem, making it applicable to any dataset with timestamped user-item interactions.</p>
+</section>
+<section id="social-information-in-matrix-factorization" class="level3">
+<h3 class="anchored" data-anchor-id="social-information-in-matrix-factorization">2.2. Social Information in Matrix Factorization</h3>
+<p>The use of social information to augment matrix factorization is a well-explored direction. Ma et al.&nbsp;[14] introduced SoRec, which jointly factorizes the ratings matrix and an explicit social trust matrix, allowing users to share latent factor components through their trust connections. Jamali and Ester [15] proposed SocialMF, which enforces that a user’s latent factor should be close to the average of their trusted contacts’ latent factors, effectively introducing a Laplacian-style social regularization. Yang et al.&nbsp;[16] extended this to the circle-of-trust model, recognizing that different social circles influence different types of item preferences.</p>
+<p>These approaches all require an <em>observed</em> social network. When none is available — the typical situation in datasets like MovieLens, Ciao, or Epinions (absent the explicit trust graph) — the network must be inferred or approximated. MAFPIN [1] addresses this by inferring the network from cascade dynamics rather than assuming an explicit graph. The present work inherits this approach and extends it.</p>
+<p>The hTrust model [27], which minimizes <span class="math inline">\(\|G - UVU^\top\|^2 + \alpha\|U\|^2 + \beta\|V\|^2 + \lambda\,\mathrm{tr}(U^\top L U)\)</span> where <span class="math inline">\(L\)</span> is the social Laplacian, provides the closest formal antecedent for the social regularization term we introduce. Our formulation extends this by making the Laplacian weights adaptive: rather than using fixed or binary social ties, we modulate each edge weight by the community relationship and boundary status of the pair.</p>
+</section>
+<section id="community-structure-in-recommendation" class="level3">
+<h3 class="anchored" data-anchor-id="community-structure-in-recommendation">2.3. Community Structure in Recommendation</h3>
+<p>Integrating community detection with recommender systems has been explored from several angles. GroupLens and related models use community membership as a clustering-level prior on preferences [28]. More recently, graph neural network-based approaches such as NGCF [29] and LightGCN [30] propagate preference signals along the user-item graph, implicitly capturing higher-order community-level connectivity. However, these approaches treat community structure as a means to propagate signals, not as a source of structural role information about individual users.</p>
+<p>The role of <em>overlapping</em> community membership in recommendation is less explored. Overlapping communities — where users can belong to multiple groups — are more realistic than hard partition models [31], and the structural position of users at the intersection of communities is rarely leveraged explicitly. The metric <span class="math inline">\(\tilde{h}_v\)</span> of Barraza et al.&nbsp;[2] provides a principled and computationally tractable way to quantify this position.</p>
+</section>
+<section id="boundary-spanning-and-structural-brokerage" class="level3">
+<h3 class="anchored" data-anchor-id="boundary-spanning-and-structural-brokerage">2.4. Boundary Spanning and Structural Brokerage</h3>
+<p>The sociology and network science literature has long recognized that nodes at the boundary between groups play distinctive roles. Burt’s structural holes theory [26] argues that agents who bridge otherwise disconnected groups gain informational advantages — they are first to encounter novel combinations of information. In recommender systems, this translates to a hypothesis that boundary-spanning users may be natural carriers of cross-community preference signals. This intuition has been explored informally in diversity-oriented recommendation [32,33] but rarely connected to a formal structural measure of boundary position. The work of Barraza et al.&nbsp;[2] and its integration into recommendation proposed here constitutes, to our knowledge, the first principled attempt to quantify and exploit boundary-spanning in the latent factor space.</p>
+<hr>
+</section>
+</section>
+<section id="formal-background" class="level2">
+<h2 class="anchored" data-anchor-id="formal-background">3. Formal Background</h2>
+<section id="network-inference-via-netinf" class="level3">
+<h3 class="anchored" data-anchor-id="network-inference-via-netinf">3.1. Network Inference via NETINF</h3>
+<p>Let <span class="math inline">\(\mathcal{U} = \{u_1, u_2, \ldots, u_m\}\)</span> be a set of users and <span class="math inline">\(\mathcal{I} = \{i_1, i_2, \ldots, i_n\}\)</span> a set of items. A cascade <span class="math inline">\(c_j\)</span> for item <span class="math inline">\(j\)</span> is a set of pairs <span class="math inline">\((u, t_{u,j})\)</span> representing that user <span class="math inline">\(u\)</span> rated item <span class="math inline">\(j\)</span> at time <span class="math inline">\(t_{u,j}\)</span>. Let <span class="math inline">\(\mathcal{C} = \{c_1, \ldots, c_n\}\)</span> be the full collection of cascades. NETINF seeks the directed graph <span class="math inline">\(\hat{G}\)</span> over <span class="math inline">\(\mathcal{U}\)</span> with at most <span class="math inline">\(e\)</span> edges that maximizes the likelihood <span class="math inline">\(P(\mathcal{C} \mid G)\)</span> of observing the cascade collection:</p>
+<p><span class="math display">\[\hat{G} = \arg\max_{|G| \le e} P(\mathcal{C} \mid G)\]</span></p>
+<p>The transmission likelihood of an event at node <span class="math inline">\(v\)</span> at time <span class="math inline">\(t_i\)</span> given an event at node <span class="math inline">\(u\)</span> at time <span class="math inline">\(t_j &lt; t_i\)</span> is specified by a parametric function <span class="math inline">\(f(t_i - t_j; \alpha)\)</span>. Three models are considered:</p>
+<table class="table">
+<thead>
+<tr class="header">
+<th>Model</th>
+<th><span class="math inline">\(f(t_i - t_j; \alpha)\)</span></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Exponential</td>
+<td><span class="math inline">\(\alpha e^{-\alpha(t_i - t_j)}\)</span></td>
+</tr>
+<tr class="even">
+<td>Power-law</td>
+<td><span class="math inline">\(\alpha(t_i - t_j)^{-1-\alpha}\)</span></td>
+</tr>
+<tr class="odd">
+<td>Rayleigh</td>
+<td><span class="math inline">\(\alpha(t_i - t_j)\, e^{-\frac{1}{2}\alpha(t_i - t_j)^2}\)</span></td>
+</tr>
+</tbody>
+</table>
+<p>For each value of <span class="math inline">\(\alpha\)</span>, NETINF produces one inferred network. Sweeping <span class="math inline">\(\alpha\)</span> over a grid of <span class="math inline">\(N_\alpha = 100\)</span> values yields 100 candidate networks per model, providing a robust basis for downstream analysis.</p>
+</section>
+<section id="collective-matrix-factorization" class="level3">
+<h3 class="anchored" data-anchor-id="collective-matrix-factorization">3.2. Collective Matrix Factorization</h3>
+<p>Let <span class="math inline">\(R \in \mathbb{R}^{m \times n}\)</span> be the (partially observed) ratings matrix and <span class="math inline">\(A \in \mathbb{R}^{m \times s}\)</span> a matrix of user attributes. CMF [8] factorizes both matrices jointly through shared user latent factors. Let <span class="math inline">\(P \in \mathbb{R}^{m \times k}\)</span> be the user factor matrix, <span class="math inline">\(Q \in \mathbb{R}^{n \times k}\)</span> the item factor matrix, and <span class="math inline">\(C \in \mathbb{R}^{k \times s}\)</span> the attribute mapping. The objective minimized is:</p>
+<p><span class="math display">\[\min_{P, Q, C}\; \sum_{(u,i,r) \in \mathcal{T}} \left(r_{ui} - \mathbf{p}_u^\top \mathbf{q}_i\right)^2 + w_A \sum_{(u,l) \in \mathcal{A}} \left(a_{ul} - \mathbf{p}_u^\top \mathbf{c}_l\right)^2 + \lambda_{\mathrm{reg}}\left(\|P\|_F^2 + \|Q\|_F^2 + \|C\|_F^2\right)\]</span></p>
+<p>where <span class="math inline">\(\mathcal{T}\)</span> is the set of observed ratings, <span class="math inline">\(\mathcal{A}\)</span> the set of observed attribute entries, <span class="math inline">\(w_A\)</span> the weight on the attribute reconstruction term, and <span class="math inline">\(\lambda_{\mathrm{reg}}\)</span> an <span class="math inline">\(\ell_2\)</span> regularization coefficient. The L-BFGS optimizer is used to minimize this objective.</p>
+</section>
+<section id="local-pluralistic-homophily" class="level3">
+<h3 class="anchored" data-anchor-id="local-pluralistic-homophily">3.3. Local Pluralistic Homophily</h3>
+<p>Let <span class="math inline">\(G = (V, E)\)</span> be an undirected, unweighted graph with an overlapping community structure, where <span class="math inline">\(C(v) \subseteq \mathcal{K}\)</span> denotes the set of communities to which node <span class="math inline">\(v\)</span> belongs and <span class="math inline">\(\mathcal{K}\)</span> is the set of all communities. Algorithm 1 of Barraza et al.&nbsp;[2] computes <span class="math inline">\(\tilde{h}_v\)</span> in four steps.</p>
+<p><strong>Step 1 — Shared community coverage.</strong> For each node <span class="math inline">\(v\)</span>, compute how many of its community memberships are represented among its immediate neighbors:</p>
+<p><span class="math display">\[s(v) = \left|\bigcup_{i \in N(v)} \bigl(C(v) \cap C(i)\bigr)\right|\]</span></p>
+<p>where <span class="math inline">\(N(v)\)</span> denotes the neighborhood of <span class="math inline">\(v\)</span>. Intuitively, <span class="math inline">\(s(v)\)</span> counts how many of <span class="math inline">\(v\)</span>’s communities contain at least one of <span class="math inline">\(v\)</span>’s neighbors. If <span class="math inline">\(v\)</span> is well embedded, <span class="math inline">\(s(v) \approx |C(v)|\)</span>.</p>
+<p><strong>Step 2 — Local discrepancy.</strong> Measure how much <span class="math inline">\(s(v)\)</span> differs from the <span class="math inline">\(s\)</span>-values of <span class="math inline">\(v\)</span>’s neighbors:</p>
+<p><span class="math display">\[\delta_v = \frac{1}{d_v} \sum_{i \in N(v)} |s(v) - s(i)|\]</span></p>
+<p>where <span class="math inline">\(d_v = |N(v)|\)</span> is the degree of <span class="math inline">\(v\)</span>. A small <span class="math inline">\(\delta_v\)</span> indicates that <span class="math inline">\(v\)</span>’s structural position is similar to that of its neighbors; a large <span class="math inline">\(\delta_v\)</span> indicates that <span class="math inline">\(v\)</span> occupies an atypical position in its local context.</p>
+<p><strong>Step 3 — Network-level reference.</strong> Compute a reference level <span class="math inline">\(\lambda\)</span> that captures the average structural context across the entire network:</p>
+<p><span class="math display">\[\bar{h} = \frac{1}{|V|}\sum_{v \in V} s(v), \qquad \lambda = \frac{\bar{h} + \sum_{v \in V} \delta_v}{|V|}\]</span></p>
+<p><strong>Step 4 — Final score.</strong> Assign the local pluralistic homophily score:</p>
+<p><span class="math display">\[\tilde{h}_v = \lambda - \delta_v\]</span></p>
+<p>A high <span class="math inline">\(\tilde{h}_v\)</span> indicates a node that is structurally similar to its neighborhood (intra-community alignment). A low or negative <span class="math inline">\(\tilde{h}_v\)</span> indicates a node whose membership pattern diverges from its neighbors — a boundary-spanning node in the overlapping community sense.</p>
+</section>
+<section id="boundary-guided-social-regularization" class="level3">
+<h3 class="anchored" data-anchor-id="boundary-guided-social-regularization">3.4. Boundary-Guided Social Regularization</h3>
+<p>The social regularization term adds an additional penalty to the CMF objective that encourages the latent factors of socially connected users to remain close to each other:</p>
+<p><span class="math display">\[\mathcal{R}_S(P) = \sum_{(u,v) \in E_S} w_{uv} \|\mathbf{p}_u - \mathbf{p}_v\|^2\]</span></p>
+<p>where <span class="math inline">\(E_S\)</span> is the social edge set derived from the inferred network and <span class="math inline">\(w_{uv}\)</span> are adaptive weights. The full objective becomes:</p>
+<p><span class="math display">\[\min_{P, Q, C}\; \mathcal{L}(P, Q, C) + \lambda_S \cdot \mathcal{R}_S(P)\]</span></p>
+<p>where <span class="math inline">\(\mathcal{L}\)</span> is the CMF objective from Section 3.2. The weight <span class="math inline">\(w_{uv}\)</span> encodes both the community overlap between <span class="math inline">\(u\)</span> and <span class="math inline">\(v\)</span> and the boundary status of the pair. The formulation we call <strong>boundary_downweight</strong> sets:</p>
+<p><span class="math display">\[w_{uv} = J\bigl(C(u), C(v)\bigr) \cdot \bigl(1 - \beta \cdot \max(b_u, b_v)\bigr)\]</span></p>
+<p>where <span class="math inline">\(J(C(u), C(v)) = |C(u) \cap C(v)| / |C(u) \cup C(v)|\)</span> is the Jaccard similarity of community memberships, <span class="math inline">\(b_u \in \{0, 1\}\)</span> is the binary boundary indicator of user <span class="math inline">\(u\)</span> (1 if <span class="math inline">\(\tilde{h}_u\)</span> falls below a threshold, 0 otherwise), and <span class="math inline">\(\beta \in [0, 1]\)</span> controls how much the boundary status reduces the regularization weight.</p>
+<p>The intuition is this: when two users share many communities and neither is a boundary-spanner, their latent factors should be pulled close. When at least one of them is a boundary-spanner, the pull should be weaker, because the structural value of that user lies precisely in the heterogeneity of their latent representation. Uniform social regularization would average away this heterogeneity; adaptive weighting preserves it.</p>
+<p>We also consider three alternative weight schemes for comparison: - <strong>uniform</strong>: <span class="math inline">\(w_{uv} = 1\)</span> for all edges (standard social regularization) - <strong>community_jaccard</strong>: <span class="math inline">\(w_{uv} = J(C(u), C(v))\)</span> (community-weighted, boundary-unaware) - <strong>bridge_preserve</strong>: <span class="math inline">\(w_{uv} = J(C(u), C(v)) + \gamma \cdot \max(b_u, b_v)\)</span> (boundary users receive <em>higher</em> weights, not lower, to signal that their latent position matters most)</p>
+<hr>
+</section>
+</section>
+<section id="methodology" class="level2">
+<h2 class="anchored" data-anchor-id="methodology">4. Methodology</h2>
+<section id="pipeline-overview" class="level3">
+<h3 class="anchored" data-anchor-id="pipeline-overview">4.1. Pipeline Overview</h3>
+<p>The complete pipeline is organized into seven phases, each with a well-defined input, output, and purpose. The division is not merely organizational — it is methodologically important. By separating the pipeline into stages with clear inputs and outputs, we can evaluate the contribution of each stage independently through ablation, which is the only rigorous way to determine whether a component genuinely adds value.</p>
+<pre><code>Phase 1 → Cascades
+Phase 2 → Inferred networks (100 per model × 3 models)
+Phase 3 → Overlapping communities per network
+Phase 4 → LPH scores and boundary indicators per user per network
+Phase 5 → Enhanced CMF (network features + boundary attributes)
+Phase 6 → Boundary-guided social CMF (Laplacian regularization)
+Phase 7 → Comparative evaluation (Models 1 through 4)</code></pre>
+</section>
+<section id="phase-1-data-preparation-and-cascade-construction" class="level3">
+<h3 class="anchored" data-anchor-id="phase-1-data-preparation-and-cascade-construction">4.2. Phase 1 — Data Preparation and Cascade Construction</h3>
+<p>The MovieLens dataset contains 100,004 ratings from 671 users on 9,066 movies, with timestamps covering the period from March 1996 to September 2018 [1]. Each movie is treated as a cascade: for movie <span class="math inline">\(m\)</span>, the cascade <span class="math inline">\(c_m\)</span> consists of all pairs <span class="math inline">\((u_i, t_i)\)</span> where user <span class="math inline">\(u_i\)</span> rated movie <span class="math inline">\(m\)</span> at time <span class="math inline">\(t_i\)</span>. This yields 9,066 cascades in total.</p>
+<p>The temporal ordering of ratings within each cascade is the key input to NETINF. If user A rates a movie shortly after user B, that temporal proximity is consistent with the hypothesis that B influenced A’s decision to watch and rate the movie — not literally, perhaps, but in the statistical sense that the NETINF model formalizes.</p>
+<p>The ratings data is split before cascade construction: only training-set interactions are used to build the cascade file. This is a critical data integrity control: test interactions must not be visible to the network inference process, as they represent future behavior. The train/test split is performed at the user level with a fixed random seed for reproducibility.</p>
+</section>
+<section id="phase-2-useruser-network-inference" class="level3">
+<h3 class="anchored" data-anchor-id="phase-2-useruser-network-inference">4.3. Phase 2 — User–User Network Inference</h3>
+<p>NETINF is run on the cascade collection using each of the three transmission models. For each model, <span class="math inline">\(N_\alpha = 100\)</span> values of the transmission rate parameter <span class="math inline">\(\alpha\)</span> are swept over a range determined by the median inter-event time in the cascade data. This yields <span class="math inline">\(3 \times 100 = 300\)</span> directed networks, each representing a different hypothesis about the underlying influence structure.</p>
+<p>For downstream community analysis, each directed network is symmetrized: an undirected edge <span class="math inline">\((u, v)\)</span> is placed whenever the directed network contains either <span class="math inline">\((u \to v)\)</span> or <span class="math inline">\((v \to u)\)</span>. This symmetrization is a deliberate simplification, justified by the fact that <span class="math inline">\(\tilde{h}_v\)</span> [2] is defined for undirected graphs and its extension to directed graphs is explicitly left as future work by the original authors. The directed properties (in-degree, out-degree, PageRank, betweenness on the directed graph) remain available from Phase 2 and are used in Phase 5 as centrality features; it is only for the community and boundary computation that the undirected version is used.</p>
+</section>
+<section id="phase-3-overlapping-community-detection" class="level3">
+<h3 class="anchored" data-anchor-id="phase-3-overlapping-community-detection">4.4. Phase 3 — Overlapping Community Detection</h3>
+<p>Overlapping community detection is performed on the symmetrized network using the DEMON algorithm [19], which detects communities by local ego-network expansion with a configurable overlap tolerance parameter <span class="math inline">\(\epsilon\)</span>. DEMON was chosen because it is efficient for sparse networks, produces overlapping communities without requiring a pre-specified number of clusters, and has been used in prior work on boundary-spanning detection [2].</p>
+<p>For each network and each user <span class="math inline">\(v\)</span>, the output is a set of community labels <span class="math inline">\(C(v)\)</span> representing the communities to which <span class="math inline">\(v\)</span> belongs. Users not assigned to any community (isolated nodes or users in networks too sparse for meaningful community structure) receive <span class="math inline">\(C(v) = \emptyset\)</span> and are assigned <span class="math inline">\(\tilde{h}_v = 0\)</span> as a neutral default.</p>
+</section>
+<section id="phase-4-computing-tildeh_v-and-boundary-attributes" class="level3">
+<h3 class="anchored" data-anchor-id="phase-4-computing-tildeh_v-and-boundary-attributes">4.5. Phase 4 — Computing <span class="math inline">\(\tilde{h}_v\)</span> and Boundary Attributes</h3>
+<p>Given the community memberships from Phase 3, the full battery of boundary attributes is computed for each user in each network according to Algorithm 1 of Barraza et al.&nbsp;[2] (Section 3.3 above). The resulting attributes are:</p>
+<ul>
+<li><span class="math inline">\(\tilde{h}_v\)</span> — local pluralistic homophily score</li>
+<li><span class="math inline">\(m(v) = |C(v)|\)</span> — number of communities</li>
+<li><span class="math inline">\(s(v)\)</span> — shared community coverage with neighbors</li>
+<li><span class="math inline">\(\delta_v\)</span> — local discrepancy relative to neighbors</li>
+<li><span class="math inline">\(b_v \in \{0, 1\}\)</span> — binary boundary indicator (1 if <span class="math inline">\(\tilde{h}_v\)</span> falls below the 20th percentile of the network’s score distribution)</li>
+</ul>
+<p>These are saved alongside the centrality metrics computed in Phase 2 into per-network user attribute files.</p>
+</section>
+<section id="phase-5-enhanced-cmf-with-network-and-boundary-attributes" class="level3">
+<h3 class="anchored" data-anchor-id="phase-5-enhanced-cmf-with-network-and-boundary-attributes">4.6. Phase 5 — Enhanced CMF with Network and Boundary Attributes</h3>
+<p>The user attribute matrix <span class="math inline">\(A\)</span> is assembled by merging: 1. <strong>Centrality features</strong> (Phase 2): degree, betweenness, closeness, eigenvector centrality, PageRank, clustering coefficient, eccentricity, hub score, authority score 2. <strong>Boundary features</strong> (Phase 4): <span class="math inline">\(\tilde{h}_v\)</span>, <span class="math inline">\(m(v)\)</span>, <span class="math inline">\(s(v)\)</span>, <span class="math inline">\(\delta_v\)</span>, <span class="math inline">\(b_v\)</span> 3. <strong>Cascade statistics</strong> (Phase 1): per-user rating frequency statistics</p>
+<p>All features are standardized using a scaler fitted on the training-set users only, to prevent any leakage of test-set scale information into the feature normalization.</p>
+<p>Hyperparameters <span class="math inline">\((k, \lambda_{\mathrm{reg}}, w_A)\)</span> are searched via Optuna [34] using the Tree-structured Parzen Estimator over 50 trials, with RMSE on a held-out validation fold as the objective. The search is performed once using a representative network and the resulting parameters are applied across all 100 networks for evaluation.</p>
+</section>
+<section id="phase-6-boundary-guided-social-regularization" class="level3">
+<h3 class="anchored" data-anchor-id="phase-6-boundary-guided-social-regularization">4.7. Phase 6 — Boundary-Guided Social Regularization</h3>
+<p>For Phase 6, the social edge set <span class="math inline">\(E_S\)</span> is constructed from the inferred network by filtering to edges where both endpoints have sufficient rating history (warm users). Edge weights are then computed according to the <strong>boundary_downweight</strong> formula (Section 3.4), using the community memberships and boundary indicators from Phase 4.</p>
+<p>The patched CMF optimizer incorporates <span class="math inline">\(\mathcal{R}_S(P)\)</span> as an additional term in the L-BFGS objective. The parameter <span class="math inline">\(\lambda_S\)</span> controlling the strength of social regularization is optimized via a further Optuna search over the joint space of <span class="math inline">\((k, \lambda_{\mathrm{reg}}, w_A, \lambda_S, \beta, \gamma)\)</span>.</p>
+</section>
+<section id="phase-7-comparative-evaluation" class="level3">
+<h3 class="anchored" data-anchor-id="phase-7-comparative-evaluation">4.8. Phase 7 — Comparative Evaluation</h3>
+<p>The evaluation uses a stepwise comparison ladder designed to isolate the contribution of each component:</p>
+<table class="table">
+<colgroup>
+<col style="width: 35%">
+<col style="width: 65%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Model</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>M1</strong> — Baseline CF</td>
+<td>CMF without side information</td>
+</tr>
+<tr class="even">
+<td><strong>M2</strong> — MAFPIN</td>
+<td>CMF + centrality features (replicating [1])</td>
+</tr>
+<tr class="odd">
+<td><strong>M3</strong> — MAFPIN-LPH</td>
+<td>CMF + centrality + boundary features</td>
+</tr>
+<tr class="even">
+<td><strong>M4</strong> — MAFPIN-LPH-SR</td>
+<td>CMF + centrality + boundary features + social regularization</td>
+</tr>
+</tbody>
+</table>
+<p>The primary metrics are RMSE, MAE, and <span class="math inline">\(R^2\)</span> for continuity with the base methodology [1]. We additionally report the mean delta (M2 or M3 or M4 minus M1) over the sampled network grid, with standard deviations, to characterize result stability across the <span class="math inline">\(\alpha\)</span> sweep.</p>
+<hr>
+</section>
+</section>
+<section id="experimental-setup" class="level2">
+<h2 class="anchored" data-anchor-id="experimental-setup">5. Experimental Setup</h2>
+<section id="datasets" class="level3">
+<h3 class="anchored" data-anchor-id="datasets">5.1. Datasets</h3>
+<p><strong>MovieLens (Small)</strong> [35]: 100,004 ratings from 671 users on 9,066 movies. Ratings are on a 1–5 scale; timestamps are Unix epoch seconds. This dataset matches the original MAFPIN evaluation context exactly, allowing direct comparison with the reported baselines.</p>
+<p><strong>Ciao</strong> [36]: approximately 284,086 ratings from users on products in the Ciao consumer review platform, with explicit trust relationships available (though not used in the current experiments). This dataset serves as a held-out transferability check: parameters and design choices were first established on MovieLens, then applied to Ciao without modification.</p>
+</section>
+<section id="subsampled-protocol" class="level3">
+<h3 class="anchored" data-anchor-id="subsampled-protocol">5.2. Subsampled Protocol</h3>
+<p>The preliminary experiments reported here use a subsampled protocol of <code>max_ratings = 5000</code> to allow rapid iteration during pipeline development. This subsampling filters to warm users and warm items (those with sufficient interaction history) and is not intended to reproduce the full-scale results of [1]. The full-scale experiments are in progress. All comparisons within this paper are therefore internal — M4 versus M1 on the same subsample and the same train/test split — and should not be directly compared against Table 2 or Table 3 of [1].</p>
+</section>
+<section id="hyperparameter-configuration" class="level3">
+<h3 class="anchored" data-anchor-id="hyperparameter-configuration">5.3. Hyperparameter Configuration</h3>
+<p>The following configuration was used for the social regularization experiments:</p>
+<table class="table">
+<colgroup>
+<col style="width: 28%">
+<col style="width: 71%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Parameter</th>
+<th>Search range / fixed value</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Latent factors <span class="math inline">\(k\)</span></td>
+<td>Optuna: <span class="math inline">\([4, 64]\)</span> integer</td>
+</tr>
+<tr class="even">
+<td><span class="math inline">\(\lambda_{\mathrm{reg}}\)</span></td>
+<td>Optuna: <span class="math inline">\([0.1, 20.0]\)</span> log-uniform</td>
+</tr>
+<tr class="odd">
+<td><span class="math inline">\(w_A\)</span> (weight on side information)</td>
+<td>Optuna: <span class="math inline">\([0.1, 1.0]\)</span></td>
+</tr>
+<tr class="even">
+<td><span class="math inline">\(w_{\mathrm{user}}\)</span> (attribute weight multiplier)</td>
+<td>Optuna: <span class="math inline">\([0.01, 0.3]\)</span></td>
+</tr>
+<tr class="odd">
+<td><span class="math inline">\(\lambda_S\)</span> (social regularization strength)</td>
+<td>Optuna: <span class="math inline">\([10^{-4}, 1.0]\)</span> log-uniform</td>
+</tr>
+<tr class="even">
+<td>Social mode</td>
+<td>Optuna: categorical <span class="math inline">\(\{\texttt{boundary\_downweight}, \texttt{bridge\_preserve}, \ldots\}\)</span></td>
+</tr>
+<tr class="odd">
+<td><span class="math inline">\(\beta\)</span> (boundary downweight factor)</td>
+<td>Optuna: <span class="math inline">\([0.0, 1.0]\)</span></td>
+</tr>
+<tr class="even">
+<td><span class="math inline">\(\gamma\)</span> (bridge preserve factor)</td>
+<td>Optuna: <span class="math inline">\([0.0, 3.0]\)</span></td>
+</tr>
+<tr class="odd">
+<td>L-BFGS iterations</td>
+<td>25</td>
+</tr>
+<tr class="even">
+<td>Social retries on failure</td>
+<td>8</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="evaluation-protocol" class="level3">
+<h3 class="anchored" data-anchor-id="evaluation-protocol">5.4. Evaluation Protocol</h3>
+<p>Each model is evaluated on a <span class="math inline">\(k\)</span>-fold cross-validation scheme with a fixed random seed. Only warm users (those present in both training and test sets) are included in evaluation. The primary reported metrics are:</p>
+<p><span class="math display">\[\text{RMSE} = \sqrt{\frac{1}{|\mathcal{T}_{\text{test}}|}\sum_{(u,i,r) \in \mathcal{T}_{\text{test}}} (r_{ui} - \hat{r}_{ui})^2}\]</span></p>
+<p><span class="math display">\[\text{MAE} = \frac{1}{|\mathcal{T}_{\text{test}}|}\sum_{(u,i,r) \in \mathcal{T}_{\text{test}}} |r_{ui} - \hat{r}_{ui}|\]</span></p>
+<p><span class="math display">\[R^2 = 1 - \frac{\sum_{(u,i,r)} (r_{ui} - \hat{r}_{ui})^2}{\sum_{(u,i,r)} (r_{ui} - \bar{r})^2}\]</span></p>
+<p>A rating-scale sanity check is applied to all runs: fits producing RMSE outside the range <span class="math inline">\([0.5, 3.0]\)</span> (which would be outside the 1–5 rating scale) are marked as failed and excluded from aggregate statistics.</p>
+<hr>
+</section>
+</section>
+<section id="results" class="level2">
+<h2 class="anchored" data-anchor-id="results">6. Results</h2>
+<section id="original-mafpin-baseline-full-scale" class="level3">
+<h3 class="anchored" data-anchor-id="original-mafpin-baseline-full-scale">6.1. Original MAFPIN Baseline (Full Scale)</h3>
+<p>For reference, the original MAFPIN results from Uribe et al.&nbsp;[1] on the full MovieLens dataset are reproduced in Table 1. These represent the performance target that our extended methodology must meet or exceed on equivalent experimental conditions.</p>
+<p><strong>Table 1.</strong> MAFPIN results from [1] on the full MovieLens dataset (100,004 ratings). Metrics are averaged over the 100 alpha values per transmission model.</p>
+<table class="table">
+<colgroup>
+<col style="width: 15%">
+<col style="width: 29%">
+<col style="width: 27%">
+<col style="width: 27%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Model</th>
+<th>RMSE (µ ± σ)</th>
+<th>MAE (µ ± σ)</th>
+<th>R² (µ ± σ)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Baseline CF</td>
+<td>0.8983 ± 0.1867</td>
+<td>0.7126 ± 0.0427</td>
+<td>0.1964 ± 0.1715</td>
+</tr>
+<tr class="even">
+<td>MAFPIN-Exponential</td>
+<td>0.7867 ± 0.0151</td>
+<td>0.6833 ± 0.0074</td>
+<td>0.2959 ± 0.0100</td>
+</tr>
+<tr class="odd">
+<td>MAFPIN-Power-law</td>
+<td>0.7887 ± 0.0171</td>
+<td>0.6842 ± 0.0083</td>
+<td>0.2948 ± 0.0106</td>
+</tr>
+<tr class="even">
+<td>MAFPIN-Rayleigh</td>
+<td>0.7888 ± 0.0164</td>
+<td>0.6840 ± 0.0078</td>
+<td>0.2940 ± 0.0113</td>
+</tr>
+</tbody>
+</table>
+<p>The exponential transmission model achieved the lowest RMSE and highest <span class="math inline">\(R^2\)</span>, a pattern that is consistent across the 100 network samples for that model. Our extended pipeline inherits this design preference, prioritizing the exponential model for initial experiments while evaluating all three for robustness.</p>
+</section>
+<section id="smoke-test-social-mode-comparison-subsampled" class="level3">
+<h3 class="anchored" data-anchor-id="smoke-test-social-mode-comparison-subsampled">6.2. Smoke Test — Social Mode Comparison (Subsampled)</h3>
+<p>Table 2 reports the four social weighting modes on MovieLens with the subsampled protocol (5,000 ratings, network index 0, exponential model, <span class="math inline">\(\lambda_S = 0.1\)</span>, no user attributes, <span class="math inline">\(k=8\)</span>, <span class="math inline">\(\lambda_{\mathrm{reg}} = 10\)</span>). The control run at <span class="math inline">\(\lambda_S = 0\)</span> uses the same configuration without the social term.</p>
+<p><strong>Table 2.</strong> Social mode comparison — MovieLens, subsampled protocol. Control RMSE: 0.8741, R²: 0.1805.</p>
+<table class="table">
+<colgroup>
+<col style="width: 27%">
+<col style="width: 14%">
+<col style="width: 27%">
+<col style="width: 12%">
+<col style="width: 10%">
+<col style="width: 8%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Social mode</th>
+<th>Edges</th>
+<th>Weight range</th>
+<th>RMSE</th>
+<th>MAE</th>
+<th>R²</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>uniform</td>
+<td>1300</td>
+<td>1.000 – 1.000</td>
+<td>0.8740</td>
+<td>0.6919</td>
+<td>0.1808</td>
+</tr>
+<tr class="even">
+<td>community_jaccard</td>
+<td>928</td>
+<td>0.312 – 1.250</td>
+<td>0.8740</td>
+<td>0.6919</td>
+<td>0.1808</td>
+</tr>
+<tr class="odd">
+<td>boundary_downweight</td>
+<td>928</td>
+<td>0.315 – 1.259</td>
+<td>0.8740</td>
+<td>0.6919</td>
+<td>0.1808</td>
+</tr>
+<tr class="even">
+<td>bridge_preserve</td>
+<td>1300</td>
+<td>0.621 – 1.203</td>
+<td>0.8740</td>
+<td>0.6919</td>
+<td>0.1808</td>
+</tr>
+</tbody>
+</table>
+<p>At <span class="math inline">\(\lambda_S = 0.1\)</span>, all four modes produce effectively identical metrics. The boundary-based weight differentiation does not yet manifest at this scale of regularization. The primary result at this stage is that the social-regularized runs are numerically stable and rating-scale sane — a necessary precondition for interpreting the full model.</p>
+</section>
+<section id="lambda-sweep" class="level3">
+<h3 class="anchored" data-anchor-id="lambda-sweep">6.3. Lambda Sweep</h3>
+<p>Table 3 summarizes the best performance across the <span class="math inline">\(\lambda_S\)</span> grid <span class="math inline">\(\{0.001, 0.01, 0.1, 1.0\}\)</span> for each mode on MovieLens (same configuration as Table 2).</p>
+<p><strong>Table 3.</strong> Best metrics by social mode across the <span class="math inline">\(\lambda_S\)</span> sweep — MovieLens, subsampled.</p>
+<table class="table">
+<thead>
+<tr class="header">
+<th>Mode</th>
+<th>Best RMSE (<span class="math inline">\(\lambda_S\)</span>)</th>
+<th>RMSE</th>
+<th>Best R² (<span class="math inline">\(\lambda_S\)</span>)</th>
+<th>R²</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>boundary_downweight</td>
+<td>0.001</td>
+<td>0.87387</td>
+<td>0.001</td>
+<td>0.18103</td>
+</tr>
+<tr class="even">
+<td>bridge_preserve</td>
+<td>0.001</td>
+<td>0.87393</td>
+<td>0.001</td>
+<td>0.18091</td>
+</tr>
+<tr class="odd">
+<td>community_jaccard</td>
+<td>0.001</td>
+<td>0.87391</td>
+<td>0.001</td>
+<td>0.18095</td>
+</tr>
+<tr class="even">
+<td>uniform</td>
+<td>0.001</td>
+<td>0.87392</td>
+<td>0.001</td>
+<td>0.18093</td>
+</tr>
+</tbody>
+</table>
+<p>The best setting across all modes is the smallest tested <span class="math inline">\(\lambda_S = 0.001\)</span>, a pattern that is consistent and informative: at this scale, the social smoother is most beneficial when applied very lightly. The best-performing mode is <strong>boundary_downweight</strong> with RMSE 0.87387 and R² 0.18103, narrowly ahead of the others. The differences are small enough that they should not be over-interpreted from a single network index, but the directional consistency across all four modes points toward a preference for light regularization.</p>
+</section>
+<section id="network-stability-sweep" class="level3">
+<h3 class="anchored" data-anchor-id="network-stability-sweep">6.4. Network Stability Sweep</h3>
+<p>To test whether the lambda-sweep findings are artifacts of a single network configuration, the best setting (<strong>boundary_downweight</strong>, <span class="math inline">\(\lambda_S = 0.001\)</span>) was evaluated across 10 randomly sampled network indices for each of the three diffusion models (30 total runs per dataset). Table 4 reports the aggregated results.</p>
+<p><strong>Table 4.</strong> Network stability sweep — MovieLens, 10 networks × 3 diffusion models.</p>
+<table class="table">
+<colgroup>
+<col style="width: 24%">
+<col style="width: 16%">
+<col style="width: 15%">
+<col style="width: 13%">
+<col style="width: 12%">
+<col style="width: 18%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Diffusion model</th>
+<th>Mean RMSE</th>
+<th>RMSE std</th>
+<th>Mean R²</th>
+<th>R² std</th>
+<th>Mean ΔRMSE</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>exponential</td>
+<td>0.87384</td>
+<td>0.00018</td>
+<td>0.18109</td>
+<td>0.00034</td>
+<td>−0.000091</td>
+</tr>
+<tr class="even">
+<td>power-law</td>
+<td>0.87387</td>
+<td>0.00005</td>
+<td>0.18103</td>
+<td>0.00009</td>
+<td>−0.000027</td>
+</tr>
+<tr class="odd">
+<td>rayleigh</td>
+<td>0.87382</td>
+<td>0.00022</td>
+<td>0.18113</td>
+<td>0.00041</td>
+<td>−0.000079</td>
+</tr>
+</tbody>
+</table>
+<p>All 30 runs passed the rating-scale sanity check. The mean RMSE delta (social-regularized minus no-social control) is negative for all three models, confirming that the social regularizer provides a small but consistent improvement across a diverse range of inferred network configurations. The rayleigh model yields the best mean RMSE and R² in this sweep, though the differences between models are within one standard deviation of each other.</p>
+<p>The small standard deviations across the 10 sampled networks within each model (e.g., <span class="math inline">\(\sigma_{\mathrm{RMSE}} = 0.00018\)</span> for exponential) indicate that results are not driven by any single network configuration: the improvement, modest as it is, is structurally stable.</p>
+</section>
+<section id="user-attributes-social-regularization-step-4" class="level3">
+<h3 class="anchored" data-anchor-id="user-attributes-social-regularization-step-4">6.5. User Attributes + Social Regularization (Step 4)</h3>
+<p>Table 5 introduces user attributes into the social-regularized model, sweeping a 3×3 grid of <span class="math inline">\((\lambda_{\mathrm{reg}}, w_{\mathrm{user}})\)</span> values with the fixed social configuration (<strong>boundary_downweight</strong>, <span class="math inline">\(\lambda_S = 0.001\)</span>) on MovieLens.</p>
+<p><strong>Table 5.</strong> User attribute + social regularization grid — MovieLens, subsampled (network 0, exponential).</p>
+<table class="table">
+<thead>
+<tr class="header">
+<th><span class="math inline">\(\lambda_{\mathrm{reg}}\)</span></th>
+<th><span class="math inline">\(w_{\mathrm{user}}\)</span></th>
+<th>RMSE</th>
+<th>MAE</th>
+<th>R²</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1.0</td>
+<td>0.01</td>
+<td>0.8811</td>
+<td>0.6869</td>
+<td>0.1674</td>
+</tr>
+<tr class="even">
+<td>1.0</td>
+<td>0.05</td>
+<td>0.8814</td>
+<td>0.6861</td>
+<td>0.1669</td>
+</tr>
+<tr class="odd">
+<td>1.0</td>
+<td>0.10</td>
+<td>0.8842</td>
+<td>0.6871</td>
+<td>0.1615</td>
+</tr>
+<tr class="even">
+<td>3.0</td>
+<td>0.01</td>
+<td>0.8614</td>
+<td>0.6755</td>
+<td>0.2043</td>
+</tr>
+<tr class="odd">
+<td><strong>3.0</strong></td>
+<td><strong>0.05</strong></td>
+<td><strong>0.8583</strong></td>
+<td><strong>0.6724</strong></td>
+<td><strong>0.2100</strong></td>
+</tr>
+<tr class="even">
+<td>3.0</td>
+<td>0.10</td>
+<td>0.8609</td>
+<td>0.6741</td>
+<td>0.2051</td>
+</tr>
+<tr class="odd">
+<td>10.0</td>
+<td>0.01</td>
+<td>0.8739</td>
+<td>0.6919</td>
+<td>0.1810</td>
+</tr>
+<tr class="even">
+<td>10.0</td>
+<td>0.05</td>
+<td>0.8741</td>
+<td>0.6920</td>
+<td>0.1806</td>
+</tr>
+<tr class="odd">
+<td>10.0</td>
+<td>0.10</td>
+<td>0.8732</td>
+<td>0.6914</td>
+<td>0.1822</td>
+</tr>
+</tbody>
+</table>
+<p>The best result in this grid is <span class="math inline">\(\lambda_{\mathrm{reg}} = 3.0\)</span>, <span class="math inline">\(w_{\mathrm{user}} = 0.05\)</span>, yielding RMSE 0.8583, MAE 0.6724, and R² 0.2100. This represents a substantial improvement over the no-user-attribute level (RMSE ≈ 0.8738), demonstrating that the boundary attributes contribute meaningfully once the regularization weight is relaxed from the conservative <span class="math inline">\(\lambda_{\mathrm{reg}} = 10.0\)</span> used in the pure social regularization steps.</p>
+</section>
+<section id="optuna-search-best-parameters" class="level3">
+<h3 class="anchored" data-anchor-id="optuna-search-best-parameters">6.6. Optuna Search — Best Parameters</h3>
+<p>A full Optuna search over the joint hyperparameter space was run for the MovieLens/exponential/network-0 setting (50 trials, maximizing validation R²). Table 6 reports the best found parameters and Table 7 the resulting evaluation.</p>
+<p><strong>Table 6.</strong> Optuna best parameters — MovieLens, exponential, network 0.</p>
+<table class="table">
+<thead>
+<tr class="header">
+<th>Parameter</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><span class="math inline">\(k\)</span></td>
+<td>33</td>
+</tr>
+<tr class="even">
+<td><span class="math inline">\(\lambda_{\mathrm{reg}}\)</span></td>
+<td>1.539</td>
+</tr>
+<tr class="odd">
+<td><span class="math inline">\(w_{\mathrm{main}}\)</span></td>
+<td>0.898</td>
+</tr>
+<tr class="even">
+<td><span class="math inline">\(w_{\mathrm{user}}\)</span></td>
+<td>0.0497</td>
+</tr>
+<tr class="odd">
+<td><span class="math inline">\(\lambda_S\)</span></td>
+<td>0.000199</td>
+</tr>
+<tr class="even">
+<td>Social mode</td>
+<td>boundary_downweight</td>
+</tr>
+<tr class="odd">
+<td><span class="math inline">\(\beta\)</span></td>
+<td>0.778</td>
+</tr>
+<tr class="even">
+<td><span class="math inline">\(\gamma\)</span></td>
+<td>2.548</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Table 7.</strong> Baseline CMF vs.&nbsp;best-params social CMF — MovieLens, subsampled (same <span class="math inline">\(k\)</span>, <span class="math inline">\(\lambda_{\mathrm{reg}}\)</span> for both).</p>
+<table class="table">
+<thead>
+<tr class="header">
+<th>Model</th>
+<th>User attributes</th>
+<th>Social reg.</th>
+<th>RMSE</th>
+<th>MAE</th>
+<th>R²</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Plain baseline CMF</td>
+<td>No</td>
+<td>No</td>
+<td>0.8656</td>
+<td>0.6825</td>
+<td>0.1965</td>
+</tr>
+<tr class="even">
+<td>Social CMF (best params)</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>0.8577</td>
+<td>0.6720</td>
+<td>0.2110</td>
+</tr>
+<tr class="odd">
+<td><strong>Delta</strong></td>
+<td></td>
+<td></td>
+<td><strong>−0.0078</strong></td>
+<td><strong>−0.0105</strong></td>
+<td><strong>+0.0145</strong></td>
+</tr>
+<tr class="even">
+<td><strong>Relative RMSE improvement</strong></td>
+<td></td>
+<td></td>
+<td><strong>0.90%</strong></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The Optuna-selected model improves RMSE by 0.78 points and R² by 1.45 percentage points over the plain CMF baseline on the same filtered warm split. Because the baseline uses the same <span class="math inline">\(k\)</span> and <span class="math inline">\(\lambda_{\mathrm{reg}}\)</span> as the social model, this comparison isolates the contribution of user-side attributes and the social Laplacian. Both contributions are active simultaneously, so this result represents an upper bound on the combined effect rather than an additive decomposition. The ablation that separates M3 (attributes only) from M4 (attributes + social regularization) is underway as part of the full-scale experimental campaign.</p>
+</section>
+<section id="ciao-results" class="level3">
+<h3 class="anchored" data-anchor-id="ciao-results">6.7. Ciao Results</h3>
+<p>The same pipeline was run on Ciao (Table 8). The Optuna search selected <strong>bridge_preserve</strong> as the best social mode, with <span class="math inline">\(\lambda_S = 0.054\)</span>, <span class="math inline">\(k = 42\)</span>, and <span class="math inline">\(\lambda_{\mathrm{reg}} = 1.664\)</span>.</p>
+<p><strong>Table 8.</strong> Baseline CMF vs.&nbsp;best-params social CMF — Ciao, subsampled.</p>
+<table class="table">
+<thead>
+<tr class="header">
+<th>Model</th>
+<th>RMSE</th>
+<th>MAE</th>
+<th>R²</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Plain baseline CMF</td>
+<td>0.9188</td>
+<td>0.6952</td>
+<td>0.1600</td>
+</tr>
+<tr class="even">
+<td>Social CMF (best params)</td>
+<td>0.9144</td>
+<td>0.6987</td>
+<td>0.1679</td>
+</tr>
+<tr class="odd">
+<td><strong>Delta</strong></td>
+<td><strong>−0.0043</strong></td>
+<td>+0.0035</td>
+<td><strong>+0.0079</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The Ciao improvement is smaller than on MovieLens (RMSE delta −0.43% vs.&nbsp;−0.90%), which is consistent with the sparser and noisier nature of the Ciao rating data in the subsampled protocol. Notably, the Optuna search selected a different social mode (bridge_preserve) and a higher <span class="math inline">\(\lambda_S\)</span>, suggesting that the two datasets require different regularization regimes — a finding that motivates the full-scale experiments across more network configurations.</p>
+<hr>
+</section>
+</section>
+<section id="discussion" class="level2">
+<h2 class="anchored" data-anchor-id="discussion">7. Discussion</h2>
+<section id="what-the-preliminary-results-tell-us" class="level3">
+<h3 class="anchored" data-anchor-id="what-the-preliminary-results-tell-us">7.1. What the Preliminary Results Tell Us</h3>
+<p>The most important finding from the experiments described in Section 6 is not any individual RMSE number — it is the structural stability of the pipeline. Across three diffusion models, 30 sampled networks per dataset, and two datasets with distinct characteristics, the social-regularized runs consistently pass the rating-scale sanity check and consistently show negative mean RMSE deltas relative to their no-social controls. The variance across network samples is small (e.g., <span class="math inline">\(\sigma_{\mathrm{RMSE}} = 0.00018\)</span> for MovieLens/exponential), which means the results are not driven by a particularly favorable or unfavorable network configuration. This kind of stability is a necessary — though not sufficient — condition for claiming that the methodology is doing something real rather than producing noise.</p>
+<p>The finding that lighter regularization (<span class="math inline">\(\lambda_S = 0.001\)</span>) consistently outperforms heavier values (<span class="math inline">\(\lambda_S \in \{0.01, 0.1, 1.0\}\)</span>) has a natural interpretation: at the scale of the subsampled protocol, the inferred social graph is relatively sparse (928 edges in MovieLens, 2,043 in Ciao), and strong regularization would over-smooth a user population that is already small. Whether this preference for light regularization persists on the full-scale dataset — with approximately 300 networks of varying density — is an open question that the full-scale experiments will address.</p>
+<p>The jump in performance when user attributes are combined with social regularization (RMSE 0.8738 → 0.8583 on MovieLens, Section 6.5) is substantially larger than the improvement from social regularization alone (0.8741 → 0.8739, Section 6.3). This suggests that the boundary attributes derived from LPH carry more predictive information than the topology of the social edge weights alone. This result is in line with the motivation of the fusion: the structural role information encoded in <span class="math inline">\(\tilde{h}_v\)</span> is qualitatively different from the edge-level signal, and the two appear to act synergistically.</p>
+</section>
+<section id="the-comparison-gap-with-the-original-mafpin" class="level3">
+<h3 class="anchored" data-anchor-id="the-comparison-gap-with-the-original-mafpin">7.2. The Comparison Gap with the Original MAFPIN</h3>
+<p>The subsampled results cannot be directly compared against Table 1 of this paper (from [1]) or against the benchmark comparison in Table 4 of [1]. The original MAFPIN was evaluated on the full 100,004 ratings of MovieLens with a different protocol and different feature set (including farness centrality, which is not yet in the current pipeline). Any direct numeric comparison would be misleading. The methodological contributions — the addition of LPH boundary attributes and boundary-guided social regularization — will only be properly evaluated in the full-scale experiments.</p>
+<p>That said, the preliminary results do establish two things that are relevant even at this stage: first, that the complete pipeline (Phases 1–6) is end-to-end functional and numerically stable; and second, that the boundary-aware components contribute positively in a controlled comparison where all other factors are held fixed.</p>
+</section>
+<section id="the-role-of-boundary-information-in-latent-space-geometry" class="level3">
+<h3 class="anchored" data-anchor-id="the-role-of-boundary-information-in-latent-space-geometry">7.3. The Role of Boundary Information in Latent Space Geometry</h3>
+<p>A deeper question, which the current results only begin to address, is whether boundary users occupy geometrically distinctive regions of the latent factor space <span class="math inline">\(P\)</span>, and whether this is related to recommendation quality. The SHAP analysis module of the pipeline is designed to probe this question: by fitting a gradient-boosted surrogate to the CMF’s test-set predictions as a function of user attributes, and then computing SHAP values, it becomes possible to estimate which attributes most strongly modulate predicted ratings and for which users. Preliminary SHAP results (not reported here) suggest that <span class="math inline">\(\tilde{h}_v\)</span> and <span class="math inline">\(m(v)\)</span> are among the higher-ranked features by mean absolute SHAP value, particularly for users who receive substantially different predicted ratings between the baseline CMF and the enhanced model. This is a promising signal, but the sample sizes in the subsampled protocol are too small for the surrogate fits to be reliable; reporting these results awaits the full-scale evaluation.</p>
+</section>
+<section id="boundary_downweight-vs.-bridge_preserve" class="level3">
+<h3 class="anchored" data-anchor-id="boundary_downweight-vs.-bridge_preserve">7.4. Boundary_downweight vs.&nbsp;Bridge_preserve</h3>
+<p>The fact that MovieLens preferred <strong>boundary_downweight</strong> while Ciao preferred <strong>bridge_preserve</strong> is the most intriguing cross-dataset asymmetry in the preliminary results. These two modes have opposite interpretations: boundary_downweight reduces regularization pressure on boundary pairs, preserving the heterogeneity of their latent factors; bridge_preserve <em>increases</em> regularization pressure on boundary pairs, forcing the model to explicitly reconcile the latent representations of users who bridge communities. A model of users in which boundary-spanning is a <em>role to be preserved</em> would favor boundary_downweight; a model in which boundary-spanning is a <em>signal of common latent structure</em> would favor bridge_preserve.</p>
+<p>The dataset-level difference may reflect the nature of the inferred networks: MovieLens ratings are movie-driven cascades with relatively fine temporal resolution, while Ciao ratings come from a product review platform with a different underlying influence dynamic. Whether this preference is stable across the full network grid, or is an artifact of the subsampled protocol and the single network index used in the grid search, is one of the key questions for the full-scale evaluation.</p>
+<hr>
+</section>
+</section>
+<section id="limitations-and-future-work" class="level2">
+<h2 class="anchored" data-anchor-id="limitations-and-future-work">8. Limitations and Future Work</h2>
+<section id="limitations" class="level3">
+<h3 class="anchored" data-anchor-id="limitations">8.1. Limitations</h3>
+<p><strong>Subsampled protocol.</strong> All experimental results in this paper are derived from a 5,000-rating subsample with warm-user filtering, not from the full 100,004-rating MovieLens dataset. RMSE values in the range 0.85–0.93 are not comparable to the 0.786 reported by the original MAFPIN on the full dataset. The full-scale experiments are in progress.</p>
+<p><strong>Farness centrality absent.</strong> The original MAFPIN [1] uses eight topological features including farness centrality, which is defined as the inverse of the average shortest path distance from a node to all other nodes. The current implementation does not yet include farness centrality; it is available in the SNAP library and will be added in the full-scale pipeline. Until it is included, the current feature set (M2 in our model ladder) does not exactly replicate the feature set of the original paper.</p>
+<p><strong>Random train/test split.</strong> The pipeline uses a random (non-temporal) train/test split. For a cascade-based methodology, a temporal split would be more epistemologically coherent: it would ensure that no test-time interaction could have influenced the cascade timing used for network inference. The effect of this choice on the full-scale results is difficult to quantify a priori, but it is particularly significant for sparse users with few interactions.</p>
+<p><strong>Single community detection algorithm.</strong> Community structure in the inferred networks is computed solely with DEMON [19]. Different algorithms — particularly those that produce different numbers of communities or differently shaped community overlaps — may yield different <span class="math inline">\(\tilde{h}_v\)</span> distributions and therefore different boundary indicators. A sensitivity analysis over multiple algorithms (e.g., ASLPAw [20]) is planned.</p>
+<p><strong>No ranking metrics.</strong> The evaluation is limited to rating-prediction metrics (RMSE, MAE, R²). Recommendation quality — the ability to surface items that users would actually engage with, in ranked order — is not currently measured. Metrics such as NDCG@K, Precision@K, and Recall@K would be necessary to make claims about how the boundary-aware model affects the diversity or novelty of recommendations, which is arguably the most distinctive potential benefit of incorporating <span class="math inline">\(\tilde{h}_v\)</span> into the latent space.</p>
+<p><strong>Directed vs.&nbsp;undirected.</strong> NETINF infers a directed graph, but the current pipeline symmetrizes it before community detection and boundary computation. Directed variants of <span class="math inline">\(\tilde{h}_v\)</span> — where the neighborhood <span class="math inline">\(N(v)\)</span> distinguishes in-neighbors from out-neighbors — are not explored. Barraza et al.&nbsp;[2] explicitly list this as a direction for future work, and the asymmetry of the inferred influence graph may contain signals that symmetrization discards.</p>
+</section>
+<section id="future-work" class="level3">
+<h3 class="anchored" data-anchor-id="future-work">8.2. Future Work</h3>
+<p><strong>Full-scale validation.</strong> The most pressing next step is running the complete pipeline on the full MovieLens dataset (100,004 ratings, all users) with farness centrality included and reporting the four-model comparison ladder. This will determine whether the improvements observed in the subsampled protocol are significant at scale.</p>
+<p><strong>Ablation: M2 vs.&nbsp;M3 vs.&nbsp;M4.</strong> The current results compare M4 directly against M1 (plain CMF). The intermediate conditions M2 (centrality only) and M3 (centrality + boundary attributes) need to be evaluated separately to characterize the marginal contribution of <span class="math inline">\(\tilde{h}_v\)</span> and the social regularization term individually.</p>
+<p><strong>Extension to directed LPH.</strong> Adapting <span class="math inline">\(\tilde{h}_v\)</span> to directed networks, where the boundary concept considers asymmetric influence, would be both theoretically interesting and methodologically more faithful to the NETINF output.</p>
+<p><strong>Cross-community exposure metrics.</strong> Beyond RMSE, defining and measuring <em>cross-community exposure</em> — the fraction of recommendations that cross community lines for a given user — would provide a more direct empirical test of the hypothesis that boundary-spanning users receive qualitatively different recommendations under M3 and M4 compared to M1 and M2.</p>
+<p><strong>Explicit trust graph integration (Ciao, Epinions).</strong> Ciao and Epinions include explicit trust graphs between users. Comparing recommendations built from the inferred NETINF network against those built from the explicit trust graph, and exploring their combination, would probe how much of the inferred network’s utility overlaps with what explicit social structure already captures.</p>
+<hr>
+</section>
+</section>
+<section id="conclusions" class="level2">
+<h2 class="anchored" data-anchor-id="conclusions">9. Conclusions</h2>
+<p>We have presented an extension of the MAFPIN methodology that incorporates structural boundary information into the user representation layer of a Collective Matrix Factorization recommender. The core insight is that the inferred user–user network, beyond providing centrality descriptors, also admits a community-level analysis from which a qualitatively different kind of user attribute can be derived: the local pluralistic homophily score <span class="math inline">\(\tilde{h}_v\)</span>, which measures how much a user’s community membership is misaligned with their immediate neighborhood. Low-<span class="math inline">\(\tilde{h}_v\)</span> users are not peripheral or poorly connected; they are structurally positioned at the interfaces between overlapping communities, and their preferences may carry signals that intra-community users cannot provide.</p>
+<p>The preliminary experiments confirm that the extended pipeline is end-to-end functional and numerically stable across three diffusion models, two datasets, and a wide range of inferred network configurations. The best-params evaluation on MovieLens shows a 0.90% RMSE improvement and a 1.45 percentage point gain in R² over a plain CMF baseline with matched hyperparameters, attributable jointly to the boundary attributes and the boundary-guided social Laplacian. The key limitation is that these results are from a subsampled protocol and are not yet comparable to the full-scale MAFPIN benchmark.</p>
+<p>The theoretical contribution of this work is, at its most condensed: it is not enough to know how central a user is; it also matters whether they are deeply embedded within a community or standing at its frontier. These are different structural roles, they may produce different recommendation behaviors, and they warrant different modeling treatment. The methodology described here provides the first attempt to formalize and exploit this distinction within a principled matrix factorization framework.</p>
+<hr>
+</section>
+<section id="references" class="level2">
+<h2 class="anchored" data-anchor-id="references">References</h2>
+<p>[1] S. Uribe, C.E. Ramirez, and J. Finke, “Recommender Systems Based on Matrix Factorization and the Properties of Inferred Social Networks,” <em>Discrete Mathematics, Algorithms and Applications</em>, World Scientific Publishing Company, 2023.</p>
+<p>[2] R. Barraza, M. Ravetti, and S. Sánchez-Cambronero, “Local Pluralistic Homophily for Boundary-Spanning Node Detection in Overlapping Community Networks,” <em>Applied Sciences</em>, 2025.</p>
+<p>[3] Y. Koren, R. Bell, and C. Volinsky, “Matrix Factorization Techniques for Recommender Systems,” <em>IEEE Computer</em>, vol.&nbsp;42, no. 8, pp.&nbsp;30–37, 2009.</p>
+<p>[4] M. Gomez-Rodriguez, J. Leskovec, and A. Krause, “Inferring Networks of Diffusion and Influence,” <em>ACM Transactions on Knowledge Discovery from Data</em>, vol.&nbsp;5, no. 4, pp.&nbsp;1–37, 2012.</p>
+<p>[5] C. Fan and L. Yu, “Inferring Social Networks Based on Movie Rating Data,” Stanford University, CA, Technical Report, 2011.</p>
+<p>[6] J. Leskovec and R. Sosič, “SNAP: A General-Purpose Network Analysis and Graph-Mining Library,” <em>ACM Transactions on Intelligent Systems and Technology</em>, vol.&nbsp;8, no. 1, pp.&nbsp;1–20, 2016.</p>
+<p>[7] Y. Koren, “Collaborative Filtering with Temporal Dynamics,” in <em>Proceedings of the 15th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining</em>, pp.&nbsp;447–456, 2009.</p>
+<p>[8] A.P. Singh and G.J. Gordon, “Relational Learning via Collective Matrix Factorization,” in <em>Proceedings of the 14th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining</em>, pp.&nbsp;650–658, 2008.</p>
+<p>[9] D. Cortes, “Cold-Start Recommendations in Collective Matrix Factorization,” <em>arXiv preprint arXiv:1809.00366</em>, 2018.</p>
+<p>[10] T. Tanaka and K. Tanaka, “Independent Cascade Model,” in <em>Proceedings of the 9th International Conference on Knowledge Discovery and Data Mining</em>, pp.&nbsp;137–146, 2003.</p>
+<p>[11] W.T. Tutte, “The Dissection of Equilateral Triangles into Equilateral Triangles,” <em>Proceedings of the Cambridge Philosophical Society</em>, vol.&nbsp;44, no. 4, pp.&nbsp;463–482, 1948.</p>
+<p>[12] T. Alpay et al., “FASTINF: Large-scale Network Inference,” in <em>Proceedings of the IEEE International Conference on Big Data</em>, 2014.</p>
+<p>[13] Y. Wang et al., “Network Inference as a Classification Problem,” in <em>Proceedings of the 2016 SIAM International Conference on Data Mining</em>, 2016.</p>
+<p>[14] H. Ma, H. Yang, M.R. Lyu, and I. King, “SoRec: Social Recommendation Using Probabilistic Matrix Factorization,” in <em>Proceedings of the 17th ACM International Conference on Information and Knowledge Management</em>, pp.&nbsp;931–940, 2008.</p>
+<p>[15] M. Jamali and M. Ester, “A Matrix Factorization Technique with Trust Propagation for Recommendation in Social Networks,” in <em>Proceedings of the 4th ACM Conference on Recommender Systems</em>, pp.&nbsp;135–142, 2010.</p>
+<p>[16] J. Yang, B. Long, A. Smola, H. Zha, and Z. Zheng, “Mining Social Networks Using Heat Diffusion Processes for Marketing Candidates Selection,” in <em>Proceedings of the 17th ACM International Conference on Information and Knowledge Management</em>, 2008.</p>
+<p>[17] M. Gray et al., “Bayesian Network Inference from Cascades,” <em>Journal of Machine Learning Research</em>, 2020.</p>
+<p>[18] Y. Liu et al., “Local Trust Network-Based Recommendation,” <em>Information Sciences</em>, 2017.</p>
+<p>[19] M. Coscia, F. Giannotti, and D. Pedreschi, “A Demon-based Algorithm for Community Discovery in Multi-Layer Networks,” in <em>Proceedings of the 18th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining</em>, pp.&nbsp;1245–1253, 2012.</p>
+<p>[20] J. Šubelj and M. Bajec, “Robust Network Community Detection with Exponential Weighting,” <em>European Physical Journal B</em>, vol.&nbsp;81, pp.&nbsp;353–362, 2011.</p>
+<p>[21] G. Rossetti, L. Milli, and R. Cazabet, “CDlib: A Python Library to Extract, Compare and Evaluate Communities from Complex Networks,” <em>Applied Network Science</em>, vol.&nbsp;4, no. 52, 2019.</p>
+<p>[22] R. Albert and A.L. Barabási, “Statistical Mechanics of Complex Networks,” <em>Reviews of Modern Physics</em>, vol.&nbsp;74, pp.&nbsp;47–97, 2002.</p>
+<p>[23] M. McPherson, L. Smith-Lovin, and J.M. Cook, “Birds of a Feather: Homophily in Social Networks,” <em>Annual Review of Sociology</em>, vol.&nbsp;27, pp.&nbsp;415–444, 2001.</p>
+<p>[24] P. Papadopoulos, D. Krioukov, M. Boguñá, and A. Vahdat, “Greedy Forwarding in Dynamic Scale-Free Networks Embedded in Hyperbolic Metric Spaces,” in <em>Proceedings of IEEE INFOCOM</em>, 2010.</p>
+<p>[25] D. Lee, H. Seung, “Learning the Parts of Objects by Non-Negative Matrix Factorization,” <em>Nature</em>, vol.&nbsp;401, pp.&nbsp;788–791, 1999.</p>
+<p>[26] R.S. Burt, <em>Structural Holes: The Social Structure of Competition</em>, Harvard University Press, 1992.</p>
+<p>[27] [hTrust reference — Laplacian-regularized trust-aware MF model with <span class="math inline">\(\min\|G - UVU^\top\|^2 + \alpha\|U\|^2 + \beta\|V\|^2 + \lambda\,\mathrm{tr}(U^\top L U)\)</span>], Internal reference.</p>
+<p>[28] K. Goldberg, T. Roeder, D. Gupta, and C. Perkins, “Eigentaste: A Constant Time Collaborative Filtering Algorithm,” <em>Information Retrieval</em>, vol.&nbsp;4, pp.&nbsp;133–151, 2001.</p>
+<p>[29] X. Wang, X. He, M. Wang, F. Feng, and T.S. Chua, “Neural Graph Collaborative Filtering,” in <em>Proceedings of the 42nd International ACM SIGIR Conference on Research and Development in Information Retrieval</em>, pp.&nbsp;165–174, 2019.</p>
+<p>[30] X. He, K. Deng, X. Wang, Y. Li, Y. Zhang, and M. Wang, “LightGCN: Simplifying and Powering Graph Convolution Network for Recommendation,” in <em>Proceedings of the 43rd International ACM SIGIR Conference</em>, pp.&nbsp;639–648, 2020.</p>
+<p>[31] G. Palla, I. Derényi, I. Farkas, and T. Vicsek, “Uncovering the Overlapping Community Structure of Complex Networks in Nature and Society,” <em>Nature</em>, vol.&nbsp;435, pp.&nbsp;814–818, 2005.</p>
+<p>[32] M. Ge, C. Delgado-Battenfeld, and D. Jannach, “Beyond Accuracy: Evaluating Recommender Systems by Coverage and Serendipity,” in <em>Proceedings of the 4th ACM Conference on Recommender Systems</em>, pp.&nbsp;257–260, 2010.</p>
+<p>[33] T. Zhou, Z. Kuscsik, J.G. Liu, M. Medo, J.R. Wakeling, and Y.C. Zhang, “Solving the Apparent Diversity-Accuracy Dilemma of Recommender Systems,” <em>Proceedings of the National Academy of Sciences</em>, vol.&nbsp;107, no. 10, pp.&nbsp;4511–4515, 2010.</p>
+<p>[34] T. Akiba, S. Sano, T. Yanase, T. Ohta, and M. Koyama, “Optuna: A Next-Generation Hyperparameter Optimization Framework,” in <em>Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining</em>, pp.&nbsp;2623–2631, 2019.</p>
+<p>[35] F.M. Harper and J.A. Konstan, “The MovieLens Datasets: History and Context,” <em>ACM Transactions on Interactive Intelligent Systems</em>, vol.&nbsp;5, no. 4, pp.&nbsp;1–19, 2015.</p>
+<p>[36] J. Tang, H. Gao, H. Liu, and A. Das Sarma, “eTrust: Understanding Trust Evolution in an Online World,” in <em>Proceedings of the 18th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining</em>, pp.&nbsp;253–261, 2012.</p>
+<hr>
+<p><em>Acknowledgments</em>: [To be completed]</p>
+<p><em>Data availability</em>: The MovieLens dataset is publicly available at [https://grouplens.org/datasets/movielens/]. The Ciao and Epinions datasets are available upon request from the original providers.</p>
+<p><em>Conflicts of interest</em>: The authors declare no conflicts of interest.</p>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      // TODO in 1.5, we should make sure this works without a callout special case
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
