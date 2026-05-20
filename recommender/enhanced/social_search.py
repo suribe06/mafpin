@@ -357,6 +357,11 @@ def search_social_regularized_params(
     best_trial = study.best_trial if complete_trials else None
     best_value = best_trial.value if best_trial is not None else None
     best_params = dict(best_trial.params) if best_trial is not None else {}
+    # beta/gamma are sampled conditionally: if the best trial's social_mode
+    # did not require them, they won't be in best_trial.params.  Fill in the
+    # same fixed defaults used in _trial_params so callers always see both keys.
+    best_params.setdefault("beta", 0.0)
+    best_params.setdefault("gamma", 1.0)
     best_metrics = (
         dict(best_trial.user_attrs.get("metrics", {})) if best_trial is not None else {}
     )
