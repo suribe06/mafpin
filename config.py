@@ -50,6 +50,7 @@ class DatasetPaths:
         self.PLOTS = Paths.PLOTS / dataset
         self.BASELINE_RESULTS = base / "baseline_search_results.json"
         self.ENHANCED_RESULTS = base / "enhanced_search_results.json"
+        self.SOCIAL_RESULTS = base / "social_hyperparam_search_results.json"
         self.SHAP_RESULTS = base / "shap_results.json"
 
 
@@ -135,6 +136,11 @@ class Defaults:
     # CMF side-information weights (enhanced model only)
     W_MAIN = 1.0  # weight for main rating-matrix reconstruction loss
     W_USER = 0.1  # weight for user side-information reconstruction loss
+    CMF_METHOD = "lbfgs"  # social regularization requires L-BFGS
+    CMF_MAXITER = 25  # optimizer iterations for L-BFGS CMF fits
+    CMF_RANDOM_STATE = 42
+    CPU_FRACTION = 0.4  # default share of CPU cores used by CMF/BLAS workloads
+    SOCIAL_N_TRIALS = 200  # Optuna trials for the larger social CMF search space
 
 
 # ---------------------------------------------------------------------------

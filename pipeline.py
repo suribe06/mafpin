@@ -52,9 +52,113 @@ shap
 from __future__ import annotations
 
 import argparse
+import json
+import math
+import os
 import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any, TextIO
 
-from config import Defaults
+from config import DatasetPaths as ConfigDatasetPaths, Defaults
+
+
+class _TeeStream:
+    def __init__(self, primary: TextIO, log_file: TextIO) -> None:
+        self.primary = primary
+        self.log_file = log_file
+        self.encoding = getattr(primary, "encoding", "utf-8")
+
+    def write(self, data: str) -> int:
+        self.primary.write(data)
+        self.log_file.write(data)
+        self.flush()
+        return len(data)
+
+    def flush(self) -> None:
+        self.primary.flush()
+        self.log_file.flush()
+
+    def isatty(self) -> bool:
+        return self.primary.isatty()
+
+    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+        return getattr(self.primary, name)
+
+
+def _cpu_thread_limit(cpu_fraction: float) -> int:
+    cpu_count = os.cpu_count() or 1
+    safe_fraction = min(max(cpu_fraction, 0.05), 1.0)
+    return max(1, int(cpu_count * safe_fraction))
+
+
+def _resolve_cmf_nthreads(args: argparse.Namespace) -> int:
+    explicit = getattr(args, "cmf_nthreads", 0)
+    if explicit and explicit > 0:
+        return int(explicit)
+    return _cpu_thread_limit(float(args.cpu_fraction))
+
+
+def _configure_cpu_limits(args: argparse.Namespace) -> int:
+    nthreads = _resolve_cmf_nthreads(args)
+    for var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "NUMEXPR_MAX_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+    ):
+        os.environ[var] = str(nthreads)
+    print(
+        f"CPU limit: CMF/BLAS threads capped at {nthreads} "
+        f"(~{float(args.cpu_fraction):.0%} of detected cores)."
+    )
+    return nthreads
+
+
+def _default_log_path(dataset: str) -> Path:
+    return ConfigDatasetPaths(dataset).BASE / "pipeline.log"
+
+
+def _open_pipeline_log(args: argparse.Namespace) -> TextIO | None:
+    if args.no_log:
+        return None
+    log_path = Path(args.log_file) if args.log_file else _default_log_path(args.dataset)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = log_path.open("a", encoding="utf-8", buffering=1)
+    print(f"Pipeline log: {log_path}", flush=True)
+    return log_file
+
+
+def _best_rmse_from_results(search_result: dict[str, Any]) -> float | None:
+    values: list[float] = []
+    for row in search_result.get("all_results", []):
+        rmse = row.get("rmse") if isinstance(row, dict) else None
+        if isinstance(rmse, (int, float)) and math.isfinite(float(rmse)):
+            values.append(float(rmse))
+    return min(values) if values else None
+
+
+def _print_best_hyperparams(label: str, search_result: dict[str, Any]) -> None:
+    best_params = search_result.get("best_params") or {}
+    print(f"\n{label} best hyperparameters:", flush=True)
+    if best_params:
+        print(json.dumps(best_params, indent=2, sort_keys=True), flush=True)
+    else:
+        print("{}", flush=True)
+
+    best_value = search_result.get("best_value")
+    if best_value is None:
+        best_value = _best_rmse_from_results(search_result)
+    if isinstance(best_value, (int, float)) and math.isfinite(float(best_value)):
+        print(f"{label} best RMSE: {float(best_value):.6f}", flush=True)
+
+    best_metrics = search_result.get("best_metrics") or {}
+    if best_metrics:
+        print(f"{label} best metrics:", flush=True)
+        print(json.dumps(best_metrics, indent=2, sort_keys=True), flush=True)
+
 
 # ---------------------------------------------------------------------------
 # Step runners
@@ -213,23 +317,38 @@ def _run_recommend(args: argparse.Namespace) -> None:
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
     with mlflow.start_run(run_name="recommend"):
+        cmf_nthreads = _resolve_cmf_nthreads(args)
         mlflow.log_params(
             {
                 "include_communities": args.include_communities,
                 "sample_networks": args.sample_networks,
                 "all_networks": args.all_networks,
                 "model": args.model or "all",
-                "n_optuna_trials": 50,
+                "n_baseline_optuna_trials": 50,
+                "n_enhanced_optuna_trials": 50,
+                "n_social_optuna_trials": (
+                    args.social_n_trials if args.social_regularization else 0
+                ),
                 "n_cv_splits": 3,
+                "cmf_method": args.cmf_method,
+                "cmf_maxiter": args.cmf_maxiter,
+                "cmf_nthreads": cmf_nthreads,
+                "cpu_fraction": args.cpu_fraction,
+                "social_regularization": args.social_regularization,
             }
         )
 
         _, train_df, test_df = load_and_split_dataset(dataset=args.dataset)
+        selected_models = [args.model] if args.model else Models.ALL
+        selected_social_mode = args.social_mode
+        selected_lambda_social = args.lambda_social
+        selected_social_beta = args.social_beta
+        selected_social_gamma = args.social_gamma
 
         # Find first available feature file to represent the feature space.
         sample_features = None
         sample_model_name = None
-        for _mn in Models.ALL:
+        for _mn in selected_models:
             sample_features = load_network_features(
                 _mn,
                 0,
@@ -249,26 +368,74 @@ def _run_recommend(args: argparse.Namespace) -> None:
             )
             with mlflow.start_run(run_name="baseline_search", nested=True):
                 baseline_search = search_baseline_params(
-                    train_df, n_trials=50, n_splits=3
+                    train_df,
+                    n_trials=50,
+                    n_splits=3,
+                    method=args.cmf_method,
+                    maxiter=args.cmf_maxiter,
+                    nthreads=cmf_nthreads,
                 )
             best_k_b = baseline_search["best_params"]["k"]
             best_lambda_b = baseline_search["best_params"]["lambda_reg"]
+            _print_best_hyperparams("Baseline CMF", baseline_search)
 
-            # Independent Optuna search for the enhanced model
-            print(
-                f"Searching best enhanced hyperparameters (Optuna TPE — k, "
-                f"lambda_reg, w_main, w_user) using first "
-                f"{sample_model_name} network …"
-            )
-            with mlflow.start_run(run_name="enhanced_search", nested=True):
-                enhanced_search = search_enhanced_params(
-                    train_df, sample_features, n_trials=50, n_splits=3
+            if args.social_regularization:
+                from recommender.enhanced.social_search import (
+                    search_social_regularized_params,
                 )
-            save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
+
+                print(
+                    f"Searching best social CMF hyperparameters (Optuna TPE) "
+                    f"using {sample_model_name} network #000 "
+                    f"({args.social_n_trials} trials) …"
+                )
+                with mlflow.start_run(run_name="social_search", nested=True):
+                    enhanced_search = search_social_regularized_params(
+                        dataset=args.dataset,
+                        model_name=sample_model_name or selected_models[0],
+                        network_index=0,
+                        n_trials=args.social_n_trials,
+                        max_ratings=args.social_search_max_ratings,
+                        maxiter=args.cmf_maxiter,
+                        random_state=args.seed,
+                        nthreads=cmf_nthreads,
+                        include_user_attributes=True,
+                        output_path=dp.SOCIAL_RESULTS,
+                    )
+                if not enhanced_search["best_params"]:
+                    print("Social hyperparameter search produced no usable trials.")
+                    sys.exit(1)
+            else:
+                # Independent Optuna search for the enhanced model
+                print(
+                    f"Searching best enhanced hyperparameters (Optuna TPE — k, "
+                    f"lambda_reg, w_main, w_user) using first "
+                    f"{sample_model_name} network …"
+                )
+                with mlflow.start_run(run_name="enhanced_search", nested=True):
+                    enhanced_search = search_enhanced_params(
+                        train_df,
+                        sample_features,
+                        n_trials=50,
+                        n_splits=3,
+                        method=args.cmf_method,
+                        maxiter=args.cmf_maxiter,
+                        cmf_nthreads=cmf_nthreads,
+                    )
+                save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
             best_k_e = enhanced_search["best_params"]["k"]
             best_lambda_e = enhanced_search["best_params"]["lambda_reg"]
             best_w_main = enhanced_search["best_params"]["w_main"]
             best_w_user = enhanced_search["best_params"]["w_user"]
+            if args.social_regularization:
+                selected_social_mode = enhanced_search["best_params"]["social_mode"]
+                selected_lambda_social = enhanced_search["best_params"]["lambda_social"]
+                selected_social_beta = enhanced_search["best_params"]["beta"]
+                selected_social_gamma = enhanced_search["best_params"]["gamma"]
+            _print_best_hyperparams(
+                "Social CMF" if args.social_regularization else "Enhanced CMF",
+                enhanced_search,
+            )
         else:
             print("No feature files found — using default params.")
             best_k_b = Defaults.K
@@ -281,6 +448,33 @@ def _run_recommend(args: argparse.Namespace) -> None:
                 "best_params": {"k": best_k_b, "lambda_reg": best_lambda_b},
                 "all_results": [],
             }
+            enhanced_search = {
+                "best_params": (
+                    {
+                        "k": best_k_e,
+                        "lambda_reg": best_lambda_e,
+                        "w_main": best_w_main,
+                        "w_user": best_w_user,
+                        "lambda_social": selected_lambda_social,
+                        "social_mode": selected_social_mode,
+                        "beta": selected_social_beta,
+                        "gamma": selected_social_gamma,
+                    }
+                    if args.social_regularization
+                    else {
+                        "k": best_k_e,
+                        "lambda_reg": best_lambda_e,
+                        "w_main": best_w_main,
+                        "w_user": best_w_user,
+                    }
+                ),
+                "all_results": [],
+            }
+            _print_best_hyperparams("Baseline CMF", baseline_search)
+            _print_best_hyperparams(
+                "Social CMF" if args.social_regularization else "Enhanced CMF",
+                enhanced_search,
+            )
 
         mlflow.log_params(
             {
@@ -290,13 +484,25 @@ def _run_recommend(args: argparse.Namespace) -> None:
                 "lambda_enhanced": best_lambda_e,
                 "w_main": best_w_main,
                 "w_user": best_w_user,
+                "social_mode": selected_social_mode,
+                "lambda_social": selected_lambda_social,
+                "social_beta": selected_social_beta,
+                "social_gamma": selected_social_gamma,
             }
         )
 
         # Train final baseline model with its own independently tuned k/lambda.
-        print(f"Training final baseline: k={best_k_b}, lambda_reg={best_lambda_b:.4f}")
+        print(
+            f"Training final baseline: method={args.cmf_method}, "
+            f"k={best_k_b}, lambda_reg={best_lambda_b:.4f}"
+        )
         baseline_model = train_final_model(
-            train_df, k=best_k_b, lambda_reg=best_lambda_b
+            train_df,
+            k=best_k_b,
+            lambda_reg=best_lambda_b,
+            method=args.cmf_method,
+            maxiter=args.cmf_maxiter,
+            nthreads=cmf_nthreads,
         )
         baseline_metrics = evaluate_single_split(baseline_model, test_df)
         print(
@@ -321,6 +527,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
         # Enhanced evaluation — pass pre-tuned enhanced params.
         all_results = run_network_evaluation(
             data=train_df,
+            model_names=selected_models,
             include_communities=args.include_communities,
             sample_networks=999_999 if args.all_networks else args.sample_networks,
             k=best_k_e,
@@ -331,12 +538,20 @@ def _run_recommend(args: argparse.Namespace) -> None:
             baseline_lambda=best_lambda_b,
             compute_ranking=True,
             dataset=args.dataset,
-            n_jobs=args.n_jobs,
+            n_jobs=cmf_nthreads if args.n_jobs == -1 else args.n_jobs,
+            method=args.cmf_method,
+            maxiter=args.cmf_maxiter,
+            cmf_nthreads=cmf_nthreads,
+            use_social_regularization=args.social_regularization,
+            social_mode=selected_social_mode,
+            lambda_social=selected_lambda_social,
+            social_beta=selected_social_beta,
+            social_gamma=selected_social_gamma,
         )
 
         for _artifact in [
             dp.BASELINE_RESULTS,
-            dp.ENHANCED_RESULTS,
+            dp.SOCIAL_RESULTS if args.social_regularization else dp.ENHANCED_RESULTS,
         ]:
             if _artifact.exists():
                 mlflow.log_artifact(str(_artifact))
@@ -356,7 +571,10 @@ def _run_recommend(args: argparse.Namespace) -> None:
 
     for _search, _prefix in [
         (baseline_search, "baseline"),
-        (enhanced_search if sample_features is not None else None, "enhanced"),
+        (
+            enhanced_search if sample_features is not None else None,
+            "social" if args.social_regularization else "enhanced",
+        ),
     ]:
         if _search and _search.get("all_results"):
             plot_hyperparameter_search_results(
@@ -412,19 +630,29 @@ def _run_hypertune(args: argparse.Namespace) -> None:
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
     with mlflow.start_run(run_name="hypertune"):
+        cmf_nthreads = _resolve_cmf_nthreads(args)
         mlflow.log_params(
             {
                 "include_communities": args.include_communities,
-                "n_optuna_trials": 50,
+                "n_enhanced_optuna_trials": 50,
+                "n_social_optuna_trials": (
+                    args.social_n_trials if args.social_regularization else 0
+                ),
                 "n_cv_splits": 3,
+                "cmf_method": args.cmf_method,
+                "cmf_maxiter": args.cmf_maxiter,
+                "cmf_nthreads": cmf_nthreads,
+                "cpu_fraction": args.cpu_fraction,
+                "social_regularization": args.social_regularization,
             }
         )
 
         _, train_df, _ = load_and_split_dataset(dataset=args.dataset)
+        selected_models = [args.model] if args.model else Models.ALL
 
         sample_features = None
         sample_model_name = None
-        for _mn in Models.ALL:
+        for _mn in selected_models:
             sample_features = load_network_features(
                 _mn,
                 0,
@@ -439,16 +667,51 @@ def _run_hypertune(args: argparse.Namespace) -> None:
             print("No feature files found. Run --steps centrality first.")
             sys.exit(1)
 
-        print(
-            f"Searching best enhanced hyperparameters (Optuna TPE — k, "
-            f"lambda_reg, w_main, w_user) using first {sample_model_name} network …"
-        )
-        enhanced_search = search_enhanced_params(
-            train_df, sample_features, n_trials=50, n_splits=3
-        )
-        save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
+        if args.social_regularization:
+            from recommender.enhanced.social_search import (
+                search_social_regularized_params,
+            )
 
-        _artifact = dp.ENHANCED_RESULTS
+            print(
+                f"Searching best social CMF hyperparameters (Optuna TPE) "
+                f"using {sample_model_name} network #000 "
+                f"({args.social_n_trials} trials) …"
+            )
+            enhanced_search = search_social_regularized_params(
+                dataset=args.dataset,
+                model_name=sample_model_name or selected_models[0],
+                network_index=0,
+                n_trials=args.social_n_trials,
+                max_ratings=args.social_search_max_ratings,
+                maxiter=args.cmf_maxiter,
+                random_state=args.seed,
+                nthreads=cmf_nthreads,
+                include_user_attributes=True,
+                output_path=dp.SOCIAL_RESULTS,
+            )
+            _artifact = dp.SOCIAL_RESULTS
+        else:
+            print(
+                f"Searching best enhanced hyperparameters (Optuna TPE — k, "
+                f"lambda_reg, w_main, w_user) using first {sample_model_name} network …"
+            )
+            enhanced_search = search_enhanced_params(
+                train_df,
+                sample_features,
+                n_trials=50,
+                n_splits=3,
+                method=args.cmf_method,
+                maxiter=args.cmf_maxiter,
+                cmf_nthreads=cmf_nthreads,
+            )
+            save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
+            _artifact = dp.ENHANCED_RESULTS
+
+        _print_best_hyperparams(
+            "Social CMF" if args.social_regularization else "Enhanced CMF",
+            enhanced_search,
+        )
+
         if _artifact.exists():
             mlflow.log_artifact(str(_artifact))
 
@@ -463,22 +726,38 @@ def _run_hypertune(args: argparse.Namespace) -> None:
     if enhanced_search.get("all_results"):
         plot_hyperparameter_search_results(
             enhanced_search,
-            save_path="enhanced_hyper_search.png",
+            save_path=(
+                "social_hyper_search.png"
+                if args.social_regularization
+                else "enhanced_hyper_search.png"
+            ),
             dataset=args.dataset,
         )
         plot_parameter_heatmap(
             enhanced_search,
-            save_path="enhanced_param_heatmap.png",
+            save_path=(
+                "social_param_heatmap.png"
+                if args.social_regularization
+                else "enhanced_param_heatmap.png"
+            ),
             dataset=args.dataset,
         )
         plot_convergence_analysis(
             enhanced_search,
-            save_path="enhanced_convergence.png",
+            save_path=(
+                "social_convergence.png"
+                if args.social_regularization
+                else "enhanced_convergence.png"
+            ),
             dataset=args.dataset,
         )
         plot_metrics_comparison(
             enhanced_search,
-            save_path="enhanced_metrics.png",
+            save_path=(
+                "social_metrics.png"
+                if args.social_regularization
+                else "enhanced_metrics.png"
+            ),
             dataset=args.dataset,
         )
 
@@ -494,6 +773,7 @@ def _run_shap(args: argparse.Namespace) -> None:
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
     with mlflow.start_run(run_name="shap"):
+        cmf_nthreads = _resolve_cmf_nthreads(args)
         mlflow.log_params(
             {
                 "k_networks": args.k_networks,
@@ -501,6 +781,13 @@ def _run_shap(args: argparse.Namespace) -> None:
                 "seed": args.seed,
                 "all_networks": args.all_networks,
                 "model": args.model or "all",
+                "cmf_method": args.cmf_method,
+                "cmf_maxiter": args.cmf_maxiter,
+                "cmf_nthreads": cmf_nthreads,
+                "cpu_fraction": args.cpu_fraction,
+                "social_regularization": args.social_regularization,
+                "social_mode": args.social_mode,
+                "lambda_social": args.lambda_social,
             }
         )
 
@@ -509,8 +796,18 @@ def _run_shap(args: argparse.Namespace) -> None:
             include_communities=args.include_communities,
             seed=args.seed,
             model_names=[args.model] if args.model else None,
-            params_path=dp.ENHANCED_RESULTS,
+            params_path=(
+                dp.SOCIAL_RESULTS if args.social_regularization else dp.ENHANCED_RESULTS
+            ),
             dataset=args.dataset,
+            method=args.cmf_method,
+            maxiter=args.cmf_maxiter,
+            cmf_nthreads=cmf_nthreads,
+            social_regularization=args.social_regularization,
+            social_mode=args.social_mode,
+            lambda_social=args.lambda_social,
+            social_beta=args.social_beta,
+            social_gamma=args.social_gamma,
         )
         save_shap_results(results, path=dp.SHAP_RESULTS)
         plot_all_shap(dataset=args.dataset)
@@ -616,6 +913,89 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.set_defaults(include_communities=True)
     parser.add_argument(
+        "--cmf-method",
+        choices=["lbfgs", "als"],
+        default=Defaults.CMF_METHOD,
+        help="CMF optimizer used by pipeline recommender fits.",
+    )
+    parser.add_argument(
+        "--cmf-maxiter",
+        type=int,
+        default=Defaults.CMF_MAXITER,
+        help="L-BFGS iteration budget for CMF fits.",
+    )
+    parser.add_argument(
+        "--cpu-fraction",
+        type=float,
+        default=Defaults.CPU_FRACTION,
+        help=(
+            "Approximate fraction of detected CPU cores to use for CMF/BLAS "
+            "workloads when --cmf-nthreads is not set."
+        ),
+    )
+    parser.add_argument(
+        "--cmf-nthreads",
+        type=int,
+        default=0,
+        help=("Explicit CMF/BLAS thread cap. 0 chooses a cap from --cpu-fraction."),
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Path for a tee log file. Defaults to data/<dataset>/pipeline.log.",
+    )
+    parser.add_argument(
+        "--no-log",
+        action="store_true",
+        help="Disable the pipeline tee log file.",
+    )
+    parser.add_argument(
+        "--social-regularization",
+        action="store_true",
+        help="Use Phase 6 social-regularized CMF in recommend/hypertune/shap.",
+    )
+    parser.add_argument(
+        "--social-mode",
+        choices=[
+            "uniform",
+            "community_jaccard",
+            "boundary_downweight",
+            "bridge_preserve",
+        ],
+        default="boundary_downweight",
+        help="Social edge weighting mode for social-regularized CMF.",
+    )
+    parser.add_argument(
+        "--lambda-social",
+        type=float,
+        default=0.001,
+        help="Fallback social regularization strength when no search params exist.",
+    )
+    parser.add_argument(
+        "--social-beta",
+        type=float,
+        default=0.5,
+        help="Boundary penalty parameter for social edge weighting.",
+    )
+    parser.add_argument(
+        "--social-gamma",
+        type=float,
+        default=1.0,
+        help="Shared-community gain parameter for social edge weighting.",
+    )
+    parser.add_argument(
+        "--social-search-max-ratings",
+        type=int,
+        default=5000,
+        help="Rating cap for social Optuna search; use 0 to disable the cap.",
+    )
+    parser.add_argument(
+        "--social-n-trials",
+        type=int,
+        default=Defaults.SOCIAL_N_TRIALS,
+        help="Optuna trial budget for the larger social CMF search space.",
+    )
+    parser.add_argument(
         "--sample-networks",
         type=int,
         default=5,
@@ -648,7 +1028,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="n_jobs",
         help=(
             "Number of parallel worker processes for the recommend step. "
-            "1 = sequential (default). -1 = all available CPU cores."
+            "1 = sequential (default). -1 = CPU cap from --cpu-fraction."
         ),
     )
     return parser
@@ -658,20 +1038,43 @@ def main(argv: list[str] | None = None) -> None:
     """Entry point for the MAFPIN pipeline."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    log_file = _open_pipeline_log(args)
+    if log_file is not None:
+        sys.stdout = _TeeStream(original_stdout, log_file)  # type: ignore[assignment]
+        sys.stderr = _TeeStream(original_stderr, log_file)  # type: ignore[assignment]
 
-    steps = ALL_STEPS if args.all else args.steps
+    try:
+        print(
+            f"\n=== Pipeline run started {datetime.now().isoformat(timespec='seconds')} ===",
+            flush=True,
+        )
+        print(f"Command: python pipeline.py {' '.join(sys.argv[1:])}", flush=True)
+        _configure_cpu_limits(args)
 
-    print(f"Running steps: {', '.join(steps)}")
-    print("-" * 50)
+        steps = ALL_STEPS if args.all else args.steps
 
-    for step in steps:
-        description, runner = STEPS[step]
-        print(f"\n[{step.upper()}] {description}")
-        print("=" * 50)
-        runner(args)  # type: ignore[operator]
-        print(f"[{step.upper()}] Done.")
+        print(f"Running steps: {', '.join(steps)}", flush=True)
+        print("-" * 50, flush=True)
 
-    print("\nPipeline finished.")
+        for step in steps:
+            description, runner = STEPS[step]
+            print(f"\n[{step.upper()}] {description}", flush=True)
+            print("=" * 50, flush=True)
+            runner(args)  # type: ignore[operator]
+            print(f"[{step.upper()}] Done.", flush=True)
+
+        print("\nPipeline finished.", flush=True)
+    finally:
+        print(
+            f"=== Pipeline run ended {datetime.now().isoformat(timespec='seconds')} ===\n",
+            flush=True,
+        )
+        if log_file is not None:
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+            log_file.close()
 
 
 if __name__ == "__main__":
