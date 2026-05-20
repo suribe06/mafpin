@@ -1,6 +1,15 @@
 """
 SHAP feature importance analysis for the MAFPIN enhanced CMF recommender.
 
+IMPORTANT — Post-hoc interpretability
+--------------------------------------
+The SHAP values produced here are *post-hoc* explanations of an already-fitted
+model.  They describe *how* the model uses its inputs, not causal relationships
+between network features and real-world preferences.  Results should be
+interpreted as "the model behaves as if feature X matters" and not as evidence
+that X causes higher ratings.  Comparisons across datasets or hyperparameter
+configurations should be made with care.
+
 Strategy
 --------
 For each sampled (diffusion model, network) pair:
@@ -414,6 +423,11 @@ def run_shap_analysis(
     Run SHAP feature importance analysis over ``k_networks`` random networks
     per diffusion model.
 
+    **Post-hoc note**: The SHAP values are post-hoc explanations of the fitted
+    CMF.  They reflect model behaviour, not causal relationships between
+    network features and user preferences.  Do not over-interpret directional
+    effects — the GBT surrogate adds an additional approximation layer.
+
     For each model the mean absolute SHAP value per feature is computed by
     averaging |SHAP| across all successfully processed networks.  The signed
     mean is also recorded to indicate the *direction* of each feature's effect
@@ -439,6 +453,9 @@ def run_shap_analysis(
                 "n_networks":      int,
                 "network_indices": list[int],
             }
+
+        A ``shap_skipped_networks.json`` audit file is also written alongside
+        the main results when any networks are skipped.
     """
     params = load_enhanced_params(params_path, dataset=dataset)
     _, train_df, test_df = load_and_split_dataset(dataset=dataset)
@@ -449,6 +466,7 @@ def run_shap_analysis(
 
     rng = random.Random(seed)
     results: dict[str, dict] = {}
+    skipped_networks: list[dict] = []
 
     for model_name in model_names:
         print(f"\n{'='*55}\nModel: {model_name.upper()}\n{'='*55}")
@@ -487,6 +505,9 @@ def run_shap_analysis(
             )
             if result is None:
                 print("skipped (insufficient data).")
+                skipped_networks.append(
+                    {"model": model_name, "index": idx, "reason": "insufficient data"}
+                )
                 continue
 
             sv, fn = result
@@ -495,10 +516,13 @@ def run_shap_analysis(
             valid_indices.append(idx)
 
             # Persist full matrix so plots can be regenerated without re-running.
+            # Use atomic tmp+replace so interrupted runs leave no partial .npy files.
             model_matrices_dir = dp.SHAP_MATRICES / model_name
             model_matrices_dir.mkdir(parents=True, exist_ok=True)
             matrix_path = model_matrices_dir / f"{model_name}_{idx:03d}.npy"
-            np.save(matrix_path, sv)
+            matrix_tmp = matrix_path.with_suffix(".tmp.npy")
+            np.save(matrix_tmp, sv)
+            matrix_tmp.replace(matrix_path)
 
             print(f"OK  ({sv.shape[0]} users, {sv.shape[1]} features)")
 
@@ -514,6 +538,26 @@ def run_shap_analysis(
             str(dp.SHAP_MATRICES / model_name / f"{model_name}_{i:03d}.npy")
             for i in valid_indices
         ]
+
+        # Write a completion manifest so downstream code can verify the matrix
+        # set is complete and was not left in a partial state.
+        manifest_path = dp.SHAP_MATRICES / model_name / "manifest.json"
+        manifest_tmp = manifest_path.with_suffix(".tmp")
+        manifest_tmp.write_text(
+            json.dumps(
+                {
+                    "model_name": model_name,
+                    "n_networks": len(all_shap),
+                    "network_indices": valid_indices,
+                    "matrix_paths": matrix_paths,
+                    "feature_names": feature_names,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        manifest_tmp.replace(manifest_path)
+
         results[model_name] = {
             "mean_shap_abs": mean_abs.tolist(),
             "mean_shap": mean_signed.tolist(),
@@ -532,6 +576,15 @@ def run_shap_analysis(
                 f"    {rank:2d}. {feature_names[i]:<30s}"
                 f"|SHAP|={mean_abs[i]:.5f}  dir={direction}"
             )
+
+    # Persist skipped-networks audit log for reproducibility.
+    if skipped_networks:
+        audit_path = dp.BASE / "shap_skipped_networks.json"
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        audit_tmp = audit_path.with_suffix(".tmp")
+        audit_tmp.write_text(json.dumps(skipped_networks, indent=2), encoding="utf-8")
+        audit_tmp.replace(audit_path)
+        print(f"  Skipped-networks audit saved \u2192 {audit_path}")
 
     return results
 
@@ -558,6 +611,7 @@ def save_shap_results(
     """
     dest = path or DatasetPaths(dataset or Datasets.DEFAULT).SHAP_RESULTS
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "w", encoding="utf-8") as fh:
-        json.dump(results, fh, indent=2)
-    print(f"SHAP results saved → {dest}")
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    tmp.replace(dest)
+    print(f"SHAP results saved \u2192 {dest}")
