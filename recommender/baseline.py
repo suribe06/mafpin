@@ -56,8 +56,9 @@ def save_search_results(search_result: dict, path: Path | None = None) -> None:
     """
     dest = path or DatasetPaths(Datasets.DEFAULT).BASELINE_RESULTS
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "w", encoding="utf-8") as fh:
-        json.dump(search_result, fh, indent=2)
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_text(json.dumps(search_result, indent=2), encoding="utf-8")
+    tmp.replace(dest)
     print(f"Search results saved → {dest}")
 
 
@@ -255,6 +256,7 @@ def search_baseline_params(
     method: str = Defaults.CMF_METHOD,
     maxiter: int = Defaults.CMF_MAXITER,
     nthreads: int = -1,
+    random_state: int = 42,
 ) -> dict:
     """
     Optuna TPE hyperparameter search over *k* and *lambda_reg*.
@@ -306,7 +308,10 @@ def search_baseline_params(
             flush=True,
         )
 
-    study = optuna.create_study(direction="minimize")
+    study = optuna.create_study(
+        direction="minimize",
+        sampler=optuna.samplers.TPESampler(seed=random_state),
+    )
     study.optimize(
         _objective,
         n_trials=n_trials,
