@@ -12,6 +12,30 @@ Run all steps in order using the default **MovieLens** dataset:
 python pipeline.py --all
 ```
 
+Run the full pipeline with Phase 6 social regularization enabled:
+
+```bash
+python pipeline.py --all --social-regularization
+```
+
+When running through conda, use `--no-capture-output` so progress is streamed
+to the terminal instead of buffered until the process exits:
+
+```bash
+conda run --no-capture-output -n mafpin python pipeline.py \
+   --steps recommend shap \
+   --dataset movielens \
+   --social-regularization
+```
+
+Every pipeline run also appends stdout and stderr to
+`data/<dataset>/pipeline.log` by default, so long runs can be monitored with
+`tail -f data/movielens/pipeline.log`.
+
+This uses the L-BFGS CMF solver by default so the baseline, enhanced model,
+social-regularized model, and SHAP analysis are trained with the optimizer
+required by the social graph penalty.
+
 To use a different dataset:
 
 ```bash
@@ -34,7 +58,7 @@ Convert the ratings dataset into a cascades file for NetInf:
 python pipeline.py --steps cascade
 ```
 
-This reads from `datasets/movielens/` by default, applies the **global 80/20 split** (seed from `config.Split.RANDOM_STATE`), and writes `data/cascades.txt` built from training interactions only. Held-out test ratings are never seen by NetInf.
+This reads from `datasets/movielens/` by default, applies the **global 80/20 split** (seed from `config.Split.RANDOM_STATE`), and writes `data/<dataset>/cascades.txt` built from training interactions only. Held-out test ratings are never seen by NetInf.
 
 To use a different dataset:
 
@@ -75,7 +99,7 @@ python pipeline.py --steps inference --model exponential
 python pipeline.py --steps inference --n-alphas 50 --max-iter 1000
 ```
 
-Output: `data/inferred_networks/<model>/inferred_edges_<short>_<alpha>.csv`
+Output: `data/<dataset>/inferred_networks/<model>/inferred_edges_<short>_<alpha>.csv`
 
 ---
 
@@ -85,7 +109,7 @@ Output: `data/inferred_networks/<model>/inferred_edges_<short>_<alpha>.csv`
 python pipeline.py --steps centrality
 ```
 
-Output: `data/centrality_metrics/<model>/centrality_metrics_<short>_<id>.csv`
+Output: `data/<dataset>/centrality_metrics/<model>/centrality_metrics_<short>_<id>.csv`
 
 ---
 
@@ -95,7 +119,7 @@ Output: `data/centrality_metrics/<model>/centrality_metrics_<short>_<id>.csv`
 python pipeline.py --steps communities
 ```
 
-Output: `data/communities/<model>/communities_<short>_<id>.csv`
+Output: `data/<dataset>/communities/<model>/communities_<short>_<id>.csv`
 
 ---
 
@@ -113,27 +137,77 @@ This step:
 2. Runs hyperparameter search and trains the **baseline CMF** on the training partition, then reports RMSE/MAE/R² on the global test set.
 3. Evaluates the **enhanced CMF** (with network side-information) using repeated random sub-splits of the training partition, with a paired baseline per fold for fair comparison.
 
-Include community features (LPH + community count):
+The pipeline default CMF solver is `lbfgs`. This keeps the plain baseline and
+the enhanced model comparable to the social-regularized path, which requires
+L-BFGS. You can still override it for non-social runs:
 
 ```bash
-python pipeline.py --steps recommend --include-communities
+python pipeline.py --steps recommend --cmf-method als
+```
+
+Community features are included by default. To exclude them from the enhanced or
+social CMF side-user matrix:
+
+```bash
+python pipeline.py --steps recommend --no-communities
+```
+
+Run the same recommendation flow with Phase 6 social regularization:
+
+```bash
+python pipeline.py --steps recommend --social-regularization
+```
+
+When `--social-regularization` is enabled, `recommend` performs a social Optuna
+search over `k`, `lambda_reg`, `w_main`, `w_user`, `lambda_social`,
+`social_mode`, `beta`, and `gamma`, saves the result to
+`data/<dataset>/social_hyperparam_search_results.json`, and then evaluates the
+selected social CMF settings across the sampled inferred networks. The social
+search uses 200 trials by default because it has a larger eight-parameter search
+space; baseline and non-social enhanced searches still use 50 trials.
+
+Useful social options:
+
+```bash
+# Restrict the social run to one diffusion model
+python pipeline.py --steps recommend --model exponential --social-regularization
+
+# Use all available networks in the recommendation evaluation
+python pipeline.py --steps recommend --all-networks --social-regularization
+
+# Adjust social-search cost and L-BFGS iterations
+python pipeline.py --steps recommend --social-regularization \
+   --social-n-trials 200 \
+   --social-search-max-ratings 10000 \
+   --cmf-maxiter 50
 ```
 
 ---
 
-### 7. Tune Enhanced CMF Hyperparameters (standalone)
+### 7. Tune Enhanced or Social CMF Hyperparameters (standalone)
 
 Run the Optuna search for the enhanced model in isolation, without triggering
 the full network evaluation:
 
 ```bash
-python pipeline.py --steps hypertune --include-communities
+python pipeline.py --steps hypertune
 ```
 
-This step performs one Optuna TPE search (50 trials, 3 CV folds) over the four
-enhanced CMF parameters (`k`, `lambda_reg`, `w_main`, `w_user`) using the first
-available network as a representative sample. Results are saved to
-`data/enhanced_search_results.json` and consumed by the `shap` step.
+This step performs one Optuna TPE search over the model hyperparameters using
+the first available network as a representative sample. The non-social enhanced
+search uses 50 trials over four parameters (`k`, `lambda_reg`, `w_main`,
+`w_user`). Results are saved to
+`data/<dataset>/enhanced_search_results.json` and consumed by the `shap` step.
+
+To run the social-regularized search instead:
+
+```bash
+python pipeline.py --steps hypertune --social-regularization
+```
+
+This saves `data/<dataset>/social_hyperparam_search_results.json`. The SHAP
+step will load that file when it is also run with `--social-regularization`.
+The social search uses 200 trials by default over eight parameters.
 
 Use `hypertune` instead of `recommend` when you only need the best params — for
 example before running the SHAP analysis without re-evaluating all networks.
@@ -146,10 +220,10 @@ Compute SHAP values to explain which network features drive the enhanced CMF
 predictions:
 
 ```bash
-python pipeline.py --steps shap --include-communities
+python pipeline.py --steps shap
 ```
 
-This step requires `data/enhanced_search_results.json` to exist (generated by
+This step requires `data/<dataset>/enhanced_search_results.json` to exist (generated by
 either `recommend` or `hypertune`).  For each of the three diffusion models it:
 
 1. Samples 5 random networks (configurable with `--k-networks`).
@@ -159,19 +233,31 @@ either `recommend` or `hypertune`).  For each of the three diffusion models it:
 5. Applies `TreeExplainer` (exact TreeSHAP) and averages |SHAP| values across
    the sampled networks.
 
-Output: `data/shap_results.json` with per-model feature importance rankings.
+Output: `data/<dataset>/shap_results.json` with per-model feature importance rankings.
+
+To explain the social-regularized CMF instead of the regular enhanced CMF, pass
+the same social flag:
+
+```bash
+python pipeline.py --steps shap --social-regularization
+```
+
+In this mode SHAP loads
+`data/<dataset>/social_hyperparam_search_results.json`, trains the L-BFGS social
+CMF for each sampled network, and fits the same GBT surrogate on the resulting
+CMF predictions.
 
 Options:
 
 ```bash
 # Fewer/more networks per model
-python pipeline.py --steps shap --k-networks 10 --include-communities
+python pipeline.py --steps shap --k-networks 10
 
 # Single diffusion model
-python pipeline.py --steps shap --model exponential --include-communities
+python pipeline.py --steps shap --model exponential
 
 # Reproducible sampling with a different seed
-python pipeline.py --steps shap --seed 7 --include-communities
+python pipeline.py --steps shap --seed 7
 ```
 
 ---
@@ -220,11 +306,25 @@ All options accepted by `pipeline.py`:
 | `--model {exponential,powerlaw,rayleigh}` | *(all)* | Restrict inference/recommendation to a single diffusion model. |
 | `--n-alphas N` | `100` | Number of α values in the NetInf log-spaced grid. |
 | `--max-iter N` | `5000` | Maximum NetInf iterations per network. |
-| `--include-communities` | `False` | Include LPH and community-count features in the enhanced CMF. |
+| `--no-communities` | `False` | Exclude community features from the enhanced/social CMF. Communities are included by default. |
+| `--cmf-method {lbfgs,als}` | `lbfgs` | CMF optimizer used by pipeline recommender fits. Social regularization requires `lbfgs`. |
+| `--cmf-maxiter N` | `25` | L-BFGS iteration budget for CMF fits. |
+| `--cpu-fraction X` | `0.4` | Approximate fraction of detected CPU cores used by CMF/BLAS workloads when `--cmf-nthreads` is not set. |
+| `--cmf-nthreads N` | `0` | Explicit CMF/BLAS thread cap. `0` derives the cap from `--cpu-fraction`. |
+| `--log-file PATH` | `data/<dataset>/pipeline.log` | Tee pipeline stdout/stderr to a log file while preserving terminal output. |
+| `--no-log` | `False` | Disable the pipeline tee log file. |
+| `--social-regularization` | `False` | Enable Phase 6 social-regularized CMF in `recommend`, `hypertune`, and `shap`. |
+| `--social-mode MODE` | `boundary_downweight` | Social edge weighting mode: `uniform`, `community_jaccard`, `boundary_downweight`, or `bridge_preserve`. |
+| `--lambda-social X` | `0.001` | Fallback social regularization strength when no searched params are being used. |
+| `--social-beta X` | `0.5` | Boundary penalty parameter for social edge weighting. |
+| `--social-gamma X` | `1.0` | Shared-community gain parameter for `bridge_preserve`. |
+| `--social-search-max-ratings N` | `5000` | Rating cap for social Optuna search; use `0` to disable the cap. |
+| `--social-n-trials N` | `200` | Optuna trial budget for the larger social CMF search space. |
 | `--sample-networks N` | `5` | Networks sampled per model for the `recommend` step. |
 | `--k-networks N` | `20` | Networks sampled per model for the `shap` step. |
 | `--all-networks` | `False` | Use all available networks for SHAP (overrides `--k-networks`). |
 | `--seed N` | `42` | Random seed for network sampling in SHAP analysis. |
+| `--n-jobs N` | `1` | Worker processes for recommendation network evaluation. Use `-1` to use the CPU cap from `--cpu-fraction`. |
 
 ---
 
@@ -239,7 +339,13 @@ python pipeline.py --steps cascade inference centrality communities recommend
 Typical workflow when only SHAP analysis is needed after networks are ready:
 
 ```bash
-python pipeline.py --steps hypertune shap --include-communities
+python pipeline.py --steps hypertune shap
+```
+
+Equivalent workflow for the Phase 6 social-regularized model:
+
+```bash
+python pipeline.py --steps hypertune shap --social-regularization
 ```
 
 ---
@@ -274,6 +380,16 @@ metrics = evaluate_single_split(model, test_df)  # RMSE on held-out test
 from recommender.enhanced import run_network_evaluation
 run_network_evaluation(data=train_df, sample_networks=5, include_communities=True)
 
+# Social-regularized recommendation
+run_network_evaluation(
+   data=train_df,
+   sample_networks=5,
+   include_communities=True,
+   use_social_regularization=True,
+   social_mode="boundary_downweight",
+   lambda_social=0.001,
+)
+
 # Enhanced hyperparameter search (standalone)
 from recommender.enhanced import search_enhanced_params, save_enhanced_search_results, load_network_features
 features = load_network_features("exponential", 0, include_communities=True)
@@ -281,9 +397,16 @@ search = search_enhanced_params(train_df, features, n_trials=50, n_splits=3)
 save_enhanced_search_results(search)
 
 # SHAP feature importance
+from config import DatasetPaths
 from analysis.shap_analysis import run_shap_analysis, save_shap_results
 results = run_shap_analysis(k_networks=5, include_communities=True)                 # movielens
 results = run_shap_analysis(k_networks=5, include_communities=True, dataset="ciao")
+social_results = run_shap_analysis(
+   k_networks=5,
+   include_communities=True,
+   social_regularization=True,
+   params_path=DatasetPaths("movielens").SOCIAL_RESULTS,
+)
 save_shap_results(results)
 ```
 
@@ -315,10 +438,11 @@ plot_cascades_timeline(n=30)
 
 | Step | Output location |
 | --- | --- |
-| Cascades | `data/cascades.txt` |
-| Inferred networks | `data/inferred_networks/<model>/` |
-| Centrality metrics | `data/centrality_metrics/<model>/` |
-| Communities + LPH | `data/communities/<model>/` |
-| Enhanced hyperparams | `data/enhanced_search_results.json` |
-| SHAP results | `data/shap_results.json` |
-| Plots | `plots/` |
+| Cascades | `data/<dataset>/cascades.txt` |
+| Inferred networks | `data/<dataset>/inferred_networks/<model>/` |
+| Centrality metrics | `data/<dataset>/centrality_metrics/<model>/` |
+| Communities + LPH | `data/<dataset>/communities/<model>/` |
+| Enhanced hyperparams | `data/<dataset>/enhanced_search_results.json` |
+| Social hyperparams | `data/<dataset>/social_hyperparam_search_results.json` |
+| SHAP results | `data/<dataset>/shap_results.json` |
+| Plots | `plots/<dataset>/` |

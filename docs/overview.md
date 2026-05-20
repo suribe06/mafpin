@@ -12,6 +12,7 @@ MAFPIN addresses this by:
 1. **Inferring latent influence networks** from user interaction timestamps using NETINF (Gomez-Rodriguez et al., 2010).
 2. **Characterising those networks** via seven centrality metrics and overlapping community detection.
 3. **Incorporating network features** as user side-information in Collective Matrix Factorisation (CMF), improving personalised rating prediction.
+4. **Optionally regularising user factors directly over the inferred network** with Phase 6 social regularization (`--social-regularization`).
 
 ---
 
@@ -35,10 +36,11 @@ MAFPIN addresses this by:
 [community detection] ──→  communities_<model>_<id>.csv  (+LPH)
     │
     ▼
-[hypertune]           ──→  enhanced_search_results.json  (Optuna TPE)
+[hypertune]           ──→  enhanced_search_results.json
+                         or social_hyperparam_search_results.json  (Optuna TPE)
     │
     ▼
-[recommendation]      ──→  RMSE / MAE / R²  (evaluated on global test set)
+[recommendation]      ──→  RMSE / MAE / R²  (regular enhanced CMF or social CMF)
     │
     ▼
 [shap analysis]       ──→  shap_results.json  (per-model feature importance)
@@ -58,6 +60,7 @@ Each model is evaluated across a log-spaced grid of the alpha (transmission rate
 | **NetInf** | Maximum-likelihood network structure learner from cascades. |
 | **LPH** | *Local Pluralistic Homophily* — per-node community overlap similarity (see [lph.md](lph.md)). |
 | **CMF** | *Collective Matrix Factorisation* — jointly factorises ratings and side-information matrices. |
+| **Social regularization** | Optional Phase 6 L-BFGS graph penalty over user latent factors, enabled with `--social-regularization`. |
 | **MLflow** | Experiment tracking for `recommend`, `hypertune`, and `shap` steps (see [mlflow.md](mlflow.md)). |
 
 ---
@@ -80,12 +83,14 @@ mafpin/
 │   └── epinions/
 │       └── rating_with_timestamp.txt
 ├── data/                   # Generated artefacts (git-ignored except JSON outputs)
-│   ├── cascades.txt
-│   ├── inferred_networks/
-│   ├── centrality_metrics/
-│   ├── communities/
-│   ├── enhanced_search_results.json
-│   └── shap_results.json
+│   └── <dataset>/
+│       ├── cascades.txt
+│       ├── inferred_networks/
+│       ├── centrality_metrics/
+│       ├── communities/
+│       ├── enhanced_search_results.json
+│       ├── social_hyperparam_search_results.json
+│       └── shap_results.json
 ├── plots/                  # Generated PNG figures
 ├── mlruns/                 # MLflow tracking store (git-ignored)
 └── docs/                   # This documentation

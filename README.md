@@ -33,6 +33,9 @@ cd cmfrec-master && python setup.py build_ext --inplace && cd ..
 
 # 3. Run the full pipeline
 python pipeline.py --all
+
+# Optional: run the full Phase 6 social-regularized pipeline
+python pipeline.py --all --social-regularization
 ```
 
 ## Pipeline Steps
@@ -47,14 +50,24 @@ Run individual steps:
 
 ```bash
 python pipeline.py --steps cascade inference centrality
-python pipeline.py --steps recommend --include-communities
+python pipeline.py --steps recommend
 
 # Tune enhanced CMF hyperparameters without running the full evaluation
-python pipeline.py --steps hypertune --include-communities
+python pipeline.py --steps hypertune
 
 # SHAP feature importance (requires hypertune or recommend to have run first)
-python pipeline.py --steps shap --include-communities
+python pipeline.py --steps shap
+
+# Social-regularized recommend + SHAP flow
+conda run --no-capture-output -n mafpin python pipeline.py \
+  --steps recommend shap \
+  --dataset movielens \
+  --social-regularization
 ```
+
+Pipeline runs append progress to `data/<dataset>/pipeline.log` by default.
+Use `tail -f data/movielens/pipeline.log` to watch long runs from another
+terminal.
 
 See [docs/usage.md](docs/usage.md) for the full reference.
 
@@ -83,7 +96,8 @@ Traditional collaborative filtering relies solely on user-item rating patterns. 
 3. **Detecting overlapping communities** (Demon / ASLPAw) and computing **Local Pluralistic Homophily (LPH)**.
 4. **Incorporating network features as user side-information** in Collective Matrix Factorisation (CMF).
 5. **Evaluating RMSE improvement** across a log-spaced alpha (transmission rate) grid.
-6. **Explaining predictions via SHAP** — a GBT surrogate trained on CMF outputs is analysed with TreeSHAP to rank the contribution of each network feature per diffusion model.
+6. **Adding direct social regularization** — Phase 6 can use the inferred network as a weighted graph penalty over L-BFGS CMF user factors via `--social-regularization`.
+7. **Explaining predictions via SHAP** — a GBT surrogate trained on CMF outputs is analysed with TreeSHAP to rank the contribution of each network feature per diffusion model, including the social-regularized path when enabled.
 
 ## Citation
 

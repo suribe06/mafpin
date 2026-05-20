@@ -12,6 +12,9 @@ MLflow tracking server — no extra configuration required.
 # 1. Run any tracked step (runs are logged automatically)
 python pipeline.py --steps recommend --all-networks
 
+# Or run the Phase 6 social-regularized flow
+python pipeline.py --steps recommend shap --social-regularization
+
 # 2. Open the MLflow UI to inspect results
 mlflow ui --backend-store-uri mlruns/
 # → http://127.0.0.1:5000
@@ -42,18 +45,20 @@ Parent run name: **`recommend`**
 
 | What | MLflow entity |
 | --- | --- |
-| `include_communities`, `sample_networks`, `all_networks`, `model`, `n_optuna_trials`, `n_cv_splits` | params |
+| `include_communities`, `sample_networks`, `all_networks`, `model`, `n_optuna_trials`, `n_cv_splits`, `cmf_method`, `cmf_maxiter`, `social_regularization` | params |
 | `k_baseline`, `lambda_baseline`, `k_enhanced`, `lambda_enhanced`, `w_main`, `w_user` | params (post-search) |
+| `social_mode`, `lambda_social`, `social_beta`, `social_gamma` | params when social regularization is enabled |
 | `baseline_rmse`, `baseline_mae`, `baseline_r2` | metrics (global test set) |
 | `<model>_rmse_enhanced`, `<model>_rmse_baseline` | metrics per network (step = network index) |
 | `<model>_improvement_pct` | metrics per network (step = network index) |
 | `<model>_mean_rmse_enhanced`, `<model>_n_networks_evaluated` | summary metrics |
-| `baseline_search_results.json`, `enhanced_search_results.json` | artifacts |
+| `baseline_search_results.json`, `enhanced_search_results.json` or `social_hyperparam_search_results.json` | artifacts |
 
 Two **nested runs** are created inside the parent:
 
 - **`baseline_search`** — logs `baseline_trial_rmse` per Optuna trial (step = trial number) and `baseline_best_k`, `baseline_best_lambda_reg`, `baseline_best_rmse`.
 - **`enhanced_search`** — logs `enhanced_trial_rmse` per Optuna trial and `enhanced_best_k`, `enhanced_best_lambda_reg`, `enhanced_best_w_main`, `enhanced_best_w_user`, `enhanced_best_rmse`.
+- **`social_search`** — created instead of `enhanced_search` when `--social-regularization` is enabled. The full Optuna result is saved as `social_hyperparam_search_results.json`; the search space includes `lambda_social`, `social_mode`, `beta`, and `gamma` in addition to the regular CMF parameters.
 
 ---
 
@@ -63,11 +68,11 @@ Run name: **`hypertune`**
 
 | What | MLflow entity |
 | --- | --- |
-| `include_communities`, `n_optuna_trials`, `n_cv_splits` | params |
-| `enhanced_best_k`, `enhanced_best_lambda_reg`, `enhanced_best_w_main`, `enhanced_best_w_user` | params |
-| `enhanced_best_rmse` | metric |
+| `include_communities`, `n_optuna_trials`, `n_cv_splits`, `cmf_method`, `cmf_maxiter`, `social_regularization` | params |
+| `enhanced_best_k`, `enhanced_best_lambda_reg`, `enhanced_best_w_main`, `enhanced_best_w_user` | params for regular enhanced search |
+| `enhanced_best_rmse` | metric for regular enhanced search |
 | `enhanced_trial_rmse` (per trial) | metric (step = trial number) |
-| `enhanced_search_results.json` | artifact |
+| `enhanced_search_results.json` or `social_hyperparam_search_results.json` | artifact |
 
 ---
 
@@ -77,7 +82,7 @@ Run name: **`shap`**
 
 | What | MLflow entity |
 | --- | --- |
-| `k_networks`, `include_communities`, `seed`, `all_networks`, `model` | params |
+| `k_networks`, `include_communities`, `seed`, `all_networks`, `model`, `cmf_method`, `cmf_maxiter`, `social_regularization`, `social_mode`, `lambda_social` | params |
 | `<model>_n_networks` | metric (number of networks processed) |
 | `shap_<model>_<feature_name>` (one per feature per model) | metrics (mean \|SHAP\|) |
 | `shap_results.json` | artifact |
@@ -97,8 +102,9 @@ mlflow ui --backend-store-uri mlruns/
 Useful comparisons:
 
 - `baseline_rmse` vs `<model>_mean_rmse_enhanced` — is the network side-information helping?
-- `enhanced_trial_rmse` over steps — Optuna convergence curve.
+- `enhanced_trial_rmse` or social-search RMSE values — Optuna convergence curve.
 - `shap_<model>_<feature>` across runs — feature importance stability.
+- Social vs non-social runs filtered by `params.social_regularization`.
 
 ---
 
@@ -138,7 +144,8 @@ mlruns/
         ├── metrics/
         └── artifacts/
             ├── baseline_search_results.json
-            └── enhanced_search_results.json
+            ├── enhanced_search_results.json
+            └── social_hyperparam_search_results.json
 ```
 
 `mlruns/` is excluded from version control via `.gitignore`.  

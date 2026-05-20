@@ -10,7 +10,7 @@ CMF recommender, which decisions were made, and why.
 The enhanced CMF model (`cmfrec.CMF`) has four interacting hyperparameters:
 
 | Parameter | Default | Role |
-|-----------|---------|------|
+| --- | --- | --- |
 | `k` | 20 | Number of latent factors (user/item embedding dimension) |
 | `lambda_reg` | 1.0 | L2 regularisation strength applied to all factor matrices |
 | `w_main` | 1.0 | Weight for the rating-matrix reconstruction loss |
@@ -57,13 +57,19 @@ and one over "bad" regions — and proposes the next candidate where the ratio
 $p(\text{good}) / p(\text{bad})$ is highest. This concentrates evaluations in
 promising areas rather than wasting them on already-explored bad zones.
 
-**50 trials was chosen** as a balance between:
+**50 trials was chosen for the non-social enhanced search** as a balance between:
+
 - Search quality (TPE converges well within 30–60 trials for 4 parameters)
 - Wall-clock time (each trial runs 3 CV folds × ~4 s per fold ≈ 2 min/trial)
 
+The social-regularized CMF path uses **200 trials by default** because it tunes
+eight parameters (`k`, `lambda_reg`, `w_main`, `w_user`, `lambda_social`,
+`social_mode`, `beta`, `gamma`) and needs more evaluations to explore mode ×
+penalty interactions.
+
 ### Parameter ranges and scales
 
-```
+```text
 k            : int      [5, 50]           (linear)
 lambda_reg   : float    [0.01, 10.0]      (log scale)
 w_main       : float    [0.1,  1.0]       (linear)
@@ -93,6 +99,7 @@ splits of the **training data** (the global 80% split). The test set (20%)
 is never touched during the search.
 
 Each trial:
+
 1. Samples a candidate `(k, lambda_reg, w_main, w_user)`.
 2. Runs `evaluate_cmf_with_user_attributes` with `n_splits=3`.
 3. Returns the mean `rmse_enhanced` across the 3 splits.
@@ -108,6 +115,7 @@ Source: `recommender/enhanced.py → search_enhanced_params()`
 
 The search needs *a* set of user-side features to evaluate the model during
 tuning. Using all networks would be:
+
 - **Redundant** — the feature *structure* (which columns exist, their scale,
   their correlation with ratings) does not vary significantly across networks
   of the same type. What varies is which specific edges NetInf inferred, which
@@ -145,7 +153,7 @@ smaller than the sensitivity to `lambda_reg` or `w_user`.
 
 ## 5. How the Best Params Flow Through the Pipeline
 
-```
+```text
 pipeline.py _run_recommend()
 │
 ├── search_baseline_params(train_df, n_trials=50)           [2 params]
@@ -153,6 +161,9 @@ pipeline.py _run_recommend()
 │
 ├── search_enhanced_params(train_df, sample_features, n_trials=50)  [4 params]
 │         └── Optuna TPE → best_k_e, best_lambda_e, best_w_main, best_w_user
+│
+├── search_social_regularized_params(..., n_trials=200)             [8 params]
+│         └── Optuna TPE → enhanced params + social mode/penalty params
 │
 ├── train_final_model(train_df, k=best_k_b, lambda_reg=best_lambda_b)
 │         └── Plain CMF (no side info) evaluated on global test set
@@ -169,7 +180,8 @@ pipeline.py _run_recommend()
 Two independent Optuna searches run sequentially. The baseline search finds
 `(best_k_b, best_lambda_b)` optimised for plain CMF; the enhanced search finds
 `(best_k_e, best_lambda_e, best_w_main, best_w_user)` optimised for the
-combined loss. Each search runs for 50 TPE trials.
+combined loss. The social search runs for 200 TPE trials by default because it
+tunes a larger eight-parameter space.
 
 Note that the **global test baseline** (middle branch) uses the baseline-tuned
 params, while the **per-network paired baseline** inside
@@ -213,4 +225,3 @@ A positive value means the network features helped. Using the **same**
 isolate the effect of side information, not of regularisation tuning. The
 variable being changed between the two models is the presence of `U`, not
 the regularisation level.
-
