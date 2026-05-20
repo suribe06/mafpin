@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -55,10 +56,15 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
-from config import DatasetPaths, Datasets, Models
+from config import DatasetPaths, Datasets, Defaults, Models
 from recommender.data import load_and_split_dataset
 from recommender._cmfrec import CMF
 from recommender.enhanced import load_network_features
+from recommender.enhanced.social_regularization import (
+    SocialMode,
+    build_social_edges,
+    fit_social_cmf_model,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -141,9 +147,22 @@ def _sample_indices(
 
 def _train_enhanced_cmf(
     train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
     features: pd.DataFrame,
     params: dict,
     transform: str,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
+    cmf_nthreads: int = -1,
+    social_regularization: bool = False,
+    dataset: str | None = None,
+    model_name: str | None = None,
+    network_index: int | None = None,
+    social_mode: SocialMode = "boundary_downweight",
+    lambda_social: float = 0.001,
+    social_beta: float = 0.5,
+    social_gamma: float = 1.0,
 ) -> tuple[CMF, pd.DataFrame]:
     """
     Train the enhanced CMF for a single network and return the fitted model
@@ -153,11 +172,12 @@ def _train_enhanced_cmf(
 
     Args:
         train_df:  Training ratings DataFrame.
+        test_df:   Test ratings DataFrame used to size L-BFGS factors for later
+                predictions.
         features:  Raw feature DataFrame indexed by ``UserId`` (0-based).
-        params:    Best-params dict (``k``, ``lambda_reg``, ``w_main``,
-                   ``w_user``).
+        params:    Best-params dict.
         transform: Scaler key — ``"standard"``, ``"minmax"``, or
-                   ``"normalizer"``.
+                ``"normalizer"``.
 
     Returns:
         ``(fitted_model, scaled_features_df)``
@@ -173,17 +193,64 @@ def _train_enhanced_cmf(
         index=features.index,
         columns=features.columns,
     )
-    u_matrix = scaled.reset_index()  # cmfrec requires UserId as a column
-
-    model = CMF(
-        method="als",
-        k=params["k"],
-        lambda_=params["lambda_reg"],
-        w_main=params["w_main"],
-        w_user=params["w_user"],
-        verbose=False,
-    )
-    model.fit(X=train_df, U=u_matrix)
+    if social_regularization:
+        if model_name is None or network_index is None:
+            raise ValueError("Social SHAP requires model_name and network_index.")
+        selected_social_mode = cast(SocialMode, params.get("social_mode", social_mode))
+        selected_lambda_social = float(params.get("lambda_social", lambda_social))
+        selected_beta = float(params.get("beta", social_beta))
+        selected_gamma = float(params.get("gamma", social_gamma))
+        social_edges = build_social_edges(
+            dataset=dataset or Datasets.DEFAULT,
+            model_name=model_name,
+            network_index=network_index,
+            user_index=features.index,
+            mode=selected_social_mode,
+            beta=selected_beta,
+            gamma=selected_gamma,
+            dtype=np.float32,
+        )
+        n_users = int(
+            max(
+                train_df["UserId"].max(),
+                test_df["UserId"].max(),
+                int(np.max(features.index.to_numpy(dtype=np.int64))),
+            )
+            + 1
+        )
+        n_items = int(max(train_df["ItemId"].max(), test_df["ItemId"].max()) + 1)
+        model = fit_social_cmf_model(
+            train_df,
+            features,
+            social_edges,
+            k=int(params["k"]),
+            lambda_reg=float(params["lambda_reg"]),
+            w_main=float(params["w_main"]),
+            w_user=float(params["w_user"]),
+            lambda_social=selected_lambda_social,
+            transform=transform,
+            maxiter=maxiter,
+            nthreads=cmf_nthreads,
+            random_state=random_state,
+            include_user_attributes=True,
+            n_users=n_users,
+            n_items=n_items,
+        )
+    else:
+        u_matrix = scaled.rename_axis("UserId").reset_index()
+        kwargs = {
+            "method": method,
+            "k": params["k"],
+            "lambda_": params["lambda_reg"],
+            "w_main": params["w_main"],
+            "w_user": params["w_user"],
+            "nthreads": cmf_nthreads,
+            "verbose": False,
+        }
+        if method == "lbfgs":
+            kwargs.update({"maxiter": maxiter, "random_state": random_state})
+        model = CMF(**kwargs)
+        model.fit(X=train_df, U=u_matrix)
 
     return model, scaled
 
@@ -201,6 +268,14 @@ def compute_shap_for_network(
     params: dict,
     include_communities: bool = True,
     transform: str = "standard",
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    cmf_nthreads: int = -1,
+    social_regularization: bool = False,
+    social_mode: SocialMode = "boundary_downweight",
+    lambda_social: float = 0.001,
+    social_beta: float = 0.5,
+    social_gamma: float = 1.0,
     surrogate_n_estimators: int = 100,
     surrogate_random_state: int = 42,
     min_users: int = 30,
@@ -243,7 +318,24 @@ def compute_shap_for_network(
     if features is None:
         return None
 
-    model, scaled_features = _train_enhanced_cmf(train_df, features, params, transform)
+    model, scaled_features = _train_enhanced_cmf(
+        train_df,
+        test_df,
+        features,
+        params,
+        transform,
+        method=method,
+        maxiter=maxiter,
+        cmf_nthreads=cmf_nthreads,
+        social_regularization=social_regularization,
+        dataset=dataset,
+        model_name=model_name,
+        network_index=network_index,
+        social_mode=social_mode,
+        lambda_social=lambda_social,
+        social_beta=social_beta,
+        social_gamma=social_gamma,
+    )
 
     # --- Per-user mean predicted rating on test interactions -----------------
     feat_users = set(scaled_features.index)
@@ -309,6 +401,14 @@ def run_shap_analysis(
     params_path: Path | None = None,
     transform: str = "standard",
     dataset: str | None = None,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    cmf_nthreads: int = -1,
+    social_regularization: bool = False,
+    social_mode: SocialMode = "boundary_downweight",
+    lambda_social: float = 0.001,
+    social_beta: float = 0.5,
+    social_gamma: float = 1.0,
 ) -> dict[str, dict]:
     """
     Run SHAP feature importance analysis over ``k_networks`` random networks
@@ -375,6 +475,14 @@ def run_shap_analysis(
                 params,
                 include_communities=include_communities,
                 transform=transform,
+                method=method,
+                maxiter=maxiter,
+                cmf_nthreads=cmf_nthreads,
+                social_regularization=social_regularization,
+                social_mode=social_mode,
+                lambda_social=lambda_social,
+                social_beta=social_beta,
+                social_gamma=social_gamma,
                 dataset=dataset,
             )
             if result is None:

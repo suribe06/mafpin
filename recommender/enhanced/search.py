@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from config import DatasetPaths, Datasets
+from config import Defaults
 from recommender.enhanced.model import evaluate_cmf_with_user_attributes
 
 
@@ -18,6 +19,9 @@ def search_enhanced_params(
     user_attributes: pd.DataFrame,
     n_trials: int = 50,
     n_splits: int = 3,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    cmf_nthreads: int = -1,
 ) -> dict:
     """
     Bayesian hyperparameter search (Optuna TPE) over ``k``, ``lambda_reg``,
@@ -54,6 +58,9 @@ def search_enhanced_params(
             w_main=w_main_val,
             w_user=w_user_val,
             n_splits=n_splits,
+            method=method,
+            maxiter=maxiter,
+            cmf_nthreads=cmf_nthreads,
         )
         if not split_results:
             raise optuna.exceptions.TrialPruned()
@@ -117,7 +124,7 @@ def search_enhanced_params(
 
 def save_enhanced_search_results(
     search_result: dict,
-    path: "Path | None" = None,
+    path: Path | None = None,
 ) -> None:
     """
     Persist *search_result* (from :func:`search_enhanced_params`) to a JSON file.

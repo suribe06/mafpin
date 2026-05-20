@@ -19,6 +19,9 @@ def evaluate_cmf_with_user_attributes(
     lambda_reg: float = 1.0,
     w_main: float = Defaults.W_MAIN,
     w_user: float = Defaults.W_USER,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
     n_splits: int = 5,
     test_size: float = 0.2,
     transform: str = "standard",
@@ -45,6 +48,9 @@ def evaluate_cmf_with_user_attributes(
         lambda_reg:       L2 regularisation strength.
         w_main:           Weight for the main rating-matrix reconstruction loss.
         w_user:           Weight for the user side-information reconstruction loss.
+        method:           CMF optimizer. Defaults to the pipeline-wide method.
+        maxiter:          L-BFGS iteration budget.
+        random_state:     Base seed for L-BFGS initialization.
         n_splits:         Number of random splits.
         test_size:        Test fraction.
         transform:        Scaler to apply per fold — ``"standard"``, ``"minmax"``,
@@ -90,30 +96,40 @@ def evaluate_cmf_with_user_attributes(
             index=user_attributes.index,
             columns=user_attributes.columns,
         )
-        u_matrix = scaled_all.reset_index()
+        u_matrix = scaled_all.rename_axis("UserId").reset_index()
 
         # Enhanced model
-        enhanced_model = CMF(
-            method="als",
-            k=k,
-            lambda_=lambda_reg,
-            w_main=w_main,
-            w_user=w_user,
-            nthreads=cmf_nthreads,
-            verbose=False,
-        )
+        enhanced_kwargs = {
+            "method": method,
+            "k": k,
+            "lambda_": lambda_reg,
+            "w_main": w_main,
+            "w_user": w_user,
+            "nthreads": cmf_nthreads,
+            "verbose": False,
+        }
+        if method == "lbfgs":
+            enhanced_kwargs.update(
+                {"maxiter": maxiter, "random_state": random_state + split_idx}
+            )
+        enhanced_model = CMF(**enhanced_kwargs)
         enhanced_model.fit(X=train_df, U=u_matrix)
         enhanced_rmse = evaluate_single_split(enhanced_model, test_df)["rmse"]
 
         # M-3: paired baseline on the same filtered subset.
         if baseline_k is not None and baseline_lambda is not None:
-            baseline_model = CMF(
-                method="als",
-                k=baseline_k,
-                lambda_=baseline_lambda,
-                nthreads=cmf_nthreads,
-                verbose=False,
-            )
+            baseline_kwargs = {
+                "method": method,
+                "k": baseline_k,
+                "lambda_": baseline_lambda,
+                "nthreads": cmf_nthreads,
+                "verbose": False,
+            }
+            if method == "lbfgs":
+                baseline_kwargs.update(
+                    {"maxiter": maxiter, "random_state": random_state + split_idx}
+                )
+            baseline_model = CMF(**baseline_kwargs)
             baseline_model.fit(X=train_df)
             baseline_rmse = evaluate_single_split(baseline_model, test_df)["rmse"]
         else:

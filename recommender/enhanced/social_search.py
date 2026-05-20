@@ -11,7 +11,7 @@ from typing import Any, Iterable, cast
 import numpy as np
 import pandas as pd
 
-from config import DatasetPaths, Datasets, Defaults, Models
+from config import DatasetPaths, Datasets, Models
 from recommender.data import load_dataset, split_data_single
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.social_regularization import (
@@ -152,7 +152,7 @@ def search_social_regularized_params(
     dataset: str = Datasets.DEFAULT,
     model_name: str = "exponential",
     network_index: int = 0,
-    n_trials: int = 50,
+    n_trials: int = 200,
     timeout: int | None = None,
     max_ratings: int = 5000,
     test_size: float = 0.2,
@@ -266,7 +266,15 @@ def search_social_regularized_params(
                 for key, value in asdict(social_edges).items()
                 if key not in {"row", "col", "val"}
             }
-            row.update({"metrics": metrics, "social_edges": edge_summary})
+            row.update(
+                {
+                    "rmse": metrics["rmse"],
+                    "mae": metrics["mae"],
+                    "r2": metrics["r2"],
+                    "metrics": metrics,
+                    "social_edges": edge_summary,
+                }
+            )
             if not _metrics_are_usable(metrics, reasonableness_limit):
                 row["status"] = "pruned"
                 row["error"] = "non-finite or unreasonable-scale metrics"
@@ -363,7 +371,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model", dest="model_name", default="exponential", choices=Models.ALL
     )
     parser.add_argument("--network-index", type=int, default=0)
-    parser.add_argument("--n-trials", type=int, default=50)
+    parser.add_argument("--n-trials", type=int, default=200)
     parser.add_argument("--timeout", type=int, default=None)
     parser.add_argument("--max-ratings", type=int, default=5000)
     parser.add_argument("--test-size", type=float, default=0.2)

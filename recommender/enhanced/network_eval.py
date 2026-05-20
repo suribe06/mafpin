@@ -4,12 +4,21 @@ Single-network and batch network evaluation for the enhanced CMF model.
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 
 from config import DatasetPaths, Datasets, Models, Defaults
+from recommender.baseline import train_model
+from recommender.data import evaluate_ranking, evaluate_single_split, split_data_single
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.model import evaluate_cmf_with_user_attributes
+from recommender.enhanced.social_regularization import (
+    SocialMode,
+    build_social_edges,
+    fit_social_cmf_split,
+)
 from recommender.enhanced.workers import _worker_init, _eval_network_worker
 
 
@@ -21,6 +30,8 @@ def evaluate_single_network(
     lambda_reg: float = 1.0,
     w_main: float = Defaults.W_MAIN,
     w_user: float = Defaults.W_USER,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
     transform: str = "standard",
     include_communities: bool = True,
     n_splits: int = 5,
@@ -30,6 +41,11 @@ def evaluate_single_network(
     ranking_k: int = 10,
     dataset: str | None = None,
     cmf_nthreads: int = -1,
+    use_social_regularization: bool = False,
+    social_mode: SocialMode = "boundary_downweight",
+    lambda_social: float = 0.001,
+    social_beta: float = 0.5,
+    social_gamma: float = 1.0,
 ) -> list[dict]:
     """
     Load features and evaluate CMF for one (model, index) pair.
@@ -42,6 +58,8 @@ def evaluate_single_network(
         lambda_reg:          L2 regularisation strength.
         w_main:              Weight for main rating-matrix loss.
         w_user:              Weight for user side-information loss.
+        method:              CMF optimizer for the non-social path and paired baseline.
+        maxiter:             L-BFGS iteration budget.
         transform:           Feature normalisation method.
         include_communities: Whether to include community features.
         n_splits:            Number of cross-validation splits.
@@ -52,6 +70,11 @@ def evaluate_single_network(
         ranking_k:           Cut-off for rank-based metrics.
         dataset:             Dataset name.  Defaults to ``Datasets.DEFAULT``.
         cmf_nthreads:        BLAS threads for cmfrec.
+        use_social_regularization: Fit with Phase 6 social regularization.
+        social_mode:         Social edge weighting mode.
+        lambda_social:       Social regularization strength.
+        social_beta:         Boundary penalty parameter for social edge weights.
+        social_gamma:        Shared-community gain parameter for social edge weights.
 
     Returns:
         List of per-split result dicts, or empty list on failure.
@@ -66,6 +89,31 @@ def evaluate_single_network(
         print(f"  Skipping {model_name} #{network_index:03d}: features not found.")
         return []
 
+    if use_social_regularization:
+        return evaluate_social_cmf_with_user_attributes(
+            data=data,
+            user_attributes=features,
+            model_name=model_name,
+            network_index=network_index,
+            k=k,
+            lambda_reg=lambda_reg,
+            w_main=w_main,
+            w_user=w_user,
+            n_splits=n_splits,
+            transform=transform,
+            baseline_k=baseline_k,
+            baseline_lambda=baseline_lambda,
+            compute_ranking=compute_ranking,
+            ranking_k=ranking_k,
+            dataset=dataset,
+            cmf_nthreads=cmf_nthreads,
+            social_mode=social_mode,
+            lambda_social=lambda_social,
+            social_beta=social_beta,
+            social_gamma=social_gamma,
+            maxiter=maxiter,
+        )
+
     return evaluate_cmf_with_user_attributes(
         data,
         features,
@@ -73,6 +121,8 @@ def evaluate_single_network(
         lambda_reg=lambda_reg,
         w_main=w_main,
         w_user=w_user,
+        method=method,
+        maxiter=maxiter,
         n_splits=n_splits,
         transform=transform,
         baseline_k=baseline_k,
@@ -81,6 +131,127 @@ def evaluate_single_network(
         ranking_k=ranking_k,
         cmf_nthreads=cmf_nthreads,
     )
+
+
+def evaluate_social_cmf_with_user_attributes(
+    data: pd.DataFrame,
+    user_attributes: pd.DataFrame,
+    model_name: str,
+    network_index: int,
+    k: int = 20,
+    lambda_reg: float = 1.0,
+    w_main: float = Defaults.W_MAIN,
+    w_user: float = Defaults.W_USER,
+    n_splits: int = 5,
+    test_size: float = 0.2,
+    transform: str = "standard",
+    baseline_k: int | None = None,
+    baseline_lambda: float | None = None,
+    compute_ranking: bool = False,
+    ranking_k: int = 10,
+    dataset: str | None = None,
+    cmf_nthreads: int = -1,
+    social_mode: SocialMode = "boundary_downweight",
+    lambda_social: float = 0.001,
+    social_beta: float = 0.5,
+    social_gamma: float = 1.0,
+    maxiter: int = Defaults.CMF_MAXITER,
+) -> list[dict]:
+    """Evaluate social-regularized CMF on repeated warm train/test splits."""
+    valid_users = list(user_attributes.index)
+    filtered = cast(pd.DataFrame, data.loc[data["UserId"].isin(valid_users)].copy())
+
+    if filtered.empty:
+        print("  Warning: no overlap between rating users and network users.")
+        return []
+
+    social_edges = build_social_edges(
+        dataset=dataset or Datasets.DEFAULT,
+        model_name=model_name,
+        network_index=network_index,
+        user_index=user_attributes.index,
+        mode=social_mode,
+        beta=social_beta,
+        gamma=social_gamma,
+        dtype=np.float32,
+    )
+    if social_edges.n_edges == 0:
+        print(f"  Skipping {model_name} #{network_index:03d}: no usable social edges.")
+        return []
+
+    results: list[dict] = []
+    for split_idx in range(n_splits):
+        train_df, test_df = split_data_single(
+            filtered, test_size=test_size, random_state=split_idx
+        )
+        seen_users = list(train_df["UserId"].unique())
+        seen_items = list(train_df["ItemId"].unique())
+        warm_test = cast(
+            pd.DataFrame,
+            test_df.loc[
+                test_df["UserId"].isin(seen_users) & test_df["ItemId"].isin(seen_items)
+            ].copy(),
+        )
+        if warm_test.empty:
+            continue
+
+        social_model, social_metrics = fit_social_cmf_split(
+            train_df,
+            warm_test,
+            user_attributes,
+            social_edges,
+            k=k,
+            lambda_reg=lambda_reg,
+            w_main=w_main,
+            w_user=w_user,
+            lambda_social=lambda_social,
+            transform=transform,
+            maxiter=maxiter,
+            nthreads=cmf_nthreads,
+            random_state=Defaults.CMF_RANDOM_STATE + split_idx,
+            include_user_attributes=True,
+        )
+
+        if baseline_k is not None and baseline_lambda is not None:
+            baseline_model = train_model(
+                train_df,
+                k=baseline_k,
+                lambda_reg=baseline_lambda,
+                method=Defaults.CMF_METHOD,
+                maxiter=maxiter,
+                nthreads=cmf_nthreads,
+                random_state=Defaults.CMF_RANDOM_STATE + split_idx,
+            )
+            baseline_metrics = evaluate_single_split(baseline_model, warm_test)
+            baseline_rmse = baseline_metrics["rmse"]
+        else:
+            baseline_metrics = {
+                "rmse": float("nan"),
+                "mae": float("nan"),
+                "r2": float("nan"),
+            }
+            baseline_rmse = float("nan")
+
+        result: dict = {
+            "rmse_enhanced": social_metrics["rmse"],
+            "rmse_baseline": baseline_rmse,
+            "improvement": baseline_rmse - social_metrics["rmse"],
+            "mae_enhanced": social_metrics["mae"],
+            "mae_baseline": baseline_metrics["mae"],
+            "r2_enhanced": social_metrics["r2"],
+            "r2_baseline": baseline_metrics["r2"],
+            "social_edges": social_edges.n_edges,
+            "social_mode": social_mode,
+            "lambda_social": lambda_social,
+        }
+
+        if compute_ranking:
+            ranking = evaluate_ranking(social_model, train_df, warm_test, k=ranking_k)
+            result.update(ranking)
+
+        results.append(result)
+
+    return results
 
 
 def _save_rmses(
@@ -140,6 +311,7 @@ def _save_rmses(
 
 def run_network_evaluation(
     data: pd.DataFrame,
+    model_names: list[str] | None = None,
     sample_networks: int = 5,
     transform: str = "standard",
     include_communities: bool = True,
@@ -155,6 +327,14 @@ def run_network_evaluation(
     dataset: str | None = None,
     seed: int = 42,
     n_jobs: int = 1,
+    cmf_nthreads: int = 1,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    use_social_regularization: bool = False,
+    social_mode: SocialMode = "boundary_downweight",
+    lambda_social: float = 0.001,
+    social_beta: float = 0.5,
+    social_gamma: float = 1.0,
 ) -> dict[str, list[float]]:
     """
     Evaluate a random sample of networks for all three diffusion models.
@@ -164,6 +344,7 @@ def run_network_evaluation(
 
     Args:
         data:                Ratings DataFrame (global train split).
+        model_names:         Diffusion models to evaluate. Defaults to all.
         sample_networks:     Number of networks to randomly sample per model.
         transform:           Feature normalisation method.
         include_communities: Whether to include community features.
@@ -180,7 +361,16 @@ def run_network_evaluation(
         dataset:             Dataset name.  Defaults to ``Datasets.DEFAULT``.
         seed:                Random seed for reproducible network sampling.
         n_jobs:              Number of parallel worker processes.  ``1`` (default)
-                             runs sequentially.  ``-1`` uses all available CPU cores.
+                             runs sequentially.  ``-1`` uses all available CPU cores
+                             unless the caller maps it to a lower cap.
+        cmf_nthreads:        BLAS threads per CMF fit.
+        method:              CMF optimizer for non-social enhanced fits.
+        maxiter:             L-BFGS iteration budget.
+        use_social_regularization: Fit Phase 6 social-regularized CMF.
+        social_mode:         Social edge weighting mode.
+        lambda_social:       Social regularization strength.
+        social_beta:         Boundary penalty parameter for social edge weights.
+        social_gamma:        Shared-community gain parameter for social edge weights.
 
     Returns:
         Dict mapping model name → list of mean enhanced RMSE values.
@@ -188,7 +378,8 @@ def run_network_evaluation(
     from recommender.enhanced.search import search_enhanced_params
 
     dp = DatasetPaths(dataset or Datasets.DEFAULT)
-    all_results: dict[str, list[float]] = {m: [] for m in Models.ALL}
+    selected_models = model_names or Models.ALL
+    all_results: dict[str, list[float]] = {m: [] for m in selected_models}
 
     if any(p is None for p in (k, lambda_reg, w_main, w_user)):
         sample_features: pd.DataFrame | None = None
@@ -218,7 +409,13 @@ def run_network_evaluation(
                 )
                 _mlflow_tune.log_param("enhanced_search_tuning_network_index", 0)
             enhanced_search = search_enhanced_params(
-                data, sample_features, n_trials=50, n_splits=3
+                data,
+                sample_features,
+                n_trials=50,
+                n_splits=3,
+                method=method,
+                maxiter=maxiter,
+                cmf_nthreads=cmf_nthreads,
             )
             best_k = enhanced_search["best_params"]["k"]
             best_lambda = enhanced_search["best_params"]["lambda_reg"]
@@ -235,7 +432,7 @@ def run_network_evaluation(
         assert w_main is not None and w_user is not None
         best_k, best_lambda, best_w_main, best_w_user = k, lambda_reg, w_main, w_user
 
-    for model_name in Models.ALL:
+    for model_name in selected_models:
         model_dir = dp.CENTRALITY / model_name
         if not model_dir.exists():
             print(f"  Skipping {model_name}: centrality directory not found.")
@@ -264,6 +461,8 @@ def run_network_evaluation(
             "lambda_reg": best_lambda,
             "w_main": best_w_main,
             "w_user": best_w_user,
+            "method": method,
+            "maxiter": maxiter,
             "transform": transform,
             "include_communities": include_communities,
             "n_splits": n_splits,
@@ -272,7 +471,12 @@ def run_network_evaluation(
             "compute_ranking": compute_ranking,
             "ranking_k": ranking_k,
             "dataset": dataset,
-            "cmf_nthreads": -1 if n_jobs == 1 else 1,
+            "cmf_nthreads": cmf_nthreads if n_jobs == 1 else 1,
+            "use_social_regularization": use_social_regularization,
+            "social_mode": social_mode,
+            "lambda_social": lambda_social,
+            "social_beta": social_beta,
+            "social_gamma": social_gamma,
         }
 
         from tqdm import tqdm

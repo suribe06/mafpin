@@ -267,29 +267,93 @@ def fit_social_cmf_split(
     w_user: float = Defaults.W_USER,
     lambda_social: float = 0.01,
     transform: str = "standard",
-    maxiter: int = 25,
+    maxiter: int = Defaults.CMF_MAXITER,
     nthreads: int = 1,
-    random_state: int = 42,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
     use_float: bool = True,
     include_user_attributes: bool = True,
 ) -> tuple[CMF, dict[str, float]]:
     """Fit one social-regularized CMF split and evaluate rating accuracy."""
-    dtype = np.float32 if use_float else np.float64
+    n_users, n_items = _shape_from_frames(
+        train_df,
+        test_df,
+        user_attributes,
+        social_edges,
+    )
+    model = fit_social_cmf_model(
+        train_df,
+        user_attributes,
+        social_edges,
+        k=k,
+        lambda_reg=lambda_reg,
+        w_main=w_main,
+        w_user=w_user,
+        lambda_social=lambda_social,
+        transform=transform,
+        maxiter=maxiter,
+        nthreads=nthreads,
+        random_state=random_state,
+        use_float=use_float,
+        include_user_attributes=include_user_attributes,
+        n_users=n_users,
+        n_items=n_items,
+    )
+    metrics = evaluate_single_split(model, test_df)
+    return model, metrics
+
+
+def _shape_from_frames(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame | None,
+    user_attributes: pd.DataFrame,
+    social_edges: SocialEdges,
+) -> tuple[int, int]:
     max_social_user = 0
     if social_edges.row.size:
         max_social_user = max(max_social_user, int(social_edges.row.max()))
     if social_edges.col.size:
         max_social_user = max(max_social_user, int(social_edges.col.max()))
-    n_users = int(
-        max(
-            train_df["UserId"].max(),
-            test_df["UserId"].max(),
-            int(np.max(user_attributes.index.to_numpy(dtype=np.int64))),
-            max_social_user,
+    user_max_values = [
+        int(train_df["UserId"].max()),
+        int(np.max(user_attributes.index.to_numpy(dtype=np.int64))),
+        max_social_user,
+    ]
+    item_max_values = [int(train_df["ItemId"].max())]
+    if test_df is not None and not test_df.empty:
+        user_max_values.append(int(test_df["UserId"].max()))
+        item_max_values.append(int(test_df["ItemId"].max()))
+    return int(max(user_max_values) + 1), int(max(item_max_values) + 1)
+
+
+def fit_social_cmf_model(
+    train_df: pd.DataFrame,
+    user_attributes: pd.DataFrame,
+    social_edges: SocialEdges,
+    k: int = Defaults.K,
+    lambda_reg: float = Defaults.LAMBDA_REG,
+    w_main: float = Defaults.W_MAIN,
+    w_user: float = Defaults.W_USER,
+    lambda_social: float = 0.01,
+    transform: str = "standard",
+    maxiter: int = Defaults.CMF_MAXITER,
+    nthreads: int = 1,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
+    use_float: bool = True,
+    include_user_attributes: bool = True,
+    n_users: int | None = None,
+    n_items: int | None = None,
+) -> CMF:
+    """Fit a social-regularized CMF model without evaluating a split."""
+    dtype = np.float32 if use_float else np.float64
+    if n_users is None or n_items is None:
+        inferred_users, inferred_items = _shape_from_frames(
+            train_df,
+            None,
+            user_attributes,
+            social_edges,
         )
-        + 1
-    )
-    n_items = int(max(train_df["ItemId"].max(), test_df["ItemId"].max()) + 1)
+        n_users = inferred_users if n_users is None else n_users
+        n_items = inferred_items if n_items is None else n_items
     train_matrix = _ratings_to_coo(train_df, n_users, n_items, dtype=dtype)
     user_matrix = None
     if include_user_attributes:
@@ -329,5 +393,4 @@ def fit_social_cmf_split(
         model.fit(X=train_matrix)
     else:
         model.fit(X=train_matrix, U=user_matrix)
-    metrics = evaluate_single_split(model, test_df)
-    return model, metrics
+    return model

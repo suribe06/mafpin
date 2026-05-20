@@ -5,9 +5,10 @@ Wraps the :class:`cmfrec.CMF` model with helpers for cross-validated
 evaluation, hyperparameter search, and final model training.
 
 The key idea is a standard matrix-factorisation approach in which a latent
-factor matrix is learned jointly from user–item interactions via alternating
-least squares (ALS).  No side information is used at this stage; side
-information is introduced in :mod:`recommender.enhanced`.
+factor matrix is learned jointly from user-item interactions.  The pipeline
+defaults to L-BFGS so baseline and social-regularized CMF fits use the same
+optimizer family.  No side information is used at this stage; side information
+is introduced in :mod:`recommender.enhanced`.
 
 Functions
 ---------
@@ -75,6 +76,10 @@ def train_model(
     train_data: pd.DataFrame,
     k: int = Defaults.K,
     lambda_reg: float = Defaults.LAMBDA_REG,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    nthreads: int = -1,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
 ) -> CMF:
     """
     Fit a CMF model on *train_data*.
@@ -84,11 +89,24 @@ def train_model(
                      columns.
         k:           Number of latent factors.
         lambda_reg:  L2 regularisation strength.
+        method:      CMF optimizer. Defaults to the pipeline-wide method.
+        maxiter:     L-BFGS iteration budget.
+        nthreads:    BLAS threads for cmfrec.
+        random_state: Random seed for L-BFGS initialization.
 
     Returns:
         Fitted :class:`cmfrec.CMF` instance.
     """
-    model = CMF(method="als", k=k, lambda_=lambda_reg, verbose=False)
+    kwargs = {
+        "method": method,
+        "k": k,
+        "lambda_": lambda_reg,
+        "verbose": False,
+        "nthreads": nthreads,
+    }
+    if method == "lbfgs":
+        kwargs.update({"maxiter": maxiter, "random_state": random_state})
+    model = CMF(**kwargs)
     model.fit(X=train_data)
     return model
 
@@ -104,6 +122,10 @@ def evaluate_with_cv(
     lambda_reg: float = Defaults.LAMBDA_REG,
     n_splits: int = 5,
     test_size: float = 0.2,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    nthreads: int = -1,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
 ) -> dict[str, float]:
     """
     Evaluate a parameter combination via *n_splits* random train/test splits.
@@ -114,6 +136,10 @@ def evaluate_with_cv(
         lambda_reg: L2 regularisation strength.
         n_splits:   Number of random splits.
         test_size:  Fraction of data to use as test set.
+        method:     CMF optimizer.
+        maxiter:    L-BFGS iteration budget.
+        nthreads:   BLAS threads for cmfrec.
+        random_state: Base seed for L-BFGS initialization.
 
     Returns:
         Dict with keys ``rmse``, ``mae``, ``r2`` containing the mean value
@@ -125,7 +151,15 @@ def evaluate_with_cv(
         train_df, test_df = split_data_single(
             data, test_size=test_size, random_state=split_idx
         )
-        model = train_model(train_df, k=k, lambda_reg=lambda_reg)
+        model = train_model(
+            train_df,
+            k=k,
+            lambda_reg=lambda_reg,
+            method=method,
+            maxiter=maxiter,
+            nthreads=nthreads,
+            random_state=random_state + split_idx,
+        )
         result = evaluate_single_split(model, test_df)
         rmses.append(result["rmse"])
         maes.append(result["mae"])
@@ -148,6 +182,9 @@ def search_best_params(
     param_grid: dict | None = None,
     n_iter: int = 20,
     n_splits: int = 3,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    nthreads: int = -1,
 ) -> dict:
     """
     Randomised search over *k* and *lambda_reg*.
@@ -187,7 +224,13 @@ def search_best_params(
         k_val = int(param_grid["k"].rvs())
         lambda_val = float(param_grid["lambda_reg"].rvs())
         metrics = evaluate_with_cv(
-            data, k=k_val, lambda_reg=lambda_val, n_splits=n_splits
+            data,
+            k=k_val,
+            lambda_reg=lambda_val,
+            n_splits=n_splits,
+            method=method,
+            maxiter=maxiter,
+            nthreads=nthreads,
         )
         result_record = {"k": k_val, "lambda_reg": lambda_val, **metrics}
         all_results.append(result_record)
@@ -209,6 +252,9 @@ def search_baseline_params(
     data: pd.DataFrame,
     n_trials: int = 50,
     n_splits: int = 3,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    nthreads: int = -1,
 ) -> dict:
     """
     Optuna TPE hyperparameter search over *k* and *lambda_reg*.
@@ -237,7 +283,13 @@ def search_baseline_params(
         k_val = trial.suggest_int("k", 5, 50)
         lambda_val = trial.suggest_float("lambda_reg", 0.01, 10.0, log=True)
         metrics = evaluate_with_cv(
-            data, k=k_val, lambda_reg=lambda_val, n_splits=n_splits
+            data,
+            k=k_val,
+            lambda_reg=lambda_val,
+            n_splits=n_splits,
+            method=method,
+            maxiter=maxiter,
+            nthreads=nthreads,
         )
         all_results.append({"k": k_val, "lambda_reg": lambda_val, **metrics})
         import mlflow
@@ -246,8 +298,21 @@ def search_baseline_params(
             mlflow.log_metric("baseline_trial_rmse", metrics["rmse"], step=trial.number)
         return metrics["rmse"]
 
+    def _print_trial(_study: "optuna.Study", trial: "optuna.trial.FrozenTrial") -> None:
+        value = f"{trial.value:.6f}" if trial.value is not None else "None"
+        print(
+            f"  [baseline trial {trial.number + 1:3d}/{n_trials}] "
+            f"state={trial.state.name} rmse={value}",
+            flush=True,
+        )
+
     study = optuna.create_study(direction="minimize")
-    study.optimize(_objective, n_trials=n_trials, show_progress_bar=False)
+    study.optimize(
+        _objective,
+        n_trials=n_trials,
+        show_progress_bar=False,
+        callbacks=[_print_trial],
+    )
 
     best_params = {
         "k": study.best_params["k"],
@@ -278,6 +343,10 @@ def train_final_model(
     data: pd.DataFrame,
     k: int = Defaults.K,
     lambda_reg: float = Defaults.LAMBDA_REG,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    nthreads: int = -1,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
 ) -> CMF:
     """
     Fit the final CMF model on the complete dataset.
@@ -286,12 +355,24 @@ def train_final_model(
         data:       Full ratings DataFrame.
         k:          Number of latent factors.
         lambda_reg: L2 regularisation strength.
+        method:     CMF optimizer.
+        maxiter:    L-BFGS iteration budget.
+        nthreads:   BLAS threads for cmfrec.
+        random_state: Random seed for L-BFGS initialization.
 
     Returns:
         Fitted :class:`cmfrec.CMF` instance trained on all data.
     """
-    print(f"Training final model: k={k}, lambda_reg={lambda_reg}")
-    return train_model(data, k=k, lambda_reg=lambda_reg)
+    print(f"Training final model: method={method}, k={k}, " f"lambda_reg={lambda_reg}")
+    return train_model(
+        data,
+        k=k,
+        lambda_reg=lambda_reg,
+        method=method,
+        maxiter=maxiter,
+        nthreads=nthreads,
+        random_state=random_state,
+    )
 
 
 # ---------------------------------------------------------------------------
