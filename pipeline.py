@@ -165,12 +165,77 @@ def _print_best_hyperparams(label: str, search_result: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Artifact manifest helpers (Issue 3)
+# ---------------------------------------------------------------------------
+
+
+def _write_artifact_manifest(dataset: str) -> None:
+    """Record current split configuration in an artifact manifest file.
+
+    Written after the cascade step so downstream steps can warn if the
+    manifest is stale relative to the current :class:`~config.Split` settings.
+    """
+    import subprocess
+    from config import Split, DatasetPaths as _DP
+
+    manifest: dict[str, Any] = {
+        "split_strategy": Split.STRATEGY,
+        "test_size": Split.TEST_SIZE,
+        "random_state": Split.RANDOM_STATE,
+        "created_at": datetime.now().isoformat(),
+    }
+    try:
+        git_hash = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        manifest["git_commit"] = git_hash
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+    dest = _DP(dataset).BASE / "artifact_manifest.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    tmp.replace(dest)
+    print(f"Artifact manifest written → {dest}")
+
+
+def _check_artifact_manifest(dataset: str) -> None:
+    """Warn if cached artifacts were built with a different split config."""
+    from config import Split, DatasetPaths as _DP
+
+    manifest_path = _DP(dataset).BASE / "artifact_manifest.json"
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("split_strategy") != Split.STRATEGY:
+            print(
+                f"  WARNING: artifacts were generated with split_strategy="
+                f"'{manifest['split_strategy']}' but the current config has "
+                f"'{Split.STRATEGY}'. Re-run --steps cascade to regenerate."
+            )
+        if (
+            abs(float(manifest.get("test_size", Split.TEST_SIZE)) - Split.TEST_SIZE)
+            > 1e-6
+        ):
+            print(
+                f"  WARNING: artifacts were generated with test_size="
+                f"{manifest['test_size']} but the current config has {Split.TEST_SIZE}."
+            )
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
 def _run_cascade(args: argparse.Namespace) -> None:
     import pandas as pd
-    from sklearn.model_selection import train_test_split
 
     from networks.cascades import generate_cascades_from_df
     from config import DatasetPaths, Datasets, Split
+    from recommender.data import split_data_temporal, split_data_single
 
     ds_name = args.dataset
     cfg = Datasets.CONFIG[ds_name]
@@ -185,17 +250,24 @@ def _run_cascade(args: argparse.Namespace) -> None:
     )
     df.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
 
-    # Apply the global split so NetInf learns from training interactions only.
-    # Pass all_user_ids=df["UserId"] so the cascade header declares the full
-    # user-ID space — keeping network compact IDs aligned with LabelEncoder.
-    train_df, _ = train_test_split(
-        df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
-    )
+    # Apply the global split respecting config.Split.STRATEGY so that NetInf
+    # learns only from training interactions.  Pass all_user_ids=df["UserId"]
+    # so the cascade header declares the full user-ID space, keeping compact
+    # network IDs aligned with LabelEncoder (C-3 fix).
+    if Split.STRATEGY == "temporal":
+        train_df, _ = split_data_temporal(df, test_size=Split.TEST_SIZE)
+    else:
+        train_df, _ = split_data_single(
+            df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
+        )
     generate_cascades_from_df(
-        pd.DataFrame(train_df),
+        train_df,
         all_user_ids=df["UserId"],
         output_file=DatasetPaths(ds_name).CASCADES,
     )
+
+    # Persist split config so downstream steps can detect stale artifacts.
+    _write_artifact_manifest(ds_name)
 
     from networks.cascades import compute_cascade_user_stats
 
@@ -266,7 +338,25 @@ def _run_inference(args: argparse.Namespace) -> None:
 def _run_centrality(args: argparse.Namespace) -> None:
     from networks.centrality import calculate_centrality_for_all_models
     from visualization.network_plots import plot_all_centrality_distributions
-    from config import Models
+    from config import Models, DatasetPaths, SideUserFeatures
+
+    _check_artifact_manifest(args.dataset)
+
+    # Warn if pagerank_lph is enabled but community files are missing (Issue 19).
+    if SideUserFeatures.FEATURES.get("pagerank_lph", False):
+        _dp = DatasetPaths(args.dataset)
+        _communities_exist = any(
+            (_dp.COMMUNITIES / _mn).exists()
+            and any((_dp.COMMUNITIES / _mn).glob(f"communities_{_mn}_*.csv"))
+            for _mn in Models.ALL
+        )
+        if not _communities_exist:
+            print(
+                "  WARNING: pagerank_lph is enabled in SideUserFeatures.FEATURES "
+                "but no community CSV files were found under "
+                f"{_dp.COMMUNITIES}. The pagerank_lph column will be set to NaN "
+                "for all networks. Run --steps communities first to compute LPH."
+            )
 
     calculate_centrality_for_all_models(
         dataset=args.dataset if hasattr(args, "dataset") else None
@@ -374,6 +464,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
                     method=args.cmf_method,
                     maxiter=args.cmf_maxiter,
                     nthreads=cmf_nthreads,
+                    random_state=args.seed,
                 )
             best_k_b = baseline_search["best_params"]["k"]
             best_lambda_b = baseline_search["best_params"]["lambda_reg"]
@@ -401,6 +492,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
                         nthreads=cmf_nthreads,
                         include_user_attributes=True,
                         output_path=dp.SOCIAL_RESULTS,
+                        train_df=train_df,
                     )
                 if not enhanced_search["best_params"]:
                     print("Social hyperparameter search produced no usable trials.")
@@ -421,6 +513,7 @@ def _run_recommend(args: argparse.Namespace) -> None:
                         method=args.cmf_method,
                         maxiter=args.cmf_maxiter,
                         cmf_nthreads=cmf_nthreads,
+                        random_state=args.seed,
                     )
                 save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
             best_k_e = enhanced_search["best_params"]["k"]
@@ -591,19 +684,29 @@ def _run_recommend(args: argparse.Namespace) -> None:
             )
 
     global_rmse = baseline_metrics["rmse"]
-    for _mn, _rmse_list in all_results.items():
-        if _rmse_list:
+    for _mn, _net_results in all_results.items():
+        _enhanced_list = _net_results.get("enhanced", [])
+        _baseline_list = _net_results.get("baseline", [])
+        if _enhanced_list:
+            # Use mean paired-baseline RMSE from the network evaluation as the
+            # per-alpha comparison line; reserve global_rmse for the global reference.
+            _mean_paired_baseline = (
+                float(sum(_baseline_list) / len(_baseline_list))
+                if _baseline_list
+                else global_rmse
+            )
             plot_alpha_rmse_analysis(
                 model_name=_mn,
-                rmse_values=_rmse_list,
-                baseline_rmse=global_rmse,
+                rmse_values=_enhanced_list,
+                baseline_rmse=_mean_paired_baseline,
+                global_baseline_rmse=global_rmse,
                 save_plot=True,
                 dataset=args.dataset,
             )
             plot_alpha_delta_rmse(
                 model_name=_mn,
-                rmse_values=_rmse_list,
-                baseline_rmse=global_rmse,
+                rmse_values=_enhanced_list,
+                baseline_rmse=_mean_paired_baseline,
                 save_plot=True,
                 dataset=args.dataset,
             )
@@ -688,6 +791,7 @@ def _run_hypertune(args: argparse.Namespace) -> None:
                 nthreads=cmf_nthreads,
                 include_user_attributes=True,
                 output_path=dp.SOCIAL_RESULTS,
+                train_df=train_df,
             )
             _artifact = dp.SOCIAL_RESULTS
         else:
@@ -703,6 +807,7 @@ def _run_hypertune(args: argparse.Namespace) -> None:
                 method=args.cmf_method,
                 maxiter=args.cmf_maxiter,
                 cmf_nthreads=cmf_nthreads,
+                random_state=args.seed,
             )
             save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
             _artifact = dp.ENHANCED_RESULTS
@@ -810,7 +915,29 @@ def _run_shap(args: argparse.Namespace) -> None:
             social_gamma=args.social_gamma,
         )
         save_shap_results(results, path=dp.SHAP_RESULTS)
-        plot_all_shap(dataset=args.dataset)
+        # Pass social_regularization so plots use the correct title/filename.
+        plot_all_shap(
+            dataset=args.dataset,
+            social_regularization=args.social_regularization,
+        )
+
+        # Log the actual hyperparameters loaded from disk (not CLI defaults).
+        try:
+            from analysis.shap_analysis import load_enhanced_params as _lep
+
+            _actual_params = _lep(
+                path=(
+                    dp.SOCIAL_RESULTS
+                    if args.social_regularization
+                    else dp.ENHANCED_RESULTS
+                ),
+                dataset=args.dataset,
+            )
+            mlflow.log_params(
+                {f"shap_best_{_k}": _v for _k, _v in _actual_params.items()}
+            )
+        except Exception as _exc:
+            print(f"  Warning: could not log actual SHAP hyperparameters: {_exc}")
 
         for model_name, model_results in results.items():
             mlflow.log_metric(f"{model_name}_n_networks", model_results["n_networks"])
@@ -823,6 +950,97 @@ def _run_shap(args: argparse.Namespace) -> None:
         _artifact = dp.SHAP_RESULTS
         if _artifact.exists():
             mlflow.log_artifact(str(_artifact))
+
+
+# ---------------------------------------------------------------------------
+# Pre-registration helper
+# ---------------------------------------------------------------------------
+
+
+def _run_preregister(args: argparse.Namespace) -> None:
+    """Write a stratified network sample plan across alpha quantiles × models.
+
+    The plan covers three density strata (sparse / medium / dense) defined by
+    tertiles of the alpha index range for each diffusion model.  Five networks
+    are sampled from each stratum, giving 45 reference networks in total
+    (3 models × 3 strata × 5).  Saving this plan *before* running evaluations
+    constitutes a pre-registration commitment and helps reviewers verify that
+    reported results are not cherry-picked.
+    """
+    import json as _json
+
+    from config import DatasetPaths, Models
+
+    dp = DatasetPaths(args.dataset)
+
+    plan: dict = {"dataset": args.dataset, "strata": {}, "models": {}}
+    total_networks = 0
+
+    for model_name in Models.ALL:
+        model_dir = dp.CENTRALITY / model_name
+        csvs = sorted(model_dir.glob(f"centrality_metrics_{model_name}_*.csv"))
+        if not csvs:
+            print(f"  No centrality CSVs for {model_name} — skipping.")
+            continue
+
+        indices = sorted(int(p.stem.rsplit("_", 1)[-1]) for p in csvs)
+        n = len(indices)
+        # Tertile boundaries
+        q33 = indices[n // 3]
+        q67 = indices[2 * n // 3]
+
+        sparse = [i for i in indices if i < q33]
+        medium = [i for i in indices if q33 <= i < q67]
+        dense = [i for i in indices if i >= q67]
+
+        rng = __import__("random").Random(args.seed)
+        sample_per_stratum = 5
+        sampled_sparse = (
+            sorted(rng.sample(sparse, min(sample_per_stratum, len(sparse))))
+            if sparse
+            else []
+        )
+        sampled_medium = (
+            sorted(rng.sample(medium, min(sample_per_stratum, len(medium))))
+            if medium
+            else []
+        )
+        sampled_dense = (
+            sorted(rng.sample(dense, min(sample_per_stratum, len(dense))))
+            if dense
+            else []
+        )
+
+        plan["models"][model_name] = {
+            "total_networks": n,
+            "quantile_boundaries": {"q33": q33, "q67": q67},
+            "sampled": {
+                "sparse": sampled_sparse,
+                "medium": sampled_medium,
+                "dense": sampled_dense,
+            },
+            "all_sampled": sampled_sparse + sampled_medium + sampled_dense,
+        }
+        total_networks += len(sampled_sparse) + len(sampled_medium) + len(sampled_dense)
+        print(
+            f"  {model_name}: {n} networks → "
+            f"sparse={sampled_sparse}, medium={sampled_medium}, dense={sampled_dense}"
+        )
+
+    plan["total_networks_sampled"] = total_networks
+    plan["seed"] = args.seed
+    plan["rationale"] = (
+        "Pre-registered stratified sample: 5 networks per stratum (sparse/medium/"
+        "dense defined by alpha-index tertiles) per diffusion model.  Networks "
+        "were selected before evaluation to avoid cherry-picking."
+    )
+
+    out_path = dp.BASE / "preregistered_network_sample.json"
+    tmp = out_path.with_suffix(".tmp")
+    tmp.write_text(_json.dumps(plan, indent=2), encoding="utf-8")
+    tmp.replace(out_path)
+    print(f"\nPre-registered sample plan saved → {out_path}")
+    print(f"Total networks to evaluate: {total_networks}")
 
 
 # ---------------------------------------------------------------------------
@@ -855,7 +1073,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    step_group = parser.add_mutually_exclusive_group(required=True)
+    step_group = parser.add_mutually_exclusive_group(required=False)
     step_group.add_argument(
         "--all",
         action="store_true",
@@ -1031,6 +1249,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "1 = sequential (default). -1 = CPU cap from --cpu-fraction."
         ),
     )
+    parser.add_argument(
+        "--preregister-networks",
+        action="store_true",
+        dest="preregister_networks",
+        help=(
+            "Compute and save a pre-registered stratified sample of networks "
+            "spanning sparse/medium/dense alpha quantiles × all diffusion models. "
+            "Outputs data/<dataset>/preregistered_network_sample.json."
+        ),
+    )
     return parser
 
 
@@ -1045,6 +1273,16 @@ def main(argv: list[str] | None = None) -> None:
         sys.stdout = _TeeStream(original_stdout, log_file)  # type: ignore[assignment]
         sys.stderr = _TeeStream(original_stderr, log_file)  # type: ignore[assignment]
 
+    # ALS does not support social regularization (no weighted-edge objective).
+    if (
+        getattr(args, "social_regularization", False)
+        and getattr(args, "cmf_method", Defaults.CMF_METHOD) == "als"
+    ):
+        parser.error(
+            "--social-regularization requires L-BFGS; ALS cannot incorporate "
+            "weighted social edges. Use --cmf-method lbfgs (the default)."
+        )
+
     try:
         print(
             f"\n=== Pipeline run started {datetime.now().isoformat(timespec='seconds')} ===",
@@ -1052,6 +1290,23 @@ def main(argv: list[str] | None = None) -> None:
         )
         print(f"Command: python pipeline.py {' '.join(sys.argv[1:])}", flush=True)
         _configure_cpu_limits(args)
+
+        # --preregister-networks runs independently before any pipeline step.
+        if getattr(args, "preregister_networks", False):
+            print(
+                "\n[PREREGISTER] Building pre-registered network sample …", flush=True
+            )
+            _run_preregister(args)
+            print("[PREREGISTER] Done.", flush=True)
+
+        # Support running --preregister-networks alone (without --steps/--all).
+        if not getattr(args, "all", False) and not getattr(args, "steps", None):
+            if not getattr(args, "preregister_networks", False):
+                parser.error(
+                    "one of --all, --steps, or --preregister-networks is required."
+                )
+            # Pre-registration-only run: nothing else to do.
+            return
 
         steps = ALL_STEPS if args.all else args.steps
 
