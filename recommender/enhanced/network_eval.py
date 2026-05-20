@@ -112,6 +112,7 @@ def evaluate_single_network(
             social_beta=social_beta,
             social_gamma=social_gamma,
             maxiter=maxiter,
+            method=method,
         )
 
     return evaluate_cmf_with_user_attributes(
@@ -156,6 +157,7 @@ def evaluate_social_cmf_with_user_attributes(
     social_beta: float = 0.5,
     social_gamma: float = 1.0,
     maxiter: int = Defaults.CMF_MAXITER,
+    method: str = Defaults.CMF_METHOD,
 ) -> list[dict]:
     """Evaluate social-regularized CMF on repeated warm train/test splits."""
     valid_users = list(user_attributes.index)
@@ -217,7 +219,7 @@ def evaluate_social_cmf_with_user_attributes(
                 train_df,
                 k=baseline_k,
                 lambda_reg=baseline_lambda,
-                method=Defaults.CMF_METHOD,
+                method=method,
                 maxiter=maxiter,
                 nthreads=cmf_nthreads,
                 random_state=Defaults.CMF_RANDOM_STATE + split_idx,
@@ -259,16 +261,18 @@ def _save_rmses(
     network_index: int,
     split_results: list[dict],
     dataset: str | None = None,
+    run_mode: str = "enhanced",
 ) -> None:
     """
-    Append mean RMSE, std, and improvement vs paired baseline to the results file.
+    Append per-mode mean RMSE, std, and improvement vs paired baseline.
 
     Args:
         model_name:    Diffusion model name.
         network_index: Zero-based network index.
-        split_results: List of per-split dicts from
-                       :func:`~recommender.enhanced.model.evaluate_cmf_with_user_attributes`.
+        split_results: List of per-split dicts.
         dataset:       Dataset name.  Defaults to ``Datasets.DEFAULT``.
+        run_mode:      ``"enhanced"`` or ``"social"`` — used as column prefix so
+                       both modes can coexist in the same results CSV.
     """
     dp = DatasetPaths(dataset or Datasets.DEFAULT)
     model_short = Models.SHORT[model_name]
@@ -279,12 +283,13 @@ def _save_rmses(
 
     df = pd.read_csv(results_file, sep="|")
     _ranking_cols = ("ndcg_at_k", "precision_at_k", "recall_at_k", "mrr")
-    for col in (
-        "rmse_mean",
-        "rmse_std",
-        "baseline_rmse_mean",
-        "improvement_pct",
-    ) + _ranking_cols:
+    mode_cols = (
+        f"{run_mode}_rmse_mean",
+        f"{run_mode}_rmse_std",
+        f"{run_mode}_baseline_rmse_mean",
+        f"{run_mode}_improvement_pct",
+    )
+    for col in mode_cols + _ranking_cols:
         if col not in df.columns:
             df[col] = np.nan
 
@@ -293,11 +298,11 @@ def _save_rmses(
         baseline_rmses = [r["rmse_baseline"] for r in split_results]
         mean_enhanced = float(np.mean(enhanced_rmses))
         mean_baseline = float(np.mean(baseline_rmses))
-        df.loc[network_index, "rmse_mean"] = mean_enhanced
-        df.loc[network_index, "rmse_std"] = float(np.std(enhanced_rmses))
-        df.loc[network_index, "baseline_rmse_mean"] = mean_baseline
+        df.loc[network_index, f"{run_mode}_rmse_mean"] = mean_enhanced
+        df.loc[network_index, f"{run_mode}_rmse_std"] = float(np.std(enhanced_rmses))
+        df.loc[network_index, f"{run_mode}_baseline_rmse_mean"] = mean_baseline
         if mean_baseline > 0:
-            df.loc[network_index, "improvement_pct"] = (
+            df.loc[network_index, f"{run_mode}_improvement_pct"] = (
                 (mean_baseline - mean_enhanced) / mean_baseline
             ) * 100.0
 
@@ -306,7 +311,10 @@ def _save_rmses(
             if col_vals:
                 df.loc[network_index, col] = float(np.mean(col_vals))
 
-        df.to_csv(results_file, sep="|", index=False)
+        # Atomic write: avoids partial files on crash / concurrent access.
+        tmp = results_file.with_suffix(".tmp")
+        df.to_csv(tmp, sep="|", index=False)
+        tmp.replace(results_file)
 
 
 def run_network_evaluation(
@@ -335,7 +343,7 @@ def run_network_evaluation(
     lambda_social: float = 0.001,
     social_beta: float = 0.5,
     social_gamma: float = 1.0,
-) -> dict[str, list[float]]:
+) -> dict[str, dict[str, list[float]]]:
     """
     Evaluate a random sample of networks for all three diffusion models.
 
@@ -373,13 +381,17 @@ def run_network_evaluation(
         social_gamma:        Shared-community gain parameter for social edge weights.
 
     Returns:
-        Dict mapping model name → list of mean enhanced RMSE values.
+        Dict mapping model name → ``{"enhanced": list[float], "baseline": list[float]}``
+        where each list holds per-network mean RMSE values in the same order as
+        the evaluated networks.
     """
     from recommender.enhanced.search import search_enhanced_params
 
     dp = DatasetPaths(dataset or Datasets.DEFAULT)
     selected_models = model_names or Models.ALL
-    all_results: dict[str, list[float]] = {m: [] for m in selected_models}
+    all_results: dict[str, dict[str, list[float]]] = {
+        m: {"enhanced": [], "baseline": []} for m in selected_models
+    }
 
     if any(p is None for p in (k, lambda_reg, w_main, w_user)):
         sample_features: pd.DataFrame | None = None
@@ -443,7 +455,10 @@ def run_network_evaluation(
             print(f"  Skipping {model_name}: no centrality CSVs found.")
             continue
 
-        indices = list(range(len(csvs)))
+        # Parse the numeric index from the filename (e.g. "..._007.csv" → 7)
+        # rather than using positional range(len(csvs)), which breaks when
+        # artifact generation skipped some alpha values.
+        indices = sorted(int(p.stem.rsplit("_", 1)[-1]) for p in csvs)
         rng = np.random.default_rng(seed)
         sampled = (
             indices[:sample_networks]
@@ -582,8 +597,15 @@ def run_network_evaluation(
                     f"improvement={sign}{improvement:.4f} "
                     f"({sign}{improvement / mean_baseline * 100:.2f}%)"
                 )
-                _save_rmses(model_name, net_idx, split_results, dataset=dataset)
-                all_results[model_name].append(mean_enhanced)
+                _save_rmses(
+                    model_name,
+                    net_idx,
+                    split_results,
+                    dataset=dataset,
+                    run_mode="social" if use_social_regularization else "enhanced",
+                )
+                all_results[model_name]["enhanced"].append(mean_enhanced)
+                all_results[model_name]["baseline"].append(mean_baseline)
 
                 import mlflow as _mlflow
 
@@ -604,7 +626,8 @@ def run_network_evaluation(
     import mlflow as _mlflow
 
     if _mlflow.active_run():
-        for _model_name, _rmse_list in all_results.items():
+        for _model_name, _net_results in all_results.items():
+            _rmse_list = _net_results["enhanced"]
             if _rmse_list:
                 _mlflow.log_metric(
                     f"{_model_name}_mean_rmse_enhanced", float(np.mean(_rmse_list))

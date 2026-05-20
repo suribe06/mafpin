@@ -86,6 +86,16 @@ def evaluate_cmf_with_user_attributes(
             filtered, test_size=test_size, random_state=split_idx  # type: ignore[arg-type]
         )
 
+        # Warm-test filtering: restrict test to users/items seen in training.
+        # Keeps the non-social and social evaluation paths consistent (M-4).
+        seen_users = list(train_df["UserId"].unique())
+        seen_items = list(train_df["ItemId"].unique())
+        warm_test = test_df.loc[
+            test_df["UserId"].isin(seen_users) & test_df["ItemId"].isin(seen_items)
+        ].copy()
+        if warm_test.empty:
+            continue
+
         # M-2: fit scaler on training users only to prevent leakage.
         train_users = sorted(train_df["UserId"].unique())
         train_feats = user_attributes.loc[train_users]
@@ -114,7 +124,7 @@ def evaluate_cmf_with_user_attributes(
             )
         enhanced_model = CMF(**enhanced_kwargs)
         enhanced_model.fit(X=train_df, U=u_matrix)
-        enhanced_rmse = evaluate_single_split(enhanced_model, test_df)["rmse"]
+        enhanced_rmse = evaluate_single_split(enhanced_model, warm_test)["rmse"]
 
         # M-3: paired baseline on the same filtered subset.
         if baseline_k is not None and baseline_lambda is not None:
@@ -131,7 +141,7 @@ def evaluate_cmf_with_user_attributes(
                 )
             baseline_model = CMF(**baseline_kwargs)
             baseline_model.fit(X=train_df)
-            baseline_rmse = evaluate_single_split(baseline_model, test_df)["rmse"]
+            baseline_rmse = evaluate_single_split(baseline_model, warm_test)["rmse"]
         else:
             baseline_rmse = float("nan")
 
@@ -142,7 +152,7 @@ def evaluate_cmf_with_user_attributes(
         }
 
         if compute_ranking:
-            ranking = evaluate_ranking(enhanced_model, train_df, test_df, k=ranking_k)
+            ranking = evaluate_ranking(enhanced_model, train_df, warm_test, k=ranking_k)
             result.update(ranking)
 
         results.append(result)
