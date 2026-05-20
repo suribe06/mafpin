@@ -155,10 +155,23 @@ def build_social_edges(
     beta: float = 0.5,
     gamma: float = 1.0,
     symmetrization: str = "union",
-    normalize: bool = True,
+    normalization: str = "mean",
     dtype: np.dtype | type = np.float32,
 ) -> SocialEdges:
-    """Build weighted upper-triangle social COO arrays for patched cmfrec."""
+    """Build weighted upper-triangle social COO arrays for patched cmfrec.
+
+    Args:
+        normalization: How to normalize edge weights after weighting.
+            ``"mean"``  — divide by the mean edge weight (default, preserves
+                           relative differences).
+            ``"edges"`` — divide by the number of edges (density-based scaling).
+            ``"none"``  — no normalization (raw weights).
+    """
+    if normalization not in ("mean", "edges", "none"):
+        raise ValueError(
+            f"Unknown normalization {normalization!r}. "
+            "Use 'mean', 'edges', or 'none'."
+        )
     if model_name not in Models.ALL:
         raise ValueError(
             f"Unknown model_name {model_name!r}. Choose from {Models.ALL}."
@@ -190,10 +203,15 @@ def build_social_edges(
         vals.append(weight)
 
     values = np.asarray(vals, dtype=dtype)
-    if normalize and values.size:
-        mean_weight = float(values.mean())
-        if mean_weight > 0.0:
-            values = values / mean_weight
+    if normalization != "none" and values.size:
+        if normalization == "mean":
+            mean_weight = float(values.mean())
+            if mean_weight > 0.0:
+                values = values / mean_weight
+        elif normalization == "edges":
+            n_edges = values.size
+            if n_edges > 0:
+                values = values / n_edges
 
     if values.size:
         mean_value = float(values.mean())
