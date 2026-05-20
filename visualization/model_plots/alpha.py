@@ -34,6 +34,39 @@ def _extract_alphas(model_name: str, dataset: str | None = None) -> np.ndarray:
     return np.asarray(df["alpha"].values, dtype=float)
 
 
+def _extract_aligned_alpha_rmse(
+    model_name: str,
+    rmse_values: list[float],
+    dataset: str | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return alpha/RMSE pairs for either full or sampled network evaluations."""
+    alpha_values = _extract_alphas(model_name, dataset=dataset)
+    rmse_array = np.asarray(rmse_values, dtype=float)
+    if len(alpha_values) == len(rmse_array):
+        return alpha_values, rmse_array
+
+    short = Models.SHORT.get(model_name, "")
+    fp = (
+        DatasetPaths(dataset or Datasets.DEFAULT).NETWORKS
+        / model_name
+        / f"inferred_edges_{short}.csv"
+    )
+    if not fp.exists():
+        return np.array([]), np.array([])
+
+    df = pd.read_csv(fp, sep="|")
+    if "alpha" not in df.columns or "rmse_mean" not in df.columns:
+        return np.array([]), np.array([])
+
+    evaluated = df.dropna(subset=["alpha", "rmse_mean"]).copy()
+    if evaluated.empty:
+        return np.array([]), np.array([])
+    return (
+        np.asarray(evaluated["alpha"].values, dtype=float),
+        np.asarray(evaluated["rmse_mean"].values, dtype=float),
+    )
+
+
 def plot_alpha_rmse_analysis(
     model_name: str,
     rmse_values: list[float],
@@ -57,22 +90,26 @@ def plot_alpha_rmse_analysis(
         global_baseline_rmse: Optional global plain-CMF baseline.
         dataset:              Dataset name.
     """
-    alpha_values = _extract_alphas(model_name, dataset=dataset)
-    if len(alpha_values) == 0 or len(alpha_values) != len(rmse_values):
-        print("Mismatch between alpha values and RMSE values — cannot plot.")
+    alpha_values, rmse_array = _extract_aligned_alpha_rmse(
+        model_name, rmse_values, dataset=dataset
+    )
+    if len(alpha_values) == 0 or len(alpha_values) != len(rmse_array):
+        print(
+            "No aligned alpha/RMSE pairs found — run recommendation evaluation first."
+        )
         return
 
-    best_idx = int(np.argmin(rmse_values))
+    best_idx = int(np.argmin(rmse_array))
     best_alpha = float(alpha_values[best_idx])
-    best_rmse = float(rmse_values[best_idx])
+    best_rmse = float(rmse_array[best_idx])
 
     plt.figure(figsize=figsize)
     plt.plot(
-        alpha_values, rmse_values, "b-", linewidth=2, alpha=0.7, label="RMSE vs Alpha"
+        alpha_values, rmse_array, "b-", linewidth=2, alpha=0.7, label="RMSE vs Alpha"
     )
-    if rmse_std_values is not None and len(rmse_std_values) == len(rmse_values):
+    if rmse_std_values is not None and len(rmse_std_values) == len(rmse_array):
         std_arr = np.asarray(rmse_std_values, dtype=float)
-        mean_arr = np.asarray(rmse_values, dtype=float)
+        mean_arr = rmse_array
         plt.fill_between(
             alpha_values,
             mean_arr - std_arr,
@@ -81,7 +118,7 @@ def plot_alpha_rmse_analysis(
             color="steelblue",
             label="±1σ",
         )
-    plt.scatter(alpha_values, rmse_values, c="steelblue", alpha=0.6, s=30)
+    plt.scatter(alpha_values, rmse_array, c="steelblue", alpha=0.6, s=30)
     plt.scatter(
         best_alpha,
         best_rmse,
@@ -166,15 +203,19 @@ def plot_alpha_delta_rmse(
         delta_pct_values: Pre-computed per-network improvement percentages.
         dataset:          Dataset name.
     """
-    alpha_values = _extract_alphas(model_name, dataset=dataset)
-    if len(alpha_values) == 0 or len(alpha_values) != len(rmse_values):
-        print("Mismatch between alpha values and RMSE values — cannot plot.")
+    alpha_values, rmse_array = _extract_aligned_alpha_rmse(
+        model_name, rmse_values, dataset=dataset
+    )
+    if len(alpha_values) == 0 or len(alpha_values) != len(rmse_array):
+        print(
+            "No aligned alpha/RMSE pairs found — run recommendation evaluation first."
+        )
         return
 
-    if delta_pct_values is not None:
+    if delta_pct_values is not None and len(delta_pct_values) == len(rmse_array):
         deltas_pct = np.array(delta_pct_values)
     else:
-        deltas_pct = (baseline_rmse - np.array(rmse_values)) / baseline_rmse * 100
+        deltas_pct = (baseline_rmse - rmse_array) / baseline_rmse * 100
     colours = ["steelblue" if d > 0 else "tomato" for d in deltas_pct]
 
     plt.figure(figsize=figsize)

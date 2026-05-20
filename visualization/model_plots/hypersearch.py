@@ -31,9 +31,13 @@ def plot_hyperparameter_search_results(
         print("Error: no search results to plot.")
         return
 
-    results = search_results["all_results"]
+    results = [
+        r
+        for r in search_results["all_results"]
+        if r.get("rmse") is not None and np.isfinite(r["rmse"])
+    ]
     if not results:
-        print("Error: all_results is empty.")
+        print("Error: all_results has no finite RMSE rows.")
         return
 
     k_values = [r["k"] for r in results]
@@ -138,6 +142,10 @@ def plot_parameter_heatmap(
     if metric not in df.columns:
         print(f"Metric '{metric}' not found. Available: {list(df.columns)}")
         return
+    df = df[df[metric].notna() & np.isfinite(df[metric])]
+    if df.empty:
+        print(f"Metric '{metric}' has no finite rows.")
+        return
 
     k_bins = np.linspace(df["k"].min(), df["k"].max(), 10)
     lambda_bins = np.linspace(df["lambda_reg"].min(), df["lambda_reg"].max(), 10)
@@ -193,7 +201,17 @@ def plot_convergence_analysis(
         print("Error: no search results.")
         return
 
-    results = sorted(search_results["all_results"], key=lambda x: x.get("iteration", 0))
+    results = sorted(
+        [
+            r
+            for r in search_results["all_results"]
+            if r.get("rmse") is not None and np.isfinite(r["rmse"])
+        ],
+        key=lambda x: x.get("iteration", x.get("trial", 0)),
+    )
+    if not results:
+        print("Error: all_results has no finite RMSE rows.")
+        return
     iterations = list(range(1, len(results) + 1))
     rmse_values = [r["rmse"] for r in results]
 
