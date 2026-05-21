@@ -2,7 +2,7 @@
 
 This document describes `recommender.enhanced.social_regularization`, the Phase 6 module that adds a direct social graph penalty to the local C-backed `cmfrec` model.
 
-The implementation is intentionally separate from the existing enhanced CMF path. Phases 1-5 continue to use network features as user side-information. Phase 6 instead uses the inferred user-user network as a regularizer over latent user factors.
+The implementation is reusable as a standalone module and is also wired into the unified pipeline through `python pipeline.py --social-regularization`. Phases 1-5 continue to use network features as user side-information; Phase 6 additionally uses the inferred user-user network as a regularizer over latent user factors.
 
 ## Model Objective
 
@@ -137,6 +137,59 @@ model, metrics = fit_social_cmf_split(
 ```
 
 The default solver is `method="lbfgs"`, because the social regularizer is implemented in the L-BFGS objective. When `include_user_attributes=False`, the fit isolates the social graph penalty. When `include_user_attributes=True`, the module also passes the Phase 5 side-user matrix as `U`; this path is available but should be tuned separately.
+
+### `fit_social_cmf_model(...)`
+
+Fits the same social-regularized CMF model without evaluating a train/test split.
+This is used by the SHAP pipeline path, where the fitted model is needed so a
+surrogate can explain its predictions:
+
+```python
+model = fit_social_cmf_model(
+    train_df,
+    user_attributes,
+    social_edges,
+    k=20,
+    lambda_reg=1.0,
+    lambda_social=0.001,
+    include_user_attributes=True,
+)
+```
+
+## Unified Pipeline Usage
+
+Run recommendation, Optuna search, and SHAP with social regularization enabled:
+
+```bash
+python pipeline.py --steps recommend shap --social-regularization
+```
+
+Or run the full pipeline from cascades through SHAP:
+
+```bash
+python pipeline.py --all --social-regularization
+```
+
+When this flag is enabled:
+
+1. `recommend` trains the plain baseline with the pipeline CMF method, which defaults to `lbfgs`.
+2. The social Optuna search writes `data/<dataset>/social_hyperparam_search_results.json`.
+3. Network evaluation calls `build_social_edges(...)` and `fit_social_cmf_split(...)` for each sampled inferred network.
+4. `shap` loads the social search result and trains social CMF models before fitting the GBT surrogate.
+
+The most common knobs are:
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--social-regularization` | off | Enable the Phase 6 social CMF path. |
+| `--cmf-method` | `lbfgs` | CMF optimizer. Social regularization requires `lbfgs`. |
+| `--cmf-maxiter` | `25` | L-BFGS iteration budget. |
+| `--social-mode` | `boundary_downweight` | Edge weighting mode. |
+| `--lambda-social` | `0.001` | Fallback social penalty strength. |
+| `--social-beta` | `0.5` | Boundary penalty parameter. |
+| `--social-gamma` | `1.0` | Shared-community gain parameter. |
+| `--social-search-max-ratings` | `5000` | Rating cap for social Optuna search. |
+| `--social-n-trials` | `200` | Optuna trial budget for the eight-parameter social CMF search. |
 
 ## Smoke-Test Runner
 

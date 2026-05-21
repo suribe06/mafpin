@@ -66,7 +66,8 @@ def main() -> None:
     print("\n" + "=" * 55)
     print("Summary")
     print("=" * 55)
-    for model_name, rmse_list in eval_results.items():
+    for model_name, model_results in eval_results.items():
+        rmse_list = model_results.get("enhanced", [])
         if rmse_list:
             print(
                 f"{model_name}: n={len(rmse_list)}, "

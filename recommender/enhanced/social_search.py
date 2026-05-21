@@ -11,7 +11,7 @@ from typing import Any, Iterable, cast
 import numpy as np
 import pandas as pd
 
-from config import DatasetPaths, Datasets, Defaults, Models
+from config import DatasetPaths, Datasets, Models
 from recommender.data import load_dataset, split_data_single
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.social_regularization import (
@@ -55,8 +55,15 @@ def _prepare_search_data(
     max_ratings: int,
     test_size: float,
     random_state: int,
+    train_df: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    data = load_dataset(dataset=dataset)
+    """Prepare (inner_train, inner_test, user_attributes) for a search trial.
+
+    When *train_df* is supplied (the pipeline's global training split) this
+    function draws an internal validation split from it instead of loading the
+    full dataset independently, eliminating the data-leakage path where the
+    global test set would otherwise be visible to Optuna trials.
+    """
     user_attributes = load_network_features(
         model_name,
         network_index,
@@ -68,27 +75,40 @@ def _prepare_search_data(
             f"Feature file not found for {dataset}/{model_name}/{network_index:03d}."
         )
 
-    valid_users = sorted(map(int, user_attributes.index))
-    data = cast(pd.DataFrame, data.loc[data["UserId"].isin(valid_users)].copy())
+    if train_df is not None:
+        # Use the externally supplied training split to avoid leaking the
+        # global test set into the hyperparameter search.
+        data = cast(
+            pd.DataFrame,
+            train_df.loc[
+                train_df["UserId"].isin(sorted(map(int, user_attributes.index)))
+            ].copy(),
+        )
+    else:
+        data = load_dataset(dataset=dataset)
+        valid_users = sorted(map(int, user_attributes.index))
+        data = cast(pd.DataFrame, data.loc[data["UserId"].isin(valid_users)].copy())
+
     if max_ratings and len(data) > max_ratings:
         data = data.sample(n=max_ratings, random_state=random_state).copy()
 
-    train_df, test_df = split_data_single(
+    inner_train, inner_test = split_data_single(
         data,
         test_size=test_size,
         random_state=random_state,
     )
-    seen_users = sorted(map(int, train_df["UserId"].unique()))
-    seen_items = sorted(map(int, train_df["ItemId"].unique()))
-    test_df = cast(
+    seen_users = sorted(map(int, inner_train["UserId"].unique()))
+    seen_items = sorted(map(int, inner_train["ItemId"].unique()))
+    inner_test = cast(
         pd.DataFrame,
-        test_df.loc[
-            test_df["UserId"].isin(seen_users) & test_df["ItemId"].isin(seen_items)
+        inner_test.loc[
+            inner_test["UserId"].isin(seen_users)
+            & inner_test["ItemId"].isin(seen_items)
         ].copy(),
     )
-    if test_df.empty:
+    if inner_test.empty:
         raise ValueError("Search split has no warm test rows after filtering.")
-    return train_df, test_df, user_attributes
+    return inner_train, inner_test, user_attributes
 
 
 def _trial_params(
@@ -109,7 +129,8 @@ def _trial_params(
     gamma_min: float,
     gamma_max: float,
 ) -> dict[str, Any]:
-    return {
+    social_mode = trial.suggest_categorical("social_mode", list(social_modes))
+    params: dict[str, Any] = {
         "k": trial.suggest_int("k", k_min, k_max),
         "lambda_reg": trial.suggest_float(
             "lambda_reg", lambda_reg_min, lambda_reg_max, log=True
@@ -119,10 +140,17 @@ def _trial_params(
         "lambda_social": trial.suggest_float(
             "lambda_social", lambda_social_min, lambda_social_max, log=True
         ),
-        "social_mode": trial.suggest_categorical("social_mode", list(social_modes)),
-        "beta": trial.suggest_float("beta", beta_min, beta_max),
-        "gamma": trial.suggest_float("gamma", gamma_min, gamma_max),
+        "social_mode": social_mode,
+        # beta / gamma only apply to certain modes; sample conditionally so
+        # Optuna's TPE doesn't waste budget on irrelevant parameters.
+        "beta": 0.0,
+        "gamma": 1.0,
     }
+    if social_mode in ("boundary_downweight", "bridge_preserve"):
+        params["beta"] = trial.suggest_float("beta", beta_min, beta_max)
+    if social_mode == "bridge_preserve":
+        params["gamma"] = trial.suggest_float("gamma", gamma_min, gamma_max)
+    return params
 
 
 def _metrics_are_usable(metrics: dict[str, float], reasonableness_limit: float) -> bool:
@@ -137,14 +165,16 @@ def _metrics_are_usable(metrics: dict[str, float], reasonableness_limit: float) 
 def save_social_search_results(
     search_result: dict, path: str | Path | None = None
 ) -> None:
-    """Persist Phase 6 social hyperparameter search results to JSON."""
+    """Persist Phase 6 social hyperparameter search results to JSON atomically."""
     dest = (
         Path(path)
         if path is not None
         else _default_output_path(search_result["dataset"])
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(_json_ready(search_result), indent=2), encoding="utf-8")
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_text(json.dumps(_json_ready(search_result), indent=2), encoding="utf-8")
+    tmp.replace(dest)
     print(f"Social hyperparameter search results saved -> {dest}")
 
 
@@ -152,7 +182,7 @@ def search_social_regularized_params(
     dataset: str = Datasets.DEFAULT,
     model_name: str = "exponential",
     network_index: int = 0,
-    n_trials: int = 50,
+    n_trials: int = 200,
     timeout: int | None = None,
     max_ratings: int = 5000,
     test_size: float = 0.2,
@@ -177,8 +207,16 @@ def search_social_regularized_params(
     gamma_max: float = 3.0,
     transform: str = "standard",
     output_path: str | Path | None = None,
+    train_df: pd.DataFrame | None = None,
 ) -> dict:
-    """Search CMF and social-regularization hyperparameters with Optuna TPE."""
+    """Search CMF and social-regularization hyperparameters with Optuna TPE.
+
+    Args:
+        train_df: Optional pre-split training DataFrame from the pipeline's
+                  global split.  When supplied, the internal validation split
+                  is drawn from it rather than the full dataset, preventing
+                  the global test set from leaking into the search.
+    """
     import optuna
 
     if dataset not in Datasets.ALL:
@@ -201,6 +239,7 @@ def search_social_regularized_params(
         max_ratings=max_ratings,
         test_size=test_size,
         random_state=random_state,
+        train_df=train_df,
     )
     rating_span = float(
         max(train_df["Rating"].max(), test_df["Rating"].max())
@@ -266,7 +305,15 @@ def search_social_regularized_params(
                 for key, value in asdict(social_edges).items()
                 if key not in {"row", "col", "val"}
             }
-            row.update({"metrics": metrics, "social_edges": edge_summary})
+            row.update(
+                {
+                    "rmse": metrics["rmse"],
+                    "mae": metrics["mae"],
+                    "r2": metrics["r2"],
+                    "metrics": metrics,
+                    "social_edges": edge_summary,
+                }
+            )
             if not _metrics_are_usable(metrics, reasonableness_limit):
                 row["status"] = "pruned"
                 row["error"] = "non-finite or unreasonable-scale metrics"
@@ -288,6 +335,10 @@ def search_social_regularized_params(
             f"  [trial {trial.number + 1:3d}/{n_trials}] "
             f"state={trial.state.name} rmse={value}"
         )
+        import mlflow as _mlflow
+
+        if trial.value is not None and _mlflow.active_run():
+            _mlflow.log_metric("social_trial_rmse", trial.value, step=trial.number)
 
     sampler = optuna.samplers.TPESampler(seed=random_state)
     study = optuna.create_study(direction="minimize", sampler=sampler)
@@ -306,6 +357,11 @@ def search_social_regularized_params(
     best_trial = study.best_trial if complete_trials else None
     best_value = best_trial.value if best_trial is not None else None
     best_params = dict(best_trial.params) if best_trial is not None else {}
+    # beta/gamma are sampled conditionally: if the best trial's social_mode
+    # did not require them, they won't be in best_trial.params.  Fill in the
+    # same fixed defaults used in _trial_params so callers always see both keys.
+    best_params.setdefault("beta", 0.0)
+    best_params.setdefault("gamma", 1.0)
     best_metrics = (
         dict(best_trial.user_attrs.get("metrics", {})) if best_trial is not None else {}
     )
@@ -350,7 +406,152 @@ def search_social_regularized_params(
         "all_results": all_results,
     }
     save_social_search_results(result, output_path)
+
+    # Log best params and edge diagnostics to MLflow when an active run exists.
+    import mlflow as _mlflow
+
+    if _mlflow.active_run() and best_params:
+        _mlflow.log_params(
+            {
+                "social_best_k": best_params.get("k"),
+                "social_best_lambda_reg": best_params.get("lambda_reg"),
+                "social_best_w_main": best_params.get("w_main"),
+                "social_best_w_user": best_params.get("w_user"),
+                "social_best_lambda_social": best_params.get("lambda_social"),
+                "social_best_mode": best_params.get("social_mode"),
+                "social_best_beta": best_params.get("beta"),
+                "social_best_gamma": best_params.get("gamma"),
+            }
+        )
+        if best_social_edges:
+            _mlflow.log_metrics(
+                {
+                    k: float(v)
+                    for k, v in best_social_edges.items()
+                    if isinstance(v, (int, float))
+                }
+            )
+        if best_value is not None:
+            _mlflow.log_metric("social_best_rmse", float(best_value))
+
     return result
+
+
+def search_social_per_mode(
+    dataset: str = Datasets.DEFAULT,
+    model_name: str = "exponential",
+    network_index: int = 0,
+    n_trials: int = 200,
+    timeout: int | None = None,
+    max_ratings: int = 5000,
+    test_size: float = 0.2,
+    maxiter: int = 25,
+    random_state: int = 42,
+    nthreads: int = 1,
+    include_user_attributes: bool = True,
+    modes: Iterable[SocialMode] = SOCIAL_MODES,
+    k_min: int = 5,
+    k_max: int = 50,
+    lambda_reg_min: float = 0.01,
+    lambda_reg_max: float = 10.0,
+    w_main_min: float = 0.1,
+    w_main_max: float = 1.0,
+    w_user_min: float = 0.01,
+    w_user_max: float = 1.0,
+    lambda_social_min: float = 1e-4,
+    lambda_social_max: float = 1.0,
+    beta_min: float = 0.0,
+    beta_max: float = 1.0,
+    gamma_min: float = 0.1,
+    gamma_max: float = 3.0,
+    transform: str = "standard",
+    output_dir: str | Path | None = None,
+    train_df: pd.DataFrame | None = None,
+) -> dict[str, dict]:
+    """Run a separate Optuna study for each social mode and compare results.
+
+    This is the per-mode study variant recommended for publication and reviewer
+    contexts, where ``boundary_downweight`` has been identified as the best mode
+    in prior smoke tests.  Each mode is searched independently so that Optuna's
+    TPE concentrates its budget on the relevant parameter subspace.
+
+    Args:
+        modes:      Social modes to evaluate.  Defaults to all four.
+        output_dir: Directory to write per-mode JSON results.  ``None`` writes
+                    each result alongside the default dataset results path.
+        train_df:   Optional pre-split training DataFrame from the pipeline's
+                    global split (passed through to avoid data leakage).
+
+    Returns:
+        Dict mapping ``social_mode`` → best-result dict from
+        :func:`search_social_regularized_params`, with an extra
+        ``"comparison"`` key summarising best RMSE per mode.
+    """
+    mode_list: list[SocialMode] = list(modes)
+    per_mode_results: dict[str, dict] = {}
+
+    for mode in mode_list:
+        print(f"\n{'='*55}")
+        print(f"Per-mode search: {mode.upper()}")
+        print("=" * 55)
+        out_path: Path | None = None
+        if output_dir is not None:
+            out_path = (
+                Path(output_dir)
+                / f"social_search_{model_name}_{network_index:03d}_{mode}.json"
+            )
+
+        result = search_social_regularized_params(
+            dataset=dataset,
+            model_name=model_name,
+            network_index=network_index,
+            n_trials=n_trials,
+            timeout=timeout,
+            max_ratings=max_ratings,
+            test_size=test_size,
+            maxiter=maxiter,
+            random_state=random_state,
+            nthreads=nthreads,
+            include_user_attributes=include_user_attributes,
+            social_modes=[mode],
+            k_min=k_min,
+            k_max=k_max,
+            lambda_reg_min=lambda_reg_min,
+            lambda_reg_max=lambda_reg_max,
+            w_main_min=w_main_min,
+            w_main_max=w_main_max,
+            w_user_min=w_user_min,
+            w_user_max=w_user_max,
+            lambda_social_min=lambda_social_min,
+            lambda_social_max=lambda_social_max,
+            beta_min=beta_min,
+            beta_max=beta_max,
+            gamma_min=gamma_min,
+            gamma_max=gamma_max,
+            transform=transform,
+            output_path=out_path,
+            train_df=train_df,
+        )
+        per_mode_results[mode] = result
+
+    # Build comparison summary.
+    comparison = {mode: res.get("best_value") for mode, res in per_mode_results.items()}
+    per_mode_results["comparison"] = {
+        "best_rmse_per_mode": comparison,
+        "best_mode": min(
+            (m for m, v in comparison.items() if v is not None),
+            key=lambda m: comparison[m],  # type: ignore[arg-type]
+            default=None,
+        ),
+    }
+    print("\nPer-mode comparison (best RMSE):")
+    for mode, val in sorted(comparison.items(), key=lambda kv: (kv[1] is None, kv[1])):
+        marker = (
+            " <-- best" if mode == per_mode_results["comparison"]["best_mode"] else ""
+        )
+        print(f"  {mode:<25s}: {val}{marker}")
+
+    return per_mode_results
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -363,7 +564,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model", dest="model_name", default="exponential", choices=Models.ALL
     )
     parser.add_argument("--network-index", type=int, default=0)
-    parser.add_argument("--n-trials", type=int, default=50)
+    parser.add_argument("--n-trials", type=int, default=200)
     parser.add_argument("--timeout", type=int, default=None)
     parser.add_argument("--max-ratings", type=int, default=5000)
     parser.add_argument("--test-size", type=float, default=0.2)

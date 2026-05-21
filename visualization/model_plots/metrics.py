@@ -28,7 +28,14 @@ def plot_metrics_comparison(
         print("Error: no search results.")
         return
 
-    results = search_results["all_results"]
+    results = [
+        r
+        for r in search_results["all_results"]
+        if r.get("rmse") is not None and np.isfinite(r["rmse"])
+    ]
+    if not results:
+        print("Error: all_results has no finite RMSE rows.")
+        return
     rmse_values = [r["rmse"] for r in results]
     mae_values_raw = [r.get("mae") for r in results]
     r2_values_raw = [r.get("r2") for r in results]
@@ -66,5 +73,7 @@ def plot_metrics_comparison(
     plt.close()
 
     print(f"\nRMSE: mean={np.mean(rmse_values):.4f}, best={best_rmse:.4f}")
-    print(f"MAE : mean={np.mean(mae_values):.4f}")
-    print(f"R²  : mean={np.mean(r2_values):.4f}")
+    if mae_values:
+        print(f"MAE : mean={np.mean(mae_values):.4f}")
+    if r2_values:
+        print(f"R²  : mean={np.mean(r2_values):.4f}")

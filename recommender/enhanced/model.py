@@ -19,6 +19,9 @@ def evaluate_cmf_with_user_attributes(
     lambda_reg: float = 1.0,
     w_main: float = Defaults.W_MAIN,
     w_user: float = Defaults.W_USER,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
     n_splits: int = 5,
     test_size: float = 0.2,
     transform: str = "standard",
@@ -45,6 +48,9 @@ def evaluate_cmf_with_user_attributes(
         lambda_reg:       L2 regularisation strength.
         w_main:           Weight for the main rating-matrix reconstruction loss.
         w_user:           Weight for the user side-information reconstruction loss.
+        method:           CMF optimizer. Defaults to the pipeline-wide method.
+        maxiter:          L-BFGS iteration budget.
+        random_state:     Base seed for L-BFGS initialization.
         n_splits:         Number of random splits.
         test_size:        Test fraction.
         transform:        Scaler to apply per fold — ``"standard"``, ``"minmax"``,
@@ -80,6 +86,16 @@ def evaluate_cmf_with_user_attributes(
             filtered, test_size=test_size, random_state=split_idx  # type: ignore[arg-type]
         )
 
+        # Warm-test filtering: restrict test to users/items seen in training.
+        # Keeps the non-social and social evaluation paths consistent (M-4).
+        seen_users = list(train_df["UserId"].unique())
+        seen_items = list(train_df["ItemId"].unique())
+        warm_test = test_df.loc[
+            test_df["UserId"].isin(seen_users) & test_df["ItemId"].isin(seen_items)
+        ].copy()
+        if warm_test.empty:
+            continue
+
         # M-2: fit scaler on training users only to prevent leakage.
         train_users = sorted(train_df["UserId"].unique())
         train_feats = user_attributes.loc[train_users]
@@ -90,32 +106,42 @@ def evaluate_cmf_with_user_attributes(
             index=user_attributes.index,
             columns=user_attributes.columns,
         )
-        u_matrix = scaled_all.reset_index()
+        u_matrix = scaled_all.rename_axis("UserId").reset_index()
 
         # Enhanced model
-        enhanced_model = CMF(
-            method="als",
-            k=k,
-            lambda_=lambda_reg,
-            w_main=w_main,
-            w_user=w_user,
-            nthreads=cmf_nthreads,
-            verbose=False,
-        )
+        enhanced_kwargs = {
+            "method": method,
+            "k": k,
+            "lambda_": lambda_reg,
+            "w_main": w_main,
+            "w_user": w_user,
+            "nthreads": cmf_nthreads,
+            "verbose": False,
+        }
+        if method == "lbfgs":
+            enhanced_kwargs.update(
+                {"maxiter": maxiter, "random_state": random_state + split_idx}
+            )
+        enhanced_model = CMF(**enhanced_kwargs)
         enhanced_model.fit(X=train_df, U=u_matrix)
-        enhanced_rmse = evaluate_single_split(enhanced_model, test_df)["rmse"]
+        enhanced_rmse = evaluate_single_split(enhanced_model, warm_test)["rmse"]
 
         # M-3: paired baseline on the same filtered subset.
         if baseline_k is not None and baseline_lambda is not None:
-            baseline_model = CMF(
-                method="als",
-                k=baseline_k,
-                lambda_=baseline_lambda,
-                nthreads=cmf_nthreads,
-                verbose=False,
-            )
+            baseline_kwargs = {
+                "method": method,
+                "k": baseline_k,
+                "lambda_": baseline_lambda,
+                "nthreads": cmf_nthreads,
+                "verbose": False,
+            }
+            if method == "lbfgs":
+                baseline_kwargs.update(
+                    {"maxiter": maxiter, "random_state": random_state + split_idx}
+                )
+            baseline_model = CMF(**baseline_kwargs)
             baseline_model.fit(X=train_df)
-            baseline_rmse = evaluate_single_split(baseline_model, test_df)["rmse"]
+            baseline_rmse = evaluate_single_split(baseline_model, warm_test)["rmse"]
         else:
             baseline_rmse = float("nan")
 
@@ -126,7 +152,7 @@ def evaluate_cmf_with_user_attributes(
         }
 
         if compute_ranking:
-            ranking = evaluate_ranking(enhanced_model, train_df, test_df, k=ranking_k)
+            ranking = evaluate_ranking(enhanced_model, train_df, warm_test, k=ranking_k)
             result.update(ranking)
 
         results.append(result)

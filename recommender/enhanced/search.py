@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from config import DatasetPaths, Datasets
+from config import Defaults
 from recommender.enhanced.model import evaluate_cmf_with_user_attributes
 
 
@@ -18,6 +19,10 @@ def search_enhanced_params(
     user_attributes: pd.DataFrame,
     n_trials: int = 50,
     n_splits: int = 3,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    cmf_nthreads: int = -1,
+    random_state: int = 42,
 ) -> dict:
     """
     Bayesian hyperparameter search (Optuna TPE) over ``k``, ``lambda_reg``,
@@ -54,6 +59,9 @@ def search_enhanced_params(
             w_main=w_main_val,
             w_user=w_user_val,
             n_splits=n_splits,
+            method=method,
+            maxiter=maxiter,
+            cmf_nthreads=cmf_nthreads,
         )
         if not split_results:
             raise optuna.exceptions.TrialPruned()
@@ -74,7 +82,10 @@ def search_enhanced_params(
             _mlflow.log_metric("enhanced_trial_rmse", mean_rmse, step=trial.number)
         return mean_rmse
 
-    study = optuna.create_study(direction="minimize")
+    study = optuna.create_study(
+        direction="minimize",
+        sampler=optuna.samplers.TPESampler(seed=random_state),
+    )
     study.optimize(
         _objective,
         n_trials=n_trials,
@@ -117,7 +128,7 @@ def search_enhanced_params(
 
 def save_enhanced_search_results(
     search_result: dict,
-    path: "Path | None" = None,
+    path: Path | None = None,
 ) -> None:
     """
     Persist *search_result* (from :func:`search_enhanced_params`) to a JSON file.
@@ -134,6 +145,7 @@ def save_enhanced_search_results(
 
     dest = path or DatasetPaths(Datasets.DEFAULT).ENHANCED_RESULTS
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "w", encoding="utf-8") as fh:
-        json.dump(search_result, fh, indent=2)
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_text(json.dumps(search_result, indent=2), encoding="utf-8")
+    tmp.replace(dest)
     print(f"Enhanced search results saved → {dest}")

@@ -32,7 +32,6 @@ import seaborn as sns
 
 from config import DatasetPaths, Datasets
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -81,6 +80,7 @@ def plot_shap_importance_comparison(
     results_path: str | Path | None = None,
     save: bool = True,
     dataset: str | None = None,
+    social_regularization: bool = False,
 ) -> None:
     """
     Grouped horizontal bar chart comparing mean |SHAP| for every feature
@@ -89,9 +89,10 @@ def plot_shap_importance_comparison(
     Features are sorted by global mean importance (average over models).
 
     Args:
-        results_path: Path to ``shap_results.json``.  ``None`` uses the
-                      default location under ``data/``.
-        save:         When ``True``, write the figure to ``plots/shap/``.
+        results_path:          Path to ``shap_results.json``.  ``None`` uses the
+                               default location under ``data/``.
+        save:                  When ``True``, write the figure to ``plots/shap/``.
+        social_regularization: When ``True``, use social-specific title/filename.
     """
     results = _load_results(results_path, dataset=dataset)
 
@@ -135,7 +136,11 @@ def plot_shap_importance_comparison(
     ax.set_yticklabels(sorted_features, fontsize=10)
     ax.set_xlabel("Mean |SHAP value|", fontsize=11)
     ax.set_title(
-        "Feature Importance (SHAP) — Enhanced CMF by Cascade Model",
+        (
+            "Feature Importance (SHAP) \u2014 Social-Regularized CMF by Cascade Model"
+            if social_regularization
+            else "Feature Importance (SHAP) \u2014 Enhanced CMF by Cascade Model"
+        ),
         fontsize=13,
         fontweight="bold",
         pad=12,
@@ -147,9 +152,14 @@ def plot_shap_importance_comparison(
     fig.tight_layout()
 
     if save:
-        path = Path(_plots_dir(dataset)) / "shap_importance_comparison.png"
+        fname = (
+            "shap_importance_comparison_social.png"
+            if social_regularization
+            else "shap_importance_comparison_enhanced.png"
+        )
+        path = Path(_plots_dir(dataset)) / fname
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"[shap_plots] Saved → {path}")
+        print(f"[shap_plots] Saved \u2192 {path}")
 
     plt.close(fig)
 
@@ -165,6 +175,7 @@ def plot_shap_beeswarm(
     save: bool = True,
     max_display_pts: int = 2000,
     dataset: str | None = None,
+    social_regularization: bool = False,
 ) -> None:
     """
     Beeswarm-style strip plot of SHAP values per feature for *model_name*.
@@ -175,10 +186,11 @@ def plot_shap_beeswarm(
     |SHAP| (same order as the comparison chart).
 
     Args:
-        model_name:       One of ``exponential``, ``powerlaw``, ``rayleigh``.
-        results_path:     Path to ``shap_results.json``.  ``None`` uses default.
-        save:             When ``True``, write to ``plots/shap/``.
-        max_display_pts:  Maximum rows to plot (down-sampled when exceeded).
+        model_name:            One of ``exponential``, ``powerlaw``, ``rayleigh``.
+        results_path:          Path to ``shap_results.json``.  ``None`` uses default.
+        save:                  When ``True``, write to ``plots/shap/``.
+        max_display_pts:       Maximum rows to plot (down-sampled when exceeded).
+        social_regularization: When ``True``, use social-specific title/filename.
     """
     results = _load_results(results_path, dataset=dataset)
 
@@ -245,7 +257,11 @@ def plot_shap_beeswarm(
     ax.set_xlabel("SHAP value", fontsize=11)
     ax.set_ylabel("")
     ax.set_title(
-        f"SHAP Value Distribution — {model_name.capitalize()} Model",
+        (
+            f"SHAP Value Distribution \u2014 {model_name.capitalize()} Model (Social)"
+            if social_regularization
+            else f"SHAP Value Distribution \u2014 {model_name.capitalize()} Model"
+        ),
         fontsize=13,
         fontweight="bold",
         pad=12,
@@ -256,9 +272,14 @@ def plot_shap_beeswarm(
     fig.tight_layout()
 
     if save:
-        path = Path(_plots_dir(dataset)) / f"shap_beeswarm_{model_name}.png"
+        fname = (
+            f"shap_beeswarm_{model_name}_social.png"
+            if social_regularization
+            else f"shap_beeswarm_{model_name}_enhanced.png"
+        )
+        path = Path(_plots_dir(dataset)) / fname
         fig.savefig(path, dpi=150, bbox_inches="tight")
-        print(f"[shap_plots] Saved → {path}")
+        print(f"[shap_plots] Saved \u2192 {path}")
 
     plt.close(fig)
 
@@ -272,30 +293,39 @@ def plot_all_shap(
     results_path: str | Path | None = None,
     save: bool = True,
     dataset: str | None = None,
+    social_regularization: bool = False,
 ) -> None:
     """
     Generate all SHAP plots:
 
-    1. ``shap_importance_comparison.png`` — grouped bar chart (all models).
-    2. ``shap_beeswarm_<model>.png``       — one beeswarm per cascade model.
+    1. ``shap_importance_comparison_{enhanced|social}.png`` — grouped bar chart.
+    2. ``shap_beeswarm_<model>_{enhanced|social}.png``       — per cascade model.
 
     Args:
-        results_path: Path to ``shap_results.json``.  ``None`` uses default.
-        save:         When ``True``, write figures to ``plots/shap/``.
+        results_path:          Path to ``shap_results.json``.  ``None`` uses default.
+        save:                  When ``True``, write figures to ``plots/shap/``.
+        social_regularization: When ``True``, filenames and titles use social labels.
     """
-    print("[shap_plots] Generating SHAP importance comparison chart…")
+    print("[shap_plots] Generating SHAP importance comparison chart\u2026")
     plot_shap_importance_comparison(
-        results_path=results_path, save=save, dataset=dataset
+        results_path=results_path,
+        save=save,
+        dataset=dataset,
+        social_regularization=social_regularization,
     )
 
     results = _load_results(results_path, dataset=dataset)
     if not results:
-        print("[shap_plots] No SHAP results available — skipping beeswarm plots.")
+        print("[shap_plots] No SHAP results available \u2014 skipping beeswarm plots.")
         return
     for model_name in results:
-        print(f"[shap_plots] Generating beeswarm for '{model_name}'…")
+        print(f"[shap_plots] Generating beeswarm for '{model_name}'\u2026")
         plot_shap_beeswarm(
-            model_name, results_path=results_path, save=save, dataset=dataset
+            model_name,
+            results_path=results_path,
+            save=save,
+            dataset=dataset,
+            social_regularization=social_regularization,
         )
 
 
