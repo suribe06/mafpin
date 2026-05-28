@@ -18,7 +18,8 @@ The smoke-test report will be expanded step by step:
 2. Sweep `lambda_social` over a small log grid such as `0.001`, `0.01`, `0.1`, `1.0`. Status: completed below.
 3. Repeat on 10 random network indices for each diffusion model: exponential, powerlaw, and rayleigh. Status: completed below.
 4. Add user attributes back with a constrained grid over `w_user` and `lambda_reg`. Status: completed below.
-5. Promote the best stable settings into the full study pipeline.
+5. Probe social edge normalization choices for the selected low-lambda setting. Status: completed below.
+6. Promote the best stable settings into the full study pipeline.
 
 ## Command
 
@@ -107,6 +108,30 @@ conda run -n mafpin python -m recommender.enhanced.social_smoke_test \
 ```
 
 For Ciao, the same Step 4 command was run with `--dataset ciao`.
+
+The Step 5 normalization sweep used the Step 2/3 social setting, `boundary_downweight` with `lambda_social=0.001`, and varied the new `--social-normalization` option:
+
+```bash
+for dataset in movielens ciao; do
+  for normalization in mean_weight sum_weight n_edges normalized_laplacian none; do
+    conda run -n mafpin python -m recommender.enhanced.social_smoke_test \
+      --dataset "$dataset" \
+      --model exponential \
+      --network-index 0 \
+      --social-mode boundary_downweight \
+      --social-normalization "$normalization" \
+      --lambda-social 0.001 \
+      --max-ratings 5000 \
+      --k 4 \
+      --lambda-reg 10 \
+      --maxiter 20 \
+      --nthreads 1 \
+      --output-path "data/${dataset}/social_smoke_results/normalization_sweep/boundary_downweight_${normalization}_lambda_0.001.json"
+  done
+done
+```
+
+Each dataset also has a generated `normalization_sweep_summary.csv` in the same `normalization_sweep` directory.
 
 ## Dataset: MovieLens
 
@@ -287,6 +312,31 @@ data/movielens/social_smoke_results/user_attribute_grid/user_attribute_grid_summ
 data/movielens/social_smoke_results/user_attribute_grid/*.json
 ```
 
+### MovieLens Step 5: Social Normalization Sweep
+
+Step 5 keeps the same isolated social setting used in Steps 2 and 3 (`boundary_downweight`, `lambda_social=0.001`) and changes only the edge-weight normalization strategy. This validates the new `--social-normalization` path before using it in longer reruns.
+
+Configuration differences from the earlier MovieLens smoke steps: `k=4` was used for this quick integration sweep, while the rest of the split and optimizer settings stayed at `max_ratings=5000`, `lambda_reg=10.0`, and `maxiter=20`.
+
+Result summary:
+
+| Normalization | Edges | Mean weight | Weight range | RMSE | MAE | R2 | Social sane |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `mean_weight` | `982` | `1.000000` | `0.174746` to `1.266655` | `0.873313475` | `0.691423019` | `0.182073595` | `true` |
+| `sum_weight` | `982` | `0.001018` | `0.000178` to `0.001290` | `0.873419385` | `0.691514411` | `0.181875197` | `true` |
+| `n_edges` | `982` | `0.000804` | `0.000140` to `0.001018` | `0.873419692` | `0.691514759` | `0.181874621` | `true` |
+| `normalized_laplacian` | `982` | `0.085254` | `0.012612` to `0.695682` | `0.873355603` | `0.691385474` | `0.181994680` | `true` |
+| `none` | `982` | `0.789481` | `0.137959` to `1.000000` | `0.873448046` | `0.691436127` | `0.181821503` | `true` |
+
+All five MovieLens normalization variants produced finite, rating-scale sane metrics. The best RMSE in this smoke sweep is `mean_weight`, while `normalized_laplacian` has the best MAE. The differences are very small, so this step should be read as a coverage and stability check rather than a normalization ranking.
+
+Step 5 artifacts:
+
+```text
+data/movielens/social_smoke_results/normalization_sweep/normalization_sweep_summary.csv
+data/movielens/social_smoke_results/normalization_sweep/boundary_downweight_*_lambda_0.001.json
+```
+
 ## Dataset: Ciao
 
 ### Configuration
@@ -448,6 +498,29 @@ data/ciao/social_smoke_results/user_attribute_grid/user_attribute_grid_summary.c
 data/ciao/social_smoke_results/user_attribute_grid/*.json
 ```
 
+### Step 5: Social Normalization Sweep
+
+The Ciao Step 5 sweep used the same configuration as MovieLens Step 5: `boundary_downweight`, `lambda_social=0.001`, `max_ratings=5000`, `k=4`, `lambda_reg=10.0`, and `maxiter=20`.
+
+Result summary:
+
+| Normalization | Edges | Mean weight | Weight range | RMSE | MAE | R2 | Social sane |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `mean_weight` | `2043` | `1.000000` | `0.202662` to `1.810997` | `0.933735542` | `0.725957257` | `0.132423001` | `true` |
+| `sum_weight` | `2043` | `0.000489` | `0.000099` to `0.000886` | `0.933735593` | `0.725957321` | `0.132422907` | `true` |
+| `n_edges` | `2043` | `0.000270` | `0.000055` to `0.000489` | `0.933734927` | `0.725955756` | `0.132424145` | `true` |
+| `normalized_laplacian` | `2043` | `0.088904` | `0.006761` to `0.687498` | `0.933735581` | `0.725957309` | `0.132422929` | `true` |
+| `none` | `2043` | `0.552182` | `0.111907` to `1.000000` | `0.933735593` | `0.725957316` | `0.132422907` | `true` |
+
+All five Ciao normalization variants passed the rating-scale sanity check at the report-style `maxiter=20` budget. A shorter `maxiter=5` probe exposed intermittent `n_edges` instability, but repeated `maxiter=20` checks were rating-scale sane, so the issue appears tied to an artificially short optimizer budget rather than a persistent data-artifact failure.
+
+Step 5 artifacts:
+
+```text
+data/ciao/social_smoke_results/normalization_sweep/normalization_sweep_summary.csv
+data/ciao/social_smoke_results/normalization_sweep/boundary_downweight_*_lambda_0.001.json
+```
+
 ## Diagnostics
 
 | Diagnostic | Result |
@@ -466,7 +539,9 @@ data/ciao/social_smoke_results/user_attribute_grid/*.json
 - The Step 2 result covers the same model and network index with four `lambda_social` values per mode per dataset.
 - The Step 3 result covers 10 sampled network indices per diffusion model per dataset, but still uses one social mode and one `lambda_social` value per dataset.
 - The Step 4 result adds user attributes back on one dataset/model/network setting per dataset and uses a constrained 3-by-3 grid over `lambda_reg` and `w_user`.
+- The Step 5 result covers five social normalization choices on one dataset/model/network setting per dataset. It is a normalization-path smoke check, not a full retuning of `lambda_social` under each normalization.
 - The observed differences between social modes are far smaller than what would be needed for a model-quality claim.
 - Ciao Step 3 can show intermittent L-BFGS divergence. In the overwrite rerun, the originally suspicious `exponential` network `60` was sane, while `rayleigh` network `6` diverged in the raw sweep but was sane in an isolated rerun. The by-model aggregate excludes invalid rows according to the sanity checks described above.
 - Step 4 confirms that side-user attributes can improve the smoke-test metrics, but it also keeps exposing occasional L-BFGS divergence. Invalid baseline or social rows are marked by the sanity checks and should be excluded from interpretation.
+- The Step 5 Ciao `n_edges` run was unstable under an artificially short `maxiter=5` probe but passed at `maxiter=20`; future full experiments should still keep the existing rating-scale sanity filters and retry policy.
 - The Step 3 network plots connect sampled network indices for readability only; the x-axis is not a temporal or ordered training trajectory.
