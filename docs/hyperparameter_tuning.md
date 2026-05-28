@@ -65,7 +65,10 @@ promising areas rather than wasting them on already-explored bad zones.
 The social-regularized CMF path uses **200 trials by default** because it tunes
 eight parameters (`k`, `lambda_reg`, `w_main`, `w_user`, `lambda_social`,
 `social_mode`, `beta`, `gamma`) and needs more evaluations to explore mode ×
-penalty interactions.
+penalty interactions. The `social_normalization` setting is not sampled by
+Optuna in the default pipeline; it is fixed by the CLI flag
+`--social-normalization`, then recorded in the best params, search-space
+metadata, and per-trial rows.
 
 ### Parameter ranges and scales
 
@@ -75,6 +78,20 @@ lambda_reg   : float    [0.01, 10.0]      (log scale)
 w_main       : float    [0.1,  1.0]       (linear)
 w_user       : float    [0.01, 1.0]       (log scale)
 ```
+
+The social search extends this with:
+
+```text
+lambda_social       : float       [1e-4, 1.0]      (log scale)
+social_mode         : categorical uniform, community_jaccard, boundary_downweight, bridge_preserve
+beta                : float       [0.0, 1.0]       (conditional on boundary-aware modes)
+gamma               : float       [0.1, 3.0]       (conditional on bridge_preserve)
+social_normalization: fixed       CLI choice, default mean_weight
+```
+
+Available `social_normalization` choices are `none`, `mean`, `mean_weight`,
+`edges`, `n_edges`, `sum_weight`, and `normalized_laplacian`. `mean` and
+`edges` are backward-compatible aliases for `mean_weight` and `n_edges`.
 
 **`lambda_reg` uses log scale** because regularisation is effective over several
 orders of magnitude — the difference between 0.01 and 0.1 is as meaningful as
@@ -164,6 +181,7 @@ pipeline.py _run_recommend()
 │
 ├── search_social_regularized_params(..., n_trials=200)             [8 params]
 │         └── Optuna TPE → enhanced params + social mode/penalty params
+│             plus fixed/logged social_normalization
 │
 ├── train_final_model(train_df, k=best_k_b, lambda_reg=best_lambda_b)
 │         └── Plain CMF (no side info) evaluated on global test set

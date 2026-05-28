@@ -160,11 +160,13 @@ python pipeline.py --steps recommend --social-regularization
 
 When `--social-regularization` is enabled, `recommend` performs a social Optuna
 search over `k`, `lambda_reg`, `w_main`, `w_user`, `lambda_social`,
-`social_mode`, `beta`, and `gamma`, saves the result to
+`social_mode`, `beta`, and `gamma`, while holding `social_normalization` fixed
+to the selected `--social-normalization` value. It saves the result to
 `data/<dataset>/social_hyperparam_search_results.json`, and then evaluates the
 selected social CMF settings across the sampled inferred networks. The social
 search uses 200 trials by default because it has a larger eight-parameter search
-space; baseline and non-social enhanced searches still use 50 trials.
+space; baseline and non-social enhanced searches still use 50 trials. The chosen
+normalization is recorded in the search result and per-trial metadata.
 
 Useful social options:
 
@@ -179,6 +181,7 @@ python pipeline.py --steps recommend --all-networks --social-regularization
 python pipeline.py --steps recommend --social-regularization \
    --social-n-trials 200 \
    --social-search-max-ratings 10000 \
+   --social-normalization mean_weight \
    --cmf-maxiter 50
 ```
 
@@ -207,7 +210,8 @@ python pipeline.py --steps hypertune --social-regularization
 
 This saves `data/<dataset>/social_hyperparam_search_results.json`. The SHAP
 step will load that file when it is also run with `--social-regularization`.
-The social search uses 200 trials by default over eight parameters.
+The social search uses 200 trials by default over eight tuned parameters plus
+the fixed/logged `social_normalization` setting.
 
 Use `hypertune` instead of `recommend` when you only need the best params — for
 example before running the SHAP analysis without re-evaluating all networks.
@@ -318,6 +322,7 @@ All options accepted by `pipeline.py`:
 | `--lambda-social X` | `0.001` | Fallback social regularization strength when no searched params are being used. |
 | `--social-beta X` | `0.5` | Boundary penalty parameter for social edge weighting. |
 | `--social-gamma X` | `1.0` | Shared-community gain parameter for `bridge_preserve`. |
+| `--social-normalization MODE` | `mean_weight` | Social edge normalization strategy: `none`, `mean`, `mean_weight`, `edges`, `n_edges`, `sum_weight`, or `normalized_laplacian`. Aliases `mean` and `edges` map to `mean_weight` and `n_edges`. |
 | `--social-search-max-ratings N` | `5000` | Rating cap for social Optuna search; use `0` to disable the cap. |
 | `--social-n-trials N` | `200` | Optuna trial budget for the larger social CMF search space. |
 | `--sample-networks N` | `5` | Networks sampled per model for the `recommend` step. |

@@ -116,7 +116,7 @@ Important parameters:
 | `beta` | `0.5` | Boundary downweight strength. |
 | `gamma` | `1.0` | Community-overlap strength for `bridge_preserve`. |
 | `symmetrization` | `union` | Directed-to-undirected conversion method. |
-| `normalize` | `True` | Divide weights by their mean. |
+| `normalization` | `mean_weight` | Social edge normalization strategy: `mean_weight`, `sum_weight`, `n_edges`, `normalized_laplacian`, or `none`. Legacy aliases `mean` and `edges` map to `mean_weight` and `n_edges`. |
 
 ### `fit_social_cmf_split(...)`
 
@@ -188,11 +188,12 @@ The most common knobs are:
 | `--lambda-social` | `0.001` | Fallback social penalty strength. |
 | `--social-beta` | `0.5` | Boundary penalty parameter. |
 | `--social-gamma` | `1.0` | Shared-community gain parameter. |
+| `--social-normalization` | `mean_weight` | Social edge normalization strategy for social-regularized CMF. |
 | `--social-search-max-ratings` | `5000` | Rating cap for social Optuna search. |
 | `--social-n-trials` | `200` | Optuna trial budget for the eight-parameter social CMF search. |
 
 ## Smoke-Test Runner
 
-The smoke-test entry point lives in `recommender.enhanced.social_smoke_test`, not in this module. That file imports the reusable functions above, runs the before/after fit, and writes `data/<dataset>/social_smoke_results.json`.
+The smoke-test entry point lives in `recommender.enhanced.social_smoke_test`, not in this module. That file imports the reusable functions above, runs the before/after fit, and writes `data/<dataset>/social_smoke_results.json`. It accepts the same `--social-normalization` choices as the pipeline so normalization variants can be probed before full dataset reruns.
 
 See `docs/reports/social_smoke_test.md` for the current smoke-test report.

@@ -15,6 +15,7 @@ from config import DatasetPaths, Datasets, Defaults, Models
 from recommender.data import load_dataset, split_data_single
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.social_regularization import (
+    SocialNormalization,
     SocialMode,
     build_social_edges,
     fit_social_cmf_split,
@@ -26,6 +27,7 @@ def run_social_smoke_test(
     model_name: str = "exponential",
     network_index: int = 0,
     social_mode: SocialMode = "boundary_downweight",
+    social_normalization: SocialNormalization = "mean_weight",
     lambda_social: float = 0.01,
     beta: float = 0.5,
     gamma: float = 1.0,
@@ -83,6 +85,7 @@ def run_social_smoke_test(
         mode=social_mode,
         beta=beta,
         gamma=gamma,
+        normalization=social_normalization,
         dtype=np.float32,
     )
     if social_edges.n_edges == 0:
@@ -129,6 +132,7 @@ def run_social_smoke_test(
         "model_name": model_name,
         "network_index": network_index,
         "social_mode": social_mode,
+        "social_normalization": social_edges.normalization,
         "lambda_social": lambda_social,
         "beta": beta,
         "gamma": gamma,
@@ -198,6 +202,7 @@ def _grid_result_row(
         "model_name": result.get("model_name"),
         "network_index": result.get("network_index"),
         "social_mode": result.get("social_mode"),
+        "social_normalization": result.get("social_normalization"),
         "lambda_social": result.get("lambda_social"),
         "lambda_reg": result.get("lambda_reg"),
         "w_user": result.get("w_user"),
@@ -223,6 +228,7 @@ def run_user_attribute_grid(
     model_name: str = "exponential",
     network_index: int = 0,
     social_mode: SocialMode = "boundary_downweight",
+    social_normalization: SocialNormalization = "mean_weight",
     lambda_social: float = 0.001,
     beta: float = 0.5,
     gamma: float = 1.0,
@@ -252,6 +258,7 @@ def run_user_attribute_grid(
         for w_user_value in w_user_grid:
             output_path = base_output_dir / (
                 f"{model_name}_{network_index:03d}_{social_mode}"
+                f"_{social_normalization}"
                 f"_lambda_social_{_float_slug(lambda_social)}"
                 f"_lambda_reg_{_float_slug(lambda_reg_value)}"
                 f"_w_user_{_float_slug(w_user_value)}.json"
@@ -265,6 +272,7 @@ def run_user_attribute_grid(
                         model_name=model_name,
                         network_index=network_index,
                         social_mode=social_mode,
+                        social_normalization=social_normalization,
                         lambda_social=lambda_social,
                         beta=beta,
                         gamma=gamma,
@@ -291,6 +299,7 @@ def run_user_attribute_grid(
                             "model_name": model_name,
                             "network_index": network_index,
                             "social_mode": social_mode,
+                            "social_normalization": social_normalization,
                             "lambda_social": lambda_social,
                             "lambda_reg": float(lambda_reg_value),
                             "w_user": float(w_user_value),
@@ -324,6 +333,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "boundary_downweight",
             "bridge_preserve",
         ],
+    )
+    parser.add_argument(
+        "--social-normalization",
+        default="mean_weight",
+        choices=[
+            "none",
+            "mean",
+            "mean_weight",
+            "edges",
+            "n_edges",
+            "sum_weight",
+            "normalized_laplacian",
+        ],
+        help="Social edge normalization strategy for the smoke-test social edges.",
     )
     parser.add_argument("--lambda-social", type=float, default=0.01)
     parser.add_argument("--beta", type=float, default=0.5)
@@ -380,6 +403,7 @@ def main() -> None:
             model_name=args.model_name,
             network_index=args.network_index,
             social_mode=args.social_mode,
+            social_normalization=args.social_normalization,
             lambda_social=args.lambda_social,
             beta=args.beta,
             gamma=args.gamma,
@@ -409,6 +433,7 @@ def main() -> None:
         model_name=args.model_name,
         network_index=args.network_index,
         social_mode=args.social_mode,
+        social_normalization=args.social_normalization,
         lambda_social=args.lambda_social,
         beta=args.beta,
         gamma=args.gamma,
