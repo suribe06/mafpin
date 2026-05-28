@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from pipeline._cpu import _resolve_cmf_nthreads
+from pipeline._artifacts import _check_artifact_manifest
 from pipeline._results import _print_best_hyperparams
 
 
@@ -21,6 +22,7 @@ def run_hypertune(args: argparse.Namespace) -> None:
     )
 
     dp = DatasetPaths(args.dataset)
+    _check_artifact_manifest(args.dataset, context="hyperparameter tuning")
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
@@ -39,6 +41,7 @@ def run_hypertune(args: argparse.Namespace) -> None:
                 "cmf_nthreads": cmf_nthreads,
                 "cpu_fraction": args.cpu_fraction,
                 "social_regularization": args.social_regularization,
+                "social_normalization": args.social_normalization,
             }
         )
 
@@ -82,6 +85,7 @@ def run_hypertune(args: argparse.Namespace) -> None:
                 random_state=args.seed,
                 nthreads=cmf_nthreads,
                 include_user_attributes=True,
+                social_normalization=args.social_normalization,
                 output_path=dp.SOCIAL_RESULTS,
                 train_df=train_df,
             )

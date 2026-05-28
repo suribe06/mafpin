@@ -146,6 +146,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Shared-community gain parameter for social edge weighting.",
     )
     parser.add_argument(
+        "--social-normalization",
+        choices=[
+            "none",
+            "mean",
+            "mean_weight",
+            "edges",
+            "n_edges",
+            "sum_weight",
+            "normalized_laplacian",
+        ],
+        default="mean_weight",
+        help="Social edge normalization strategy for social-regularized CMF.",
+    )
+    parser.add_argument(
         "--social-search-max-ratings",
         type=int,
         default=5000,

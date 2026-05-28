@@ -12,7 +12,7 @@ def run_centrality(args: argparse.Namespace) -> None:
     from networks.centrality import calculate_centrality_for_all_models
     from visualization.network_plots import plot_all_centrality_distributions
 
-    _check_artifact_manifest(args.dataset)
+    _check_artifact_manifest(args.dataset, context="centrality computation")
 
     # Warn if pagerank_lph is enabled but community files are missing (Issue 19).
     if SideUserFeatures.FEATURES.get("pagerank_lph", False):

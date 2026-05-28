@@ -27,6 +27,15 @@ SocialMode = Literal[
     "boundary_downweight",
     "bridge_preserve",
 ]
+SocialNormalization = Literal[
+    "none",
+    "mean",
+    "mean_weight",
+    "edges",
+    "n_edges",
+    "sum_weight",
+    "normalized_laplacian",
+]
 
 
 @dataclass(frozen=True)
@@ -37,6 +46,7 @@ class SocialEdges:
     col: np.ndarray
     val: np.ndarray
     mode: str
+    normalization: str
     n_edges: int
     mean_weight: float
     min_weight: float
@@ -155,22 +165,32 @@ def build_social_edges(
     beta: float = 0.5,
     gamma: float = 1.0,
     symmetrization: str = "union",
-    normalization: str = "mean",
+    normalization: SocialNormalization = "mean_weight",
     dtype: np.dtype | type = np.float32,
 ) -> SocialEdges:
     """Build weighted upper-triangle social COO arrays for patched cmfrec.
 
     Args:
         normalization: How to normalize edge weights after weighting.
-            ``"mean"``  — divide by the mean edge weight (default, preserves
-                           relative differences).
-            ``"edges"`` — divide by the number of edges (density-based scaling).
-            ``"none"``  — no normalization (raw weights).
+            ``"mean_weight"`` — divide by mean edge weight (default; alias ``"mean"``).
+            ``"sum_weight"``  — divide by total edge weight.
+            ``"n_edges"``     — divide by the number of retained edges (alias ``"edges"``).
+            ``"normalized_laplacian"`` — apply degree-normalized edge weights.
+            ``"none"``        — no normalization (raw weights).
     """
-    if normalization not in ("mean", "edges", "none"):
+    normalization_aliases = {"mean": "mean_weight", "edges": "n_edges"}
+    normalized = normalization_aliases.get(normalization, normalization)
+    if normalized not in (
+        "mean_weight",
+        "sum_weight",
+        "n_edges",
+        "normalized_laplacian",
+        "none",
+    ):
         raise ValueError(
             f"Unknown normalization {normalization!r}. "
-            "Use 'mean', 'edges', or 'none'."
+            "Use 'mean_weight', 'sum_weight', 'n_edges', "
+            "'normalized_laplacian', or 'none'."
         )
     if model_name not in Models.ALL:
         raise ValueError(
@@ -203,12 +223,30 @@ def build_social_edges(
         vals.append(weight)
 
     values = np.asarray(vals, dtype=dtype)
-    if normalization != "none" and values.size:
-        if normalization == "mean":
+    if normalized == "normalized_laplacian" and values.size:
+        degree: dict[int, float] = {}
+        for row, col, value in zip(rows, cols, values):
+            weight = float(value)
+            degree[row] = degree.get(row, 0.0) + weight
+            degree[col] = degree.get(col, 0.0) + weight
+        values = np.asarray(
+            [
+                float(value)
+                / np.sqrt(max(degree[row], 1e-12) * max(degree[col], 1e-12))
+                for row, col, value in zip(rows, cols, values)
+            ],
+            dtype=dtype,
+        )
+    elif normalized != "none" and values.size:
+        if normalized == "mean_weight":
             mean_weight = float(values.mean())
             if mean_weight > 0.0:
                 values = values / mean_weight
-        elif normalization == "edges":
+        elif normalized == "sum_weight":
+            sum_weight = float(values.sum())
+            if sum_weight > 0.0:
+                values = values / sum_weight
+        elif normalized == "n_edges":
             n_edges = values.size
             if n_edges > 0:
                 values = values / n_edges
@@ -225,6 +263,7 @@ def build_social_edges(
         col=np.asarray(cols, dtype=np.int32),
         val=values,
         mode=mode,
+        normalization=normalized,
         n_edges=int(values.size),
         mean_weight=mean_value,
         min_weight=min_value,

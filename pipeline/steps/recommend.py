@@ -7,6 +7,7 @@ import sys
 
 from config import Defaults
 from pipeline._cpu import _resolve_cmf_nthreads
+from pipeline._artifacts import _check_artifact_manifest
 from pipeline._results import _print_best_hyperparams
 
 
@@ -25,6 +26,7 @@ def run_recommend(args: argparse.Namespace) -> None:
     )
 
     dp = DatasetPaths(args.dataset)
+    _check_artifact_manifest(args.dataset, context="recommendation evaluation")
 
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
@@ -48,6 +50,7 @@ def run_recommend(args: argparse.Namespace) -> None:
                 "cmf_nthreads": cmf_nthreads,
                 "cpu_fraction": args.cpu_fraction,
                 "social_regularization": args.social_regularization,
+                "social_normalization": args.social_normalization,
             }
         )
 
@@ -114,6 +117,7 @@ def run_recommend(args: argparse.Namespace) -> None:
                         random_state=args.seed,
                         nthreads=cmf_nthreads,
                         include_user_attributes=True,
+                        social_normalization=args.social_normalization,
                         output_path=dp.SOCIAL_RESULTS,
                         train_df=train_df,
                     )
@@ -204,6 +208,7 @@ def run_recommend(args: argparse.Namespace) -> None:
                 "lambda_social": selected_lambda_social,
                 "social_beta": selected_social_beta,
                 "social_gamma": selected_social_gamma,
+                "social_normalization": args.social_normalization,
             }
         )
 
@@ -261,6 +266,7 @@ def run_recommend(args: argparse.Namespace) -> None:
             lambda_social=selected_lambda_social,
             social_beta=selected_social_beta,
             social_gamma=selected_social_gamma,
+            social_normalization=args.social_normalization,
         )
 
         for _artifact in [

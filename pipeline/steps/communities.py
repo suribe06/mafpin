@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 
+from pipeline._artifacts import _check_artifact_manifest
+
 
 def run_communities(args: argparse.Namespace) -> None:
     from networks.communities import calculate_communities_for_all_models
@@ -15,6 +17,8 @@ def run_communities(args: argparse.Namespace) -> None:
         plot_lph_vs_centrality,
         plot_num_communities_dist,
     )
+
+    _check_artifact_manifest(args.dataset, context="community detection")
 
     calculate_communities_for_all_models(
         dataset=args.dataset if hasattr(args, "dataset") else None

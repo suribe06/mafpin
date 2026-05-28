@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from config import Defaults
+from pipeline._artifacts import _check_artifact_manifest
 
 
 def run_inference(args: argparse.Namespace) -> None:
@@ -19,6 +20,7 @@ def run_inference(args: argparse.Namespace) -> None:
     dp = DatasetPaths(
         args.dataset if hasattr(args, "dataset") and args.dataset else Datasets.DEFAULT
     )
+    _check_artifact_manifest(args.dataset, context="network inference")
     model = args.model
     model_index_map = {"exponential": 0, "powerlaw": 1, "rayleigh": 2}
     if model:
