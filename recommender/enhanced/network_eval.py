@@ -15,11 +15,66 @@ from recommender.data import evaluate_ranking, evaluate_single_split, split_data
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.model import evaluate_cmf_with_user_attributes
 from recommender.enhanced.social_regularization import (
+    SocialNormalization,
     SocialMode,
     build_social_edges,
     fit_social_cmf_split,
 )
 from recommender.enhanced.workers import _worker_init, _eval_network_worker
+
+
+def _index_suffix_from_underscore(path: object) -> int | None:
+    try:
+        return int(getattr(path, "stem").rsplit("_", 1)[-1])
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _index_suffix_from_dash(path: object) -> int | None:
+    try:
+        return int(getattr(path, "stem").rsplit("-", 1)[-1])
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _available_centrality_indices(dp: DatasetPaths, model_name: str) -> list[int]:
+    indices = {
+        idx
+        for idx in (
+            _index_suffix_from_underscore(path)
+            for path in (dp.CENTRALITY / model_name).glob(
+                f"centrality_metrics_{model_name}_*.csv"
+            )
+        )
+        if idx is not None
+    }
+    return sorted(indices)
+
+
+def _available_social_indices(dp: DatasetPaths, model_name: str) -> list[int]:
+    short = Models.SHORT[model_name]
+    centrality = set(_available_centrality_indices(dp, model_name))
+    networks = {
+        idx
+        for idx in (
+            _index_suffix_from_dash(path)
+            for path in (dp.NETWORKS / model_name).glob(
+                f"inferred-network-{short}-*.txt"
+            )
+        )
+        if idx is not None
+    }
+    communities = {
+        idx
+        for idx in (
+            _index_suffix_from_underscore(path)
+            for path in (dp.COMMUNITIES / model_name).glob(
+                f"communities_{model_name}_*.csv"
+            )
+        )
+        if idx is not None
+    }
+    return sorted(centrality & networks & communities)
 
 
 def evaluate_single_network(
@@ -46,6 +101,7 @@ def evaluate_single_network(
     lambda_social: float = 0.001,
     social_beta: float = 0.5,
     social_gamma: float = 1.0,
+    social_normalization: SocialNormalization = "mean_weight",
 ) -> list[dict]:
     """
     Load features and evaluate CMF for one (model, index) pair.
@@ -111,6 +167,7 @@ def evaluate_single_network(
             lambda_social=lambda_social,
             social_beta=social_beta,
             social_gamma=social_gamma,
+            social_normalization=social_normalization,
             maxiter=maxiter,
             method=method,
         )
@@ -156,6 +213,7 @@ def evaluate_social_cmf_with_user_attributes(
     lambda_social: float = 0.001,
     social_beta: float = 0.5,
     social_gamma: float = 1.0,
+    social_normalization: SocialNormalization = "mean_weight",
     maxiter: int = Defaults.CMF_MAXITER,
     method: str = Defaults.CMF_METHOD,
 ) -> list[dict]:
@@ -175,6 +233,7 @@ def evaluate_social_cmf_with_user_attributes(
         mode=social_mode,
         beta=social_beta,
         gamma=social_gamma,
+        normalization=social_normalization,
         dtype=np.float32,
     )
     if social_edges.n_edges == 0:
@@ -245,6 +304,7 @@ def evaluate_social_cmf_with_user_attributes(
             "social_edges": social_edges.n_edges,
             "social_mode": social_mode,
             "lambda_social": lambda_social,
+            "social_normalization": social_edges.normalization,
         }
 
         if compute_ranking:
@@ -343,6 +403,7 @@ def run_network_evaluation(
     lambda_social: float = 0.001,
     social_beta: float = 0.5,
     social_gamma: float = 1.0,
+    social_normalization: SocialNormalization = "mean_weight",
 ) -> dict[str, dict[str, list[float]]]:
     """
     Evaluate a random sample of networks for all three diffusion models.
@@ -379,6 +440,7 @@ def run_network_evaluation(
         lambda_social:       Social regularization strength.
         social_beta:         Boundary penalty parameter for social edge weights.
         social_gamma:        Shared-community gain parameter for social edge weights.
+        social_normalization: Social edge normalization strategy.
 
     Returns:
         Dict mapping model name → ``{"enhanced": list[float], "baseline": list[float]}``
@@ -396,13 +458,20 @@ def run_network_evaluation(
     if any(p is None for p in (k, lambda_reg, w_main, w_user)):
         sample_features: pd.DataFrame | None = None
         sample_model_name: str | None = None
-        for _mn in Models.ALL:
-            _csvs = sorted(
-                (dp.CENTRALITY / _mn).glob(f"centrality_metrics_{_mn}_*.csv")
+        sample_network_index = 0
+        for _mn in selected_models:
+            _indices = (
+                _available_social_indices(dp, _mn)
+                if use_social_regularization
+                else _available_centrality_indices(dp, _mn)
             )
-            if _csvs:
+            if _indices:
+                sample_network_index = _indices[0]
                 sample_features = load_network_features(
-                    _mn, 0, include_communities=include_communities, dataset=dataset
+                    _mn,
+                    sample_network_index,
+                    include_communities=include_communities,
+                    dataset=dataset,
                 )
                 sample_model_name = _mn
                 if sample_features is not None:
@@ -419,7 +488,9 @@ def run_network_evaluation(
                 _mlflow_tune.log_param(
                     "enhanced_search_tuning_model", sample_model_name or "unknown"
                 )
-                _mlflow_tune.log_param("enhanced_search_tuning_network_index", 0)
+                _mlflow_tune.log_param(
+                    "enhanced_search_tuning_network_index", sample_network_index
+                )
             enhanced_search = search_enhanced_params(
                 data,
                 sample_features,
@@ -450,15 +521,19 @@ def run_network_evaluation(
             print(f"  Skipping {model_name}: centrality directory not found.")
             continue
 
-        csvs = sorted(model_dir.glob(f"centrality_metrics_{model_name}_*.csv"))
-        if not csvs:
-            print(f"  Skipping {model_name}: no centrality CSVs found.")
+        indices = (
+            _available_social_indices(dp, model_name)
+            if use_social_regularization
+            else _available_centrality_indices(dp, model_name)
+        )
+        if not indices:
+            reason = (
+                "no complete centrality/network/community artifact triplets found"
+                if use_social_regularization
+                else "no centrality CSVs found"
+            )
+            print(f"  Skipping {model_name}: {reason}.")
             continue
-
-        # Parse the numeric index from the filename (e.g. "..._007.csv" → 7)
-        # rather than using positional range(len(csvs)), which breaks when
-        # artifact generation skipped some alpha values.
-        indices = sorted(int(p.stem.rsplit("_", 1)[-1]) for p in csvs)
         rng = np.random.default_rng(seed)
         sampled = (
             indices[:sample_networks]
@@ -492,6 +567,7 @@ def run_network_evaluation(
             "lambda_social": lambda_social,
             "social_beta": social_beta,
             "social_gamma": social_gamma,
+            "social_normalization": social_normalization,
         }
 
         from tqdm import tqdm
