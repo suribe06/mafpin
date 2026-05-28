@@ -15,6 +15,7 @@ from config import DatasetPaths, Datasets, Models
 from recommender.data import load_dataset, split_data_single
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.social_regularization import (
+    SocialNormalization,
     SocialMode,
     build_social_edges,
     fit_social_cmf_split,
@@ -206,6 +207,7 @@ def search_social_regularized_params(
     gamma_min: float = 0.1,
     gamma_max: float = 3.0,
     transform: str = "standard",
+    social_normalization: SocialNormalization = "mean_weight",
     output_path: str | Path | None = None,
     train_df: pd.DataFrame | None = None,
 ) -> dict:
@@ -232,6 +234,7 @@ def search_social_regularized_params(
         raise ValueError(f"Unknown social modes: {sorted(unknown_modes)}")
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    uses_external_train = train_df is not None
     train_df, test_df, user_attributes = _prepare_search_data(
         dataset=dataset,
         model_name=model_name,
@@ -268,6 +271,7 @@ def search_social_regularized_params(
             gamma_max=gamma_max,
         )
         row: dict[str, Any] = {"trial": trial.number, "status": "ok", **params}
+        row["social_normalization"] = social_normalization
         try:
             social_edges = build_social_edges(
                 dataset=dataset,
@@ -277,6 +281,7 @@ def search_social_regularized_params(
                 mode=cast(SocialMode, params["social_mode"]),
                 beta=float(params["beta"]),
                 gamma=float(params["gamma"]),
+                normalization=social_normalization,
                 dtype=np.float32,
             )
             if social_edges.n_edges == 0:
@@ -362,6 +367,8 @@ def search_social_regularized_params(
     # same fixed defaults used in _trial_params so callers always see both keys.
     best_params.setdefault("beta", 0.0)
     best_params.setdefault("gamma", 1.0)
+    if best_params:
+        best_params["social_normalization"] = social_normalization
     best_metrics = (
         dict(best_trial.user_attrs.get("metrics", {})) if best_trial is not None else {}
     )
@@ -388,10 +395,12 @@ def search_social_regularized_params(
         "train_ratings": int(len(train_df)),
         "test_ratings": int(len(test_df)),
         "warm_test_only": True,
+        "source_split": "global_train" if uses_external_train else "full_dataset",
         "maxiter": maxiter,
         "random_state": random_state,
         "nthreads": nthreads,
         "transform": transform,
+        "social_normalization": social_normalization,
         "reasonableness_limit": reasonableness_limit,
         "search_space": {
             "k": [k_min, k_max],
@@ -400,6 +409,7 @@ def search_social_regularized_params(
             "w_user": [w_user_min, w_user_max],
             "lambda_social": [lambda_social_min, lambda_social_max],
             "social_mode": list(selected_social_modes),
+            "social_normalization": [social_normalization],
             "beta": [beta_min, beta_max],
             "gamma": [gamma_min, gamma_max],
         },
@@ -421,6 +431,7 @@ def search_social_regularized_params(
                 "social_best_mode": best_params.get("social_mode"),
                 "social_best_beta": best_params.get("beta"),
                 "social_best_gamma": best_params.get("gamma"),
+                "social_best_normalization": best_params.get("social_normalization"),
             }
         )
         if best_social_edges:
@@ -465,6 +476,7 @@ def search_social_per_mode(
     gamma_min: float = 0.1,
     gamma_max: float = 3.0,
     transform: str = "standard",
+    social_normalization: SocialNormalization = "mean_weight",
     output_dir: str | Path | None = None,
     train_df: pd.DataFrame | None = None,
 ) -> dict[str, dict]:
@@ -529,6 +541,7 @@ def search_social_per_mode(
             gamma_min=gamma_min,
             gamma_max=gamma_max,
             transform=transform,
+            social_normalization=social_normalization,
             output_path=out_path,
             train_df=train_df,
         )
@@ -572,6 +585,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("--nthreads", type=int, default=1)
     parser.add_argument("--transform", default="standard")
+    parser.add_argument(
+        "--social-normalization",
+        default="mean_weight",
+        choices=[
+            "none",
+            "mean",
+            "mean_weight",
+            "edges",
+            "n_edges",
+            "sum_weight",
+            "normalized_laplacian",
+        ],
+    )
     parser.add_argument(
         "--social-modes",
         nargs="+",
@@ -631,6 +657,7 @@ def main() -> None:
         gamma_min=args.gamma_min,
         gamma_max=args.gamma_max,
         transform=args.transform,
+        social_normalization=cast(SocialNormalization, args.social_normalization),
         output_path=args.output_path,
     )
     if result["best_params"]:

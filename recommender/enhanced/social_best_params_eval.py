@@ -16,6 +16,7 @@ from recommender.baseline import train_model
 from recommender.data import evaluate_single_split, load_dataset, split_data_single
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.social_regularization import (
+    SocialNormalization,
     SocialMode,
     build_social_edges,
     fit_social_cmf_split,
@@ -314,6 +315,13 @@ def evaluate_best_social_params(
         mode=cast(SocialMode, best_params["social_mode"]),
         beta=float(best_params["beta"]),
         gamma=float(best_params["gamma"]),
+        normalization=cast(
+            SocialNormalization,
+            best_params.get(
+                "social_normalization",
+                search_result.get("social_normalization", "mean_weight"),
+            ),
+        ),
         dtype=np.float32,
     )
     attempts: list[dict[str, Any]] = []
