@@ -56,7 +56,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -70,6 +70,7 @@ from recommender.data import load_and_split_dataset
 from recommender._cmfrec import CMF
 from recommender.enhanced import load_network_features
 from recommender.enhanced.social_regularization import (
+    SocialNormalization,
     SocialMode,
     build_social_edges,
     fit_social_cmf_model,
@@ -88,6 +89,22 @@ _SCALERS = {
     "minmax": MinMaxScaler,
     "normalizer": Normalizer,  # row-normalisation — see warning above
 }
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +189,7 @@ def _train_enhanced_cmf(
     lambda_social: float = 0.001,
     social_beta: float = 0.5,
     social_gamma: float = 1.0,
+    social_normalization: SocialNormalization = "mean_weight",
 ) -> tuple[CMF, pd.DataFrame]:
     """
     Train the enhanced CMF for a single network and return the fitted model
@@ -217,6 +235,10 @@ def _train_enhanced_cmf(
             mode=selected_social_mode,
             beta=selected_beta,
             gamma=selected_gamma,
+            normalization=cast(
+                SocialNormalization,
+                params.get("social_normalization", social_normalization),
+            ),
             dtype=np.float32,
         )
         n_users = int(
@@ -285,12 +307,13 @@ def compute_shap_for_network(
     lambda_social: float = 0.001,
     social_beta: float = 0.5,
     social_gamma: float = 1.0,
+    social_normalization: SocialNormalization = "mean_weight",
     surrogate_n_estimators: int = 100,
     surrogate_random_state: int = 42,
     min_users: int = 30,
     surrogate_r2_threshold: float = 0.05,
     dataset: str | None = None,
-) -> tuple[np.ndarray, list[str]] | None:
+) -> dict[str, Any]:
     """
     Train enhanced CMF on one (model, network) pair and compute SHAP values.
 
@@ -318,39 +341,59 @@ def compute_shap_for_network(
         dataset:                Dataset name.  Defaults to ``Datasets.DEFAULT``.
 
     Returns:
-        ``(shap_values, feature_names)`` where ``shap_values`` has shape
-        ``(n_users, n_features)``, or ``None`` if data is insufficient.
+        Dict with ``status="ok"`` and SHAP payload, or ``status="skipped"``
+        with audit metadata explaining why the network was skipped.
     """
     features = load_network_features(
         model_name, network_index, include_communities, dataset=dataset
     )
     if features is None:
-        return None
+        return {
+            "status": "skipped",
+            "reason": "features_not_found",
+            "network_index": network_index,
+            "n_users": 0,
+        }
 
-    model, scaled_features = _train_enhanced_cmf(
-        train_df,
-        test_df,
-        features,
-        params,
-        transform,
-        method=method,
-        maxiter=maxiter,
-        cmf_nthreads=cmf_nthreads,
-        social_regularization=social_regularization,
-        dataset=dataset,
-        model_name=model_name,
-        network_index=network_index,
-        social_mode=social_mode,
-        lambda_social=lambda_social,
-        social_beta=social_beta,
-        social_gamma=social_gamma,
-    )
+    try:
+        model, scaled_features = _train_enhanced_cmf(
+            train_df,
+            test_df,
+            features,
+            params,
+            transform,
+            method=method,
+            maxiter=maxiter,
+            cmf_nthreads=cmf_nthreads,
+            social_regularization=social_regularization,
+            dataset=dataset,
+            model_name=model_name,
+            network_index=network_index,
+            social_mode=social_mode,
+            lambda_social=lambda_social,
+            social_beta=social_beta,
+            social_gamma=social_gamma,
+            social_normalization=social_normalization,
+        )
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+        return {
+            "status": "skipped",
+            "reason": "training_failed",
+            "error": str(exc),
+            "network_index": network_index,
+            "n_users": int(len(features)),
+        }
 
     # --- Per-user mean predicted rating on test interactions -----------------
     feat_users = set(scaled_features.index)
     test_filtered = test_df[test_df["UserId"].isin(list(feat_users))].copy()
     if test_filtered.empty:
-        return None
+        return {
+            "status": "skipped",
+            "reason": "no_test_users_with_features",
+            "network_index": network_index,
+            "n_users": 0,
+        }
 
     preds = model.predict(
         user=test_filtered["UserId"].values,  # type: ignore[union-attr]
@@ -362,7 +405,13 @@ def compute_shap_for_network(
     # --- Align features and predictions --------------------------------------
     common_users = sorted(per_user_pred.index.intersection(scaled_features.index))
     if len(common_users) < min_users:
-        return None
+        return {
+            "status": "skipped",
+            "reason": "insufficient_users",
+            "network_index": network_index,
+            "n_users": int(len(common_users)),
+            "min_users": int(min_users),
+        }
 
     X = scaled_features.loc[common_users].values
     y = per_user_pred.loc[common_users].values
@@ -378,15 +427,23 @@ def compute_shap_for_network(
         random_state=surrogate_random_state,
     )
     val_split = max(1, int(0.8 * len(common_users)))
+    surrogate_r2: float | None = None
     if val_split < len(common_users):  # enough data for a held-out set
         surrogate.fit(X[:val_split], y[:val_split])
         surrogate_r2 = float(r2_score(y[val_split:], surrogate.predict(X[val_split:])))
-        if surrogate_r2 < surrogate_r2_threshold:
+        if not np.isfinite(surrogate_r2) or surrogate_r2 < surrogate_r2_threshold:
             print(
                 f"  surrogate R²={surrogate_r2:.3f} below threshold "
                 f"{surrogate_r2_threshold} — skipping network {network_index:03d}."
             )
-            return None
+            return {
+                "status": "skipped",
+                "reason": "low_surrogate_r2",
+                "network_index": network_index,
+                "n_users": int(len(common_users)),
+                "surrogate_r2": surrogate_r2,
+                "surrogate_r2_threshold": surrogate_r2_threshold,
+            }
     # Refit on full data before computing SHAP values
     surrogate.fit(X, y)
 
@@ -394,7 +451,14 @@ def compute_shap_for_network(
     explainer = shap.TreeExplainer(surrogate)
     shap_values: np.ndarray = explainer.shap_values(X)  # (n_users, n_features)
 
-    return shap_values, feature_names
+    return {
+        "status": "ok",
+        "network_index": network_index,
+        "shap_values": shap_values,
+        "feature_names": feature_names,
+        "n_users": int(len(common_users)),
+        "surrogate_r2": surrogate_r2,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +482,7 @@ def run_shap_analysis(
     lambda_social: float = 0.001,
     social_beta: float = 0.5,
     social_gamma: float = 1.0,
+    social_normalization: SocialNormalization = "mean_weight",
 ) -> dict[str, dict]:
     """
     Run SHAP feature importance analysis over ``k_networks`` random networks
@@ -482,6 +547,8 @@ def run_shap_analysis(
         all_shap: list[np.ndarray] = []
         feature_names: list[str] = []
         valid_indices: list[int] = []
+        model_skipped: list[dict[str, Any]] = []
+        surrogate_r2_values: list[float] = []
 
         for idx in indices:
             print(f"  [{model_name}] network {idx:03d} ...", end=" ", flush=True)
@@ -501,19 +568,33 @@ def run_shap_analysis(
                 lambda_social=lambda_social,
                 social_beta=social_beta,
                 social_gamma=social_gamma,
+                social_normalization=social_normalization,
                 dataset=dataset,
             )
-            if result is None:
-                print("skipped (insufficient data).")
-                skipped_networks.append(
-                    {"model": model_name, "index": idx, "reason": "insufficient data"}
-                )
+            if result.get("status") != "ok":
+                reason = str(result.get("reason", "unknown"))
+                print(f"skipped ({reason}).")
+                audit = {
+                    "model": model_name,
+                    "index": idx,
+                    **{
+                        key: _json_ready(value)
+                        for key, value in result.items()
+                        if key not in {"shap_values", "feature_names"}
+                    },
+                }
+                skipped_networks.append(audit)
+                model_skipped.append(audit)
                 continue
 
-            sv, fn = result
+            sv = cast(np.ndarray, result["shap_values"])
+            fn = cast(list[str], result["feature_names"])
             all_shap.append(sv)
             feature_names = fn
             valid_indices.append(idx)
+            surrogate_r2 = result.get("surrogate_r2")
+            if isinstance(surrogate_r2, (int, float, np.integer, np.floating)):
+                surrogate_r2_values.append(float(surrogate_r2))
 
             # Persist full matrix so plots can be regenerated without re-running.
             # Use atomic tmp+replace so interrupted runs leave no partial .npy files.
@@ -548,9 +629,15 @@ def run_shap_analysis(
                 {
                     "model_name": model_name,
                     "n_networks": len(all_shap),
+                    "n_attempted": len(indices),
+                    "n_skipped": len(model_skipped),
                     "network_indices": valid_indices,
                     "matrix_paths": matrix_paths,
                     "feature_names": feature_names,
+                    "model_variant": "social" if social_regularization else "enhanced",
+                    "social_normalization": (
+                        social_normalization if social_regularization else None
+                    ),
                 },
                 indent=2,
             ),
@@ -563,8 +650,27 @@ def run_shap_analysis(
             "mean_shap": mean_signed.tolist(),
             "feature_names": feature_names,
             "n_networks": len(all_shap),
+            "n_attempted": len(indices),
+            "n_valid": len(all_shap),
+            "n_skipped": len(model_skipped),
             "network_indices": valid_indices,
             "matrix_paths": matrix_paths,
+            "skipped_networks": model_skipped,
+            "surrogate_r2_summary": {
+                "count": len(surrogate_r2_values),
+                "mean": (
+                    float(np.mean(surrogate_r2_values)) if surrogate_r2_values else None
+                ),
+                "min": (
+                    float(np.min(surrogate_r2_values)) if surrogate_r2_values else None
+                ),
+                "max": (
+                    float(np.max(surrogate_r2_values)) if surrogate_r2_values else None
+                ),
+            },
+            "model_variant": "social" if social_regularization else "enhanced",
+            "resolved_params": _json_ready(params),
+            "post_hoc_target": "per-user mean CMF prediction on held-out test interactions",
         }
 
         # Pretty-print ranked feature importances.
