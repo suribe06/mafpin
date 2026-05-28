@@ -31,9 +31,9 @@ def run_cascade(args: argparse.Namespace) -> None:
     # so the cascade header declares the full user-ID space, keeping compact
     # network IDs aligned with LabelEncoder (C-3 fix).
     if Split.STRATEGY == "temporal":
-        train_df, _ = split_data_temporal(df, test_size=Split.TEST_SIZE)
+        train_df, test_df = split_data_temporal(df, test_size=Split.TEST_SIZE)
     else:
-        train_df, _ = split_data_single(
+        train_df, test_df = split_data_single(
             df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
         )
     generate_cascades_from_df(
@@ -43,7 +43,21 @@ def run_cascade(args: argparse.Namespace) -> None:
     )
 
     # Persist split config so downstream steps can detect stale artifacts.
-    _write_artifact_manifest(ds_name)
+    temporal_cutoff = None
+    if Split.STRATEGY == "temporal" and not train_df.empty:
+        temporal_cutoff = train_df["timestamp"].max()
+        if hasattr(temporal_cutoff, "item"):
+            temporal_cutoff = temporal_cutoff.item()
+    _write_artifact_manifest(
+        ds_name,
+        source_path=csv_path,
+        train_rows=len(train_df),
+        test_rows=len(test_df),
+        total_rows=len(df),
+        n_users=int(df["UserId"].nunique()),
+        n_items=int(df["ItemId"].nunique()),
+        temporal_cutoff=temporal_cutoff,
+    )
 
     compute_cascade_user_stats(dataset=ds_name)
 

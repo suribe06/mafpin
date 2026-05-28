@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from pipeline._cpu import _resolve_cmf_nthreads
+from pipeline._artifacts import _check_artifact_manifest
 
 
 def run_shap(args: argparse.Namespace) -> None:
@@ -15,6 +16,7 @@ def run_shap(args: argparse.Namespace) -> None:
     from visualization.shap_plots import plot_all_shap
 
     dp = DatasetPaths(args.dataset)
+    _check_artifact_manifest(args.dataset, context="SHAP analysis")
     mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
@@ -34,6 +36,7 @@ def run_shap(args: argparse.Namespace) -> None:
                 "social_regularization": args.social_regularization,
                 "social_mode": args.social_mode,
                 "lambda_social": args.lambda_social,
+                "social_normalization": args.social_normalization,
             }
         )
 
@@ -54,6 +57,7 @@ def run_shap(args: argparse.Namespace) -> None:
             lambda_social=args.lambda_social,
             social_beta=args.social_beta,
             social_gamma=args.social_gamma,
+            social_normalization=args.social_normalization,
         )
         save_shap_results(results, path=dp.SHAP_RESULTS)
         plot_all_shap(
@@ -76,7 +80,7 @@ def run_shap(args: argparse.Namespace) -> None:
             mlflow.log_params(
                 {f"shap_best_{_k}": _v for _k, _v in _actual_params.items()}
             )
-        except Exception as _exc:
+        except (FileNotFoundError, OSError, ValueError, KeyError, TypeError) as _exc:
             print(f"  Warning: could not log actual SHAP hyperparameters: {_exc}")
 
         for model_name, model_results in results.items():
