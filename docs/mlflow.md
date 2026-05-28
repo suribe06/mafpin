@@ -47,7 +47,7 @@ Parent run name: **`recommend`**
 | --- | --- |
 | `include_communities`, `sample_networks`, `all_networks`, `model`, `n_optuna_trials`, `n_cv_splits`, `cmf_method`, `cmf_maxiter`, `social_regularization` | params |
 | `k_baseline`, `lambda_baseline`, `k_enhanced`, `lambda_enhanced`, `w_main`, `w_user` | params (post-search) |
-| `social_mode`, `lambda_social`, `social_beta`, `social_gamma` | params when social regularization is enabled |
+| `social_mode`, `lambda_social`, `social_beta`, `social_gamma`, `social_normalization` | params when social regularization is enabled |
 | `baseline_rmse`, `baseline_mae`, `baseline_r2` | metrics (global test set) |
 | `<model>_rmse_enhanced`, `<model>_rmse_baseline` | metrics per network (step = network index) |
 | `<model>_improvement_pct` | metrics per network (step = network index) |
@@ -58,7 +58,7 @@ Two **nested runs** are created inside the parent:
 
 - **`baseline_search`** — logs `baseline_trial_rmse` per Optuna trial (step = trial number) and `baseline_best_k`, `baseline_best_lambda_reg`, `baseline_best_rmse`.
 - **`enhanced_search`** — logs `enhanced_trial_rmse` per Optuna trial and `enhanced_best_k`, `enhanced_best_lambda_reg`, `enhanced_best_w_main`, `enhanced_best_w_user`, `enhanced_best_rmse`.
-- **`social_search`** — created instead of `enhanced_search` when `--social-regularization` is enabled. The full Optuna result is saved as `social_hyperparam_search_results.json`; the search space includes `lambda_social`, `social_mode`, `beta`, and `gamma` in addition to the regular CMF parameters.
+- **`social_search`** — created instead of `enhanced_search` when `--social-regularization` is enabled. The full Optuna result is saved as `social_hyperparam_search_results.json`; the search space includes `lambda_social`, `social_mode`, `beta`, and `gamma` in addition to the regular CMF parameters. `social_normalization` is fixed by `--social-normalization` and logged in the result metadata rather than sampled by Optuna.
 
 ---
 
@@ -82,7 +82,7 @@ Run name: **`shap`**
 
 | What | MLflow entity |
 | --- | --- |
-| `k_networks`, `include_communities`, `seed`, `all_networks`, `model`, `cmf_method`, `cmf_maxiter`, `social_regularization`, `social_mode`, `lambda_social` | params |
+| `k_networks`, `include_communities`, `seed`, `all_networks`, `model`, `cmf_method`, `cmf_maxiter`, `social_regularization`, `social_mode`, `lambda_social`, `social_normalization` | params |
 | `<model>_n_networks` | metric (number of networks processed) |
 | `shap_<model>_<feature_name>` (one per feature per model) | metrics (mean \|SHAP\|) |
 | `shap_results.json` | artifact |
