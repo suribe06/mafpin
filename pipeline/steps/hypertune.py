@@ -85,6 +85,7 @@ def run_hypertune(args: argparse.Namespace) -> None:
                 random_state=args.seed,
                 nthreads=cmf_nthreads,
                 include_user_attributes=True,
+                social_modes=(args.social_mode,),
                 social_normalization=args.social_normalization,
                 output_path=dp.SOCIAL_RESULTS,
                 train_df=train_df,

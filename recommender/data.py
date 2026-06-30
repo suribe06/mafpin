@@ -224,6 +224,13 @@ def predict_ratings(model, test_data: pd.DataFrame) -> np.ndarray:
     )
 
 
+def rating_reasonableness_limit(ratings: pd.Series | np.ndarray) -> float:
+    """Upper RMSE sanity bound from the rating scale (matches social search)."""
+    values = np.asarray(ratings, dtype=float)
+    span = float(np.max(values) - np.min(values))
+    return max(10.0, 10.0 * span)
+
+
 def evaluate_single_split(
     model,
     test_data: pd.DataFrame,
@@ -236,10 +243,16 @@ def evaluate_single_split(
         test_data: DataFrame with ``UserId``, ``ItemId``, ``Rating`` columns.
 
     Returns:
-        Dict with keys ``rmse``, ``mae``, ``r2``.
+        Dict with keys ``rmse``, ``mae``, ``r2``.  Non-finite predictions yield
+        ``inf`` / ``-inf`` metrics so Optuna can prune the trial instead of crashing.
     """
-    predictions = predict_ratings(model, test_data)
-    ground_truth = test_data["Rating"].values
+    predictions = np.asarray(predict_ratings(model, test_data), dtype=float)
+    ground_truth = test_data["Rating"].values.astype(float)
+
+    if predictions.shape[0] != ground_truth.shape[0] or not np.all(
+        np.isfinite(predictions)
+    ):
+        return {"rmse": float("inf"), "mae": float("inf"), "r2": float("-inf")}
 
     rmse = float(np.sqrt(mean_squared_error(ground_truth, predictions)))
     mae = float(mean_absolute_error(ground_truth, predictions))

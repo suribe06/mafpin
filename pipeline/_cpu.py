@@ -15,8 +15,19 @@ def _cpu_thread_limit(cpu_fraction: float) -> int:
 def _resolve_cmf_nthreads(args: argparse.Namespace) -> int:
     explicit = getattr(args, "cmf_nthreads", 0)
     if explicit and explicit > 0:
-        return int(explicit)
-    return _cpu_thread_limit(float(args.cpu_fraction))
+        nthreads = int(explicit)
+    else:
+        nthreads = _cpu_thread_limit(float(args.cpu_fraction))
+    # ponytail: cmfrec L-BFGS segfaults with nthreads>1 on typical OpenBLAS builds;
+    # parallelize with --n-jobs (network workers), not BLAS inside each fit.
+    if getattr(args, "cmf_method", "lbfgs") == "lbfgs" and nthreads != 1:
+        if explicit and explicit > 1:
+            print(
+                f"WARNING: cmfrec L-BFGS is not thread-safe above 1; "
+                f"capping CMF nthreads from {nthreads} to 1."
+            )
+        nthreads = 1
+    return nthreads
 
 
 def _configure_cpu_limits(args: argparse.Namespace) -> int:
@@ -30,8 +41,14 @@ def _configure_cpu_limits(args: argparse.Namespace) -> int:
         "VECLIB_MAXIMUM_THREADS",
     ):
         os.environ[var] = str(nthreads)
-    print(
-        f"CPU limit: CMF/BLAS threads capped at {nthreads} "
-        f"(~{float(args.cpu_fraction):.0%} of detected cores)."
-    )
+    if getattr(args, "cmf_method", "lbfgs") == "lbfgs":
+        print(
+            "CPU limit: CMF/BLAS threads capped at 1 "
+            "(cmfrec L-BFGS; use --n-jobs for parallel network evaluation)."
+        )
+    else:
+        print(
+            f"CPU limit: CMF/BLAS threads capped at {nthreads} "
+            f"(~{float(args.cpu_fraction):.0%} of detected cores)."
+        )
     return nthreads

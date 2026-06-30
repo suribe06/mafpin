@@ -52,6 +52,13 @@ class DatasetPaths:
         self.ENHANCED_RESULTS = base / "enhanced_search_results.json"
         self.SOCIAL_RESULTS = base / "social_hyperparam_search_results.json"
         self.SHAP_RESULTS = base / "shap_results.json"
+        self.RUNS = base / "runs"
+        self.EXPERIMENT_MANIFEST = base / "experiment_manifest.json"
+        self.CANONICAL_BASELINE = base / "canonical_baseline.json"
+        self.NETWORK_SELECTION = base / "network_selection_results.json"
+        self.CORE_EXPERIMENT_RESULTS = base / "core_experiment_results.csv"
+        self.CORE_EXPERIMENT_BY_NETWORK = base / "core_experiment_by_network.csv"
+        self.LOGS = base / "logs"
 
 
 class Datasets:

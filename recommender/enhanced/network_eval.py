@@ -11,7 +11,7 @@ import pandas as pd
 
 from config import DatasetPaths, Datasets, Models, Defaults
 from recommender.baseline import train_model
-from recommender.data import evaluate_ranking, evaluate_single_split, split_data_single
+from recommender.data import evaluate_ranking, evaluate_single_split, rating_reasonableness_limit, split_data_single
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.model import evaluate_cmf_with_user_attributes
 from recommender.enhanced.social_regularization import (
@@ -322,6 +322,7 @@ def _save_rmses(
     split_results: list[dict],
     dataset: str | None = None,
     run_mode: str = "enhanced",
+    rmse_limit: float | None = None,
 ) -> None:
     """
     Append per-mode mean RMSE, std, and improvement vs paired baseline.
@@ -361,7 +362,12 @@ def _save_rmses(
         df.loc[network_index, f"{run_mode}_rmse_mean"] = mean_enhanced
         df.loc[network_index, f"{run_mode}_rmse_std"] = float(np.std(enhanced_rmses))
         df.loc[network_index, f"{run_mode}_baseline_rmse_mean"] = mean_baseline
-        if mean_baseline > 0:
+        if (
+            mean_baseline > 0
+            and np.isfinite(mean_baseline)
+            and np.isfinite(mean_enhanced)
+            and (rmse_limit is None or mean_baseline <= rmse_limit)
+        ):
             df.loc[network_index, f"{run_mode}_improvement_pct"] = (
                 (mean_baseline - mean_enhanced) / mean_baseline
             ) * 100.0
@@ -451,6 +457,7 @@ def run_network_evaluation(
 
     dp = DatasetPaths(dataset or Datasets.DEFAULT)
     selected_models = model_names or Models.ALL
+    rmse_limit = rating_reasonableness_limit(data["Rating"])
     all_results: dict[str, dict[str, list[float]]] = {
         m: {"enhanced": [], "baseline": []} for m in selected_models
     }
@@ -667,11 +674,17 @@ def run_network_evaluation(
                 )
                 improvement = mean_baseline - mean_enhanced
                 sign = "+" if improvement > 0 else ""
+                pct_str = ""
+                if (
+                    mean_baseline > 0
+                    and np.isfinite(mean_baseline)
+                    and mean_baseline <= rmse_limit
+                ):
+                    pct_str = f"({sign}{improvement / mean_baseline * 100:.2f}%)"
                 print(
                     f"  Enhanced RMSE = {mean_enhanced:.4f}  "
                     f"Baseline RMSE = {mean_baseline:.4f}  "
-                    f"improvement={sign}{improvement:.4f} "
-                    f"({sign}{improvement / mean_baseline * 100:.2f}%)"
+                    f"improvement={sign}{improvement:.4f} {pct_str}"
                 )
                 _save_rmses(
                     model_name,
@@ -679,6 +692,7 @@ def run_network_evaluation(
                     split_results,
                     dataset=dataset,
                     run_mode="social" if use_social_regularization else "enhanced",
+                    rmse_limit=rmse_limit,
                 )
                 all_results[model_name]["enhanced"].append(mean_enhanced)
                 all_results[model_name]["baseline"].append(mean_baseline)
@@ -692,7 +706,11 @@ def run_network_evaluation(
                     _mlflow.log_metric(
                         f"{model_name}_rmse_baseline", mean_baseline, step=net_idx
                     )
-                    if mean_baseline > 0:
+                    if (
+                        mean_baseline > 0
+                        and np.isfinite(mean_baseline)
+                        and mean_baseline <= rmse_limit
+                    ):
                         _mlflow.log_metric(
                             f"{model_name}_improvement_pct",
                             improvement / mean_baseline * 100,

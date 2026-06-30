@@ -11,7 +11,12 @@ import pandas as pd
 
 from config import DatasetPaths, Datasets
 from config import Defaults
+from recommender.data import rating_reasonableness_limit
 from recommender.enhanced.model import evaluate_cmf_with_user_attributes
+
+
+def _enhanced_trial_rmse_is_usable(mean_rmse: float, limit: float) -> bool:
+    return np.isfinite(mean_rmse) and mean_rmse <= limit
 
 
 def search_enhanced_params(
@@ -44,6 +49,7 @@ def search_enhanced_params(
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     all_results: list[dict] = []
+    rmse_limit = rating_reasonableness_limit(data["Rating"])
 
     def _objective(trial: optuna.Trial) -> float:
         k_val = trial.suggest_int("k", 5, 50)
@@ -51,22 +57,31 @@ def search_enhanced_params(
         w_main_val = trial.suggest_float("w_main", 0.1, 1.0)
         w_user_val = trial.suggest_float("w_user", 0.01, 1.0, log=True)
 
-        split_results = evaluate_cmf_with_user_attributes(
-            data,
-            user_attributes,
-            k=k_val,
-            lambda_reg=lambda_val,
-            w_main=w_main_val,
-            w_user=w_user_val,
-            n_splits=n_splits,
-            method=method,
-            maxiter=maxiter,
-            cmf_nthreads=cmf_nthreads,
-        )
+        try:
+            split_results = evaluate_cmf_with_user_attributes(
+                data,
+                user_attributes,
+                k=k_val,
+                lambda_reg=lambda_val,
+                w_main=w_main_val,
+                w_user=w_user_val,
+                n_splits=n_splits,
+                method=method,
+                maxiter=maxiter,
+                cmf_nthreads=cmf_nthreads,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise optuna.exceptions.TrialPruned(str(exc)) from exc
+
         if not split_results:
-            raise optuna.exceptions.TrialPruned()
+            raise optuna.exceptions.TrialPruned("no CV splits")
 
         mean_rmse = float(np.mean([r["rmse_enhanced"] for r in split_results]))
+        if not _enhanced_trial_rmse_is_usable(mean_rmse, rmse_limit):
+            raise optuna.exceptions.TrialPruned(
+                "non-finite or unreasonable-scale RMSE"
+            )
+
         all_results.append(
             {
                 "k": k_val,
@@ -82,6 +97,19 @@ def search_enhanced_params(
             _mlflow.log_metric("enhanced_trial_rmse", mean_rmse, step=trial.number)
         return mean_rmse
 
+    def _print_trial(_study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        params = trial.params
+        value = f"{trial.value:.4f}" if trial.value is not None else "None"
+        print(
+            f"  [trial {trial.number + 1:2d}/{n_trials}] "
+            f"state={trial.state.name} "
+            f"k={params.get('k')}  "
+            f"lambda={params.get('lambda_reg', 0.0):.4f}  "
+            f"w_main={params.get('w_main', 0.0):.3f}  "
+            f"w_user={params.get('w_user', 0.0):.3f}  "
+            f"RMSE={value}"
+        )
+
     study = optuna.create_study(
         direction="minimize",
         sampler=optuna.samplers.TPESampler(seed=random_state),
@@ -89,17 +117,16 @@ def search_enhanced_params(
     study.optimize(
         _objective,
         n_trials=n_trials,
-        callbacks=[
-            lambda study, trial: print(
-                f"  [trial {trial.number + 1:2d}/{n_trials}] "
-                f"k={trial.params.get('k')}  "
-                f"lambda={trial.params.get('lambda_reg'):.4f}  "
-                f"w_main={trial.params.get('w_main'):.3f}  "
-                f"w_user={trial.params.get('w_user'):.3f}  "
-                f"RMSE={trial.value:.4f}"
-            )
-        ],
+        callbacks=[_print_trial],
     )
+
+    complete = [
+        t
+        for t in study.trials
+        if t.state == optuna.trial.TrialState.COMPLETE and t.value is not None
+    ]
+    if not complete:
+        raise RuntimeError("Enhanced hyperparameter search produced no usable trials.")
 
     best = study.best_params
     best_params = {
