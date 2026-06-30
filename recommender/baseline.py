@@ -64,6 +64,7 @@ def save_search_results(search_result: dict, path: Path | None = None) -> None:
 
 from recommender.data import (
     load_dataset,
+    rating_reasonableness_limit,
     split_data_single,
     evaluate_single_split,
 )
@@ -280,19 +281,29 @@ def search_baseline_params(
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     all_results: list[dict] = []
+    rmse_limit = rating_reasonableness_limit(data["Rating"])
 
     def _objective(trial: "optuna.Trial") -> float:
         k_val = trial.suggest_int("k", 5, 50)
         lambda_val = trial.suggest_float("lambda_reg", 0.01, 10.0, log=True)
-        metrics = evaluate_with_cv(
-            data,
-            k=k_val,
-            lambda_reg=lambda_val,
-            n_splits=n_splits,
-            method=method,
-            maxiter=maxiter,
-            nthreads=nthreads,
-        )
+        try:
+            metrics = evaluate_with_cv(
+                data,
+                k=k_val,
+                lambda_reg=lambda_val,
+                n_splits=n_splits,
+                method=method,
+                maxiter=maxiter,
+                nthreads=nthreads,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise optuna.exceptions.TrialPruned(str(exc)) from exc
+
+        if not np.isfinite(metrics["rmse"]) or metrics["rmse"] > rmse_limit:
+            raise optuna.exceptions.TrialPruned(
+                "non-finite or unreasonable-scale RMSE"
+            )
+
         all_results.append({"k": k_val, "lambda_reg": lambda_val, **metrics})
         import mlflow
 
@@ -318,6 +329,14 @@ def search_baseline_params(
         show_progress_bar=False,
         callbacks=[_print_trial],
     )
+
+    complete = [
+        t
+        for t in study.trials
+        if t.state == optuna.trial.TrialState.COMPLETE and t.value is not None
+    ]
+    if not complete:
+        raise RuntimeError("Baseline hyperparameter search produced no usable trials.")
 
     best_params = {
         "k": study.best_params["k"],

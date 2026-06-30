@@ -17,6 +17,10 @@ from pipeline.steps.inference import run_inference
 from pipeline.steps.preregister import run_preregister
 from pipeline.steps.recommend import run_recommend
 from pipeline.steps.shap import run_shap
+from pipeline.steps.import_manifest import run_import_manifest
+from pipeline.steps.canonical_baseline import run_canonical_baseline
+from pipeline.steps.network_selection import run_network_selection_step
+from pipeline.steps.final_eval import run_final_eval
 
 STEPS: dict[str, tuple[str, Any]] = {
     "cascade": ("Generate diffusion cascades from ratings", run_cascade),
@@ -27,6 +31,22 @@ STEPS: dict[str, tuple[str, Any]] = {
     "recommend": ("Train and evaluate CMF recommender", run_recommend),
     "hypertune": ("Optuna search for enhanced CMF hyperparameters", run_hypertune),
     "shap": ("SHAP feature importance for enhanced CMF", run_shap),
+    "import_manifest": (
+        "Import hyperparameters from recommend logs into experiment manifest",
+        run_import_manifest,
+    ),
+    "canonical_baseline": (
+        "Establish canonical M1 baseline for final test evaluation",
+        run_canonical_baseline,
+    ),
+    "network_selection": (
+        "Freeze best diffusion model and alpha per variant",
+        run_network_selection_step,
+    ),
+    "final_eval": (
+        "Evaluate variants on global held-out test split",
+        run_final_eval,
+    ),
 }
 
 ALL_STEPS: list[str] = list(STEPS.keys())

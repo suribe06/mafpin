@@ -117,6 +117,7 @@ def run_recommend(args: argparse.Namespace) -> None:
                         random_state=args.seed,
                         nthreads=cmf_nthreads,
                         include_user_attributes=True,
+                        social_modes=(args.social_mode,),
                         social_normalization=args.social_normalization,
                         output_path=dp.SOCIAL_RESULTS,
                         train_df=train_df,
@@ -275,6 +276,17 @@ def run_recommend(args: argparse.Namespace) -> None:
         ]:
             if _artifact.exists():
                 mlflow.log_artifact(str(_artifact))
+
+    if getattr(args, "run_id", None):
+        from recommender.experiment.manifest import archive_recommend_run
+
+        archive_recommend_run(
+            args.dataset,
+            args.run_id,
+            baseline_path=dp.BASELINE_RESULTS,
+            enhanced_path=dp.ENHANCED_RESULTS if not args.social_regularization else None,
+            social_path=dp.SOCIAL_RESULTS if args.social_regularization else None,
+        )
 
     # --- plots ---------------------------------------------------------------
     from visualization.model_plots import (

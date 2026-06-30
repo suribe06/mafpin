@@ -217,4 +217,31 @@ def _build_parser() -> argparse.ArgumentParser:
             "Outputs data/<dataset>/preregistered_network_sample.json."
         ),
     )
+    from recommender.experiment.variants import ALL_VARIANT_IDS
+
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help=(
+            "Archive recommend artifacts under data/<dataset>/runs/<run-id>/ "
+            "after recommend completes."
+        ),
+    )
+    parser.add_argument(
+        "--model-variant",
+        choices=ALL_VARIANT_IDS,
+        default=None,
+        help="Single core experiment variant (import_manifest / network_selection / final_eval).",
+    )
+    parser.add_argument(
+        "--all-variants",
+        action="store_true",
+        dest="all_variants",
+        help="Process all core experiment variants (M1–M4d).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-run when canonical_baseline already exists.",
+    )
     return parser
