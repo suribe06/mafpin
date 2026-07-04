@@ -1,5 +1,9 @@
 {
+  "venvPath": "/home/suribe06/anaconda3/envs",
+  "venv": "mafpin",
   "exclude": [
+    "articles",
+    "articles/**",
     "cmfrec-master",
     "cmfrec-master/**",
     "cmfrec",
