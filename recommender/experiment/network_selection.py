@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -76,11 +75,11 @@ def _pick_from_run_csv(
         df = pd.read_csv(csv_path, sep="|")
         if rmse_col not in df.columns:
             continue
-        valid = df[rmse_col].dropna()
-        valid = valid[(valid > 0) & (valid < 10)]
-        if valid.empty:
+        valid = cast(pd.Series, df[rmse_col].dropna())
+        valid = cast(pd.Series, valid[(valid > 0) & (valid < 10)])
+        if len(valid) == 0:
             continue
-        idx = int(valid.idxmin())
+        idx = int(cast(int, valid.idxmin()))
         cv_rmse = float(valid.loc[idx])
         if cv_rmse < best_rmse:
             best_rmse = cv_rmse

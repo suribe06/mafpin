@@ -457,7 +457,7 @@ def run_network_evaluation(
 
     dp = DatasetPaths(dataset or Datasets.DEFAULT)
     selected_models = model_names or Models.ALL
-    rmse_limit = rating_reasonableness_limit(data["Rating"])
+    rmse_limit = rating_reasonableness_limit(cast(pd.Series, data["Rating"]))
     all_results: dict[str, dict[str, list[float]]] = {
         m: {"enhanced": [], "baseline": []} for m in selected_models
     }

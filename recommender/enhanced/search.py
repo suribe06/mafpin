@@ -5,6 +5,7 @@ Optuna-based hyperparameter search and result persistence for enhanced CMF.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -49,7 +50,7 @@ def search_enhanced_params(
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     all_results: list[dict] = []
-    rmse_limit = rating_reasonableness_limit(data["Rating"])
+    rmse_limit = rating_reasonableness_limit(cast(pd.Series, data["Rating"]))
 
     def _objective(trial: optuna.Trial) -> float:
         k_val = trial.suggest_int("k", 5, 50)

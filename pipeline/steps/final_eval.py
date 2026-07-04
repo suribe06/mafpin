@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 
 import mlflow
 
@@ -92,7 +93,7 @@ def run_final_eval(args: argparse.Namespace) -> None:
                 )
                 row["rmse_delta_vs_baseline"] = (
                     baseline_rmse - float(row["rmse"])
-                    if baseline_rmse == baseline_rmse
+                    if not math.isnan(baseline_rmse)
                     else float("nan")
                 )
                 rows.append(row)

@@ -15,8 +15,6 @@ from recommender.baseline import train_final_model
 from recommender.data import evaluate_ranking, evaluate_single_split
 from recommender.enhanced.features import _SCALERS, load_network_features
 from recommender.enhanced.social_regularization import (
-    SocialMode,
-    SocialNormalization,
     build_social_edges,
     fit_social_cmf_model,
 )
@@ -139,7 +137,7 @@ def evaluate_variant_global_test(
             dataset=dataset,
             model_name=model_name,
             network_index=net_idx,
-            user_index=train_df["UserId"].unique(),
+            user_index=list(map(int, train_df["UserId"].unique())),
             mode=spec["social_mode"],  # type: ignore[arg-type]
             beta=float(hyperparameters.get("beta", 0.5)),
             gamma=float(hyperparameters.get("gamma", 1.0)),
