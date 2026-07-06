@@ -135,7 +135,10 @@ MASTER_LOG="${LOG_DIR}/run_all_${STAMP}.log"
 SUMMARY="${LOG_DIR}/run_summary.tsv"
 
 if [[ $DRY_RUN -eq 1 ]]; then
-  : # dry-run does not modify run_summary.tsv
+  if [[ ! -f "$SUMMARY" ]]; then
+    echo -e "step\texit_code\tfinished_at" >"$SUMMARY"
+    echo "# session dry-run at $(date -Iseconds)" >>"$SUMMARY"
+  fi
 elif [[ -n "$FROM_STEP" && -f "$SUMMARY" ]]; then
   echo >>"$SUMMARY"
   echo "# session --from $FROM_STEP at $(date -Iseconds)" >>"$SUMMARY"
@@ -153,6 +156,9 @@ if [[ -z "$MAFPIN_PYTHON" ]] && command -v conda >/dev/null 2>&1; then
   # shellcheck disable=SC1091
   source "$(conda info --base)/etc/profile.d/conda.sh" 2>/dev/null || true
   MAFPIN_PYTHON="$(conda run -n mafpin which python 2>/dev/null | tail -1)"
+fi
+if [[ ! -x "$MAFPIN_PYTHON" ]] && command -v python >/dev/null 2>&1; then
+  MAFPIN_PYTHON="$(command -v python)"
 fi
 if [[ ! -x "$MAFPIN_PYTHON" ]]; then
   echo "Error: mafpin python not found. Set MAFPIN_PYTHON=/path/to/mafpin/bin/python" >&2
