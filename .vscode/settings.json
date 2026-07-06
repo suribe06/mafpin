@@ -1,14 +1,8 @@
 {
   "python.defaultInterpreterPath": "/home/suribe06/anaconda3/envs/mafpin/bin/python",
-  "isort.interpreter": [
-    "/home/suribe06/anaconda3/envs/mafpin/bin/python"
-  ],
-  "python.analysis.exclude": [
-    "cmfrec-master/**"
-  ],
-  "pylint.args": [
-    "--ignore=cmfrec-master"
-  ],
+  "isort.interpreter": ["/home/suribe06/anaconda3/envs/mafpin/bin/python"],
+  "python.analysis.exclude": ["cmfrec-master/**"],
+  "pylint.args": ["--ignore=cmfrec-master"],
   "search.exclude": {
     "cmfrec-master/build": true,
     "cmfrec-master/**/*.so": true
@@ -20,5 +14,11 @@
   "markdown-pdf.margin.left": "12mm",
   "markdown-pdf.margin.right": "12mm",
   "markdown-pdf.printBackground": true,
-  "cmake.sourceDirectory": "/home/suribe06/Documents/Workspaces/GitHub/research/mafpin/cmfrec-master"
+  "cmake.sourceDirectory": "/home/suribe06/Documents/Workspaces/GitHub/research/mafpin/cmfrec-master",
+  "cursorpyright.analysis.exclude": [
+    "cmfrec-master/**"
+  ],
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
+  "python-envs.defaultPackageManager": "ms-python.python:conda",
+  "python-envs.pythonProjects": []
 }

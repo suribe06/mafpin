@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from config import Defaults
-from pipeline._cpu import _resolve_cmf_nthreads
+from pipeline._cpu import _resolve_cmf_nthreads, _cpu_thread_limit
 from pipeline._artifacts import _check_artifact_manifest
 from pipeline._results import _print_best_hyperparams
 
@@ -33,6 +33,11 @@ def run_recommend(args: argparse.Namespace) -> None:
 
     with mlflow.start_run(run_name="recommend"):
         cmf_nthreads = _resolve_cmf_nthreads(args)
+        network_n_jobs = (
+            _cpu_thread_limit(args.cpu_fraction)
+            if args.n_jobs == -1
+            else args.n_jobs
+        )
         mlflow.log_params(
             {
                 "include_communities": args.include_communities,
@@ -49,6 +54,7 @@ def run_recommend(args: argparse.Namespace) -> None:
                 "cmf_maxiter": args.cmf_maxiter,
                 "cmf_nthreads": cmf_nthreads,
                 "cpu_fraction": args.cpu_fraction,
+                "network_eval_n_jobs": network_n_jobs,
                 "social_regularization": args.social_regularization,
                 "social_normalization": args.social_normalization,
             }
@@ -258,7 +264,7 @@ def run_recommend(args: argparse.Namespace) -> None:
             baseline_lambda=best_lambda_b,
             compute_ranking=True,
             dataset=args.dataset,
-            n_jobs=cmf_nthreads if args.n_jobs == -1 else args.n_jobs,
+            n_jobs=network_n_jobs,
             method=args.cmf_method,
             maxiter=args.cmf_maxiter,
             cmf_nthreads=cmf_nthreads,

@@ -235,7 +235,7 @@ def search_social_regularized_params(
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     uses_external_train = train_df is not None
-    train_df, test_df, user_attributes = _prepare_search_data(
+    inner_train, inner_test, user_attributes = _prepare_search_data(
         dataset=dataset,
         model_name=model_name,
         network_index=network_index,
@@ -245,8 +245,8 @@ def search_social_regularized_params(
         train_df=train_df,
     )
     rating_span = float(
-        max(train_df["Rating"].max(), test_df["Rating"].max())
-        - min(train_df["Rating"].min(), test_df["Rating"].min())
+        max(inner_train["Rating"].max(), inner_test["Rating"].max())
+        - min(inner_train["Rating"].min(), inner_test["Rating"].min())
     )
     reasonableness_limit = max(10.0, 10.0 * rating_span)
     all_results: list[dict[str, Any]] = []
@@ -290,8 +290,8 @@ def search_social_regularized_params(
                 raise optuna.exceptions.TrialPruned("no usable social edges")
 
             _, metrics = fit_social_cmf_split(
-                train_df,
-                test_df,
+                inner_train,
+                inner_test,
                 user_attributes,
                 social_edges,
                 k=int(params["k"]),
@@ -392,8 +392,8 @@ def search_social_regularized_params(
         "include_user_attributes": include_user_attributes,
         "max_ratings": max_ratings,
         "test_size": test_size,
-        "train_ratings": int(len(train_df)),
-        "test_ratings": int(len(test_df)),
+        "train_ratings": int(len(inner_train)),
+        "test_ratings": int(len(inner_test)),
         "warm_test_only": True,
         "source_split": "global_train" if uses_external_train else "full_dataset",
         "maxiter": maxiter,

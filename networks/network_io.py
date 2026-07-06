@@ -16,7 +16,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import networkx as nx
-from snap import snap
 
 from config import Paths
 
@@ -95,6 +94,8 @@ def load_as_snap(
     """
     nodes, edges = parse_network_file(network_file)
     mapper = _build_mapper(nodes)
+
+    from snap import snap  # optional; only needed for SNAP centrality batch
 
     G = snap.TNGraph.New()  # type: ignore[attr-defined]  # directed graph
     user_ids = list(mapper.values())

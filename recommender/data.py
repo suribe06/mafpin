@@ -231,6 +231,17 @@ def rating_reasonableness_limit(ratings: pd.Series | np.ndarray) -> float:
     return max(10.0, 10.0 * span)
 
 
+def metrics_are_reasonable(
+    metrics: dict[str, float],
+    ratings: pd.Series | np.ndarray,
+) -> bool:
+    """True when RMSE is finite and on the rating scale (ponytail: shared sanity guard)."""
+    rmse = float(metrics.get("rmse", float("inf")))
+    if not np.isfinite(rmse) or rmse < 0:
+        return False
+    return rmse <= rating_reasonableness_limit(ratings)
+
+
 def evaluate_single_split(
     model,
     test_data: pd.DataFrame,

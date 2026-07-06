@@ -10,7 +10,13 @@ import mlflow
 from config import DatasetPaths, MLflow as MlflowCfg
 from pipeline._cpu import _resolve_cmf_nthreads
 from recommender.baseline import save_search_results, search_baseline_params
-from recommender.data import evaluate_single_split, load_and_split_dataset
+from recommender.data import (
+    evaluate_single_split,
+    load_and_split_dataset,
+    metrics_are_reasonable,
+)
+
+_CANONICAL_TEST_ATTEMPTS = 3
 
 
 def run_canonical_baseline(args: argparse.Namespace) -> None:
@@ -57,16 +63,37 @@ def run_canonical_baseline(args: argparse.Namespace) -> None:
 
         from recommender.baseline import train_final_model
 
-        model = train_final_model(
-            train_df,
-            k=best["k"],
-            lambda_reg=best["lambda_reg"],
-            method=args.cmf_method,
-            maxiter=args.cmf_maxiter,
-            nthreads=cmf_nthreads,
-            random_state=args.seed,
-        )
-        test_metrics = evaluate_single_split(model, test_df)
+        test_metrics: dict[str, float] | None = None
+        candidate: dict[str, float] = {"rmse": float("nan")}
+        for attempt in range(_CANONICAL_TEST_ATTEMPTS):
+            fit_seed = args.seed + attempt
+            if attempt:
+                print(
+                    f"Retrying canonical baseline global test "
+                    f"(attempt {attempt + 1}/{_CANONICAL_TEST_ATTEMPTS}, seed={fit_seed}) …"
+                )
+            model = train_final_model(
+                train_df,
+                k=best["k"],
+                lambda_reg=best["lambda_reg"],
+                method=args.cmf_method,
+                maxiter=args.cmf_maxiter,
+                nthreads=cmf_nthreads,
+                random_state=fit_seed,
+            )
+            candidate = evaluate_single_split(model, test_df)
+            if metrics_are_reasonable(candidate, test_df["Rating"]):
+                test_metrics = candidate
+                break
+
+        if test_metrics is None:
+            last_rmse = candidate["rmse"] if candidate else float("nan")
+            raise RuntimeError(
+                f"Canonical baseline global test metrics degenerate after "
+                f"{_CANONICAL_TEST_ATTEMPTS} attempt(s) (last RMSE={last_rmse}). "
+                "Re-run with --force or a different --seed."
+            )
+
         search["global_test_rmse"] = test_metrics["rmse"]
         search["global_test_mae"] = test_metrics["mae"]
         search["global_test_r2"] = test_metrics["r2"]

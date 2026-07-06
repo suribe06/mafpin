@@ -1,4 +1,23 @@
 [MASTER]
-ignore=cmfrec-master
+ignore=cmfrec-master,articles
+jobs=0
 
 [MESSAGES CONTROL]
+# Research codebase conventions: graph vars (G, M), lazy pipeline imports, config constants.
+disable=
+    invalid-name,
+    import-outside-toplevel,
+    duplicate-code,
+    cyclic-import,
+    missing-module-docstring,
+    missing-function-docstring,
+    missing-class-docstring,
+    too-many-locals,
+    too-many-branches,
+    too-many-arguments,
+    too-many-statements,
+    line-too-long,
+    wrong-import-position
+
+[FORMAT]
+max-line-length=100
