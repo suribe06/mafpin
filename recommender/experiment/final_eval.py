@@ -12,7 +12,11 @@ import pandas as pd
 from config import DatasetPaths, Defaults
 from recommender._cmfrec import CMF
 from recommender.baseline import train_final_model
-from recommender.data import evaluate_ranking, evaluate_single_split
+from recommender.data import (
+    evaluate_ranking,
+    evaluate_single_split,
+    metrics_are_reasonable,
+)
 from recommender.enhanced.features import _SCALERS, load_network_features
 from recommender.enhanced.social_regularization import (
     build_social_edges,
@@ -224,6 +228,40 @@ def evaluate_variant_global_test(
         }
     )
     return row
+
+
+def apply_final_eval_deltas(
+    rows: list[dict[str, Any]],
+    *,
+    canonical_baseline_rmse: float | None = None,
+    ratings: pd.Series | np.ndarray | None = None,
+) -> None:
+    """Set rmse_delta_vs_baseline / rmse_delta_vs_m3 from the same-session M1 row."""
+    m1_rmse = next(
+        (float(r["rmse"]) for r in rows if r.get("model_variant") == "M1"),
+        None,
+    )
+    if m1_rmse is None and canonical_baseline_rmse is not None:
+        candidate = {"rmse": float(canonical_baseline_rmse)}
+        if ratings is None or metrics_are_reasonable(candidate, ratings):
+            m1_rmse = float(canonical_baseline_rmse)
+
+    m3_rmse = next(
+        (float(r["rmse"]) for r in rows if r.get("model_variant") == "M3"),
+        None,
+    )
+    for row in rows:
+        rmse = float(row["rmse"])
+        if m1_rmse is not None and np.isfinite(m1_rmse):
+            row["rmse_delta_vs_baseline"] = m1_rmse - rmse
+        else:
+            row["rmse_delta_vs_baseline"] = float("nan")
+        if row.get("model_variant") == "M3":
+            row["rmse_delta_vs_m3"] = 0.0
+        elif m3_rmse is not None:
+            row["rmse_delta_vs_m3"] = m3_rmse - rmse
+        else:
+            row["rmse_delta_vs_m3"] = float("nan")
 
 
 def append_core_results(rows: list[dict[str, Any]], path: Path) -> None:

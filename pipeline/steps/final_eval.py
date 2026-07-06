@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 
 import mlflow
 
@@ -13,6 +12,7 @@ from pipeline._cpu import _resolve_cmf_nthreads
 from recommender.data import load_and_split_dataset
 from recommender.experiment.final_eval import (
     append_core_results,
+    apply_final_eval_deltas,
     evaluate_variant_global_test,
     load_canonical_baseline,
 )
@@ -86,16 +86,6 @@ def run_final_eval(args: argparse.Namespace) -> None:
                     nthreads=cmf_nthreads,
                     random_state=args.seed,
                 )
-                if variant_id == "M3":
-                    pass  # deltas computed after all variants
-                baseline_rmse = float(
-                    baseline_search.get("global_test_rmse", float("nan"))
-                )
-                row["rmse_delta_vs_baseline"] = (
-                    baseline_rmse - float(row["rmse"])
-                    if not math.isnan(baseline_rmse)
-                    else float("nan")
-                )
                 rows.append(row)
                 print(
                     f"  Global test — RMSE: {row['rmse']:.4f}  "
@@ -112,18 +102,11 @@ def run_final_eval(args: argparse.Namespace) -> None:
                     }
                 )
 
-    m3_rmse = next(
-        (float(r["rmse"]) for r in rows if r.get("model_variant") == "M3"),
-        None,
+    apply_final_eval_deltas(
+        rows,
+        canonical_baseline_rmse=baseline_search.get("global_test_rmse"),
+        ratings=test_df["Rating"],
     )
-    for row in rows:
-        vid = row.get("model_variant")
-        if vid == "M3":
-            row["rmse_delta_vs_m3"] = 0.0
-        elif m3_rmse is not None:
-            row["rmse_delta_vs_m3"] = m3_rmse - float(row["rmse"])
-        else:
-            row["rmse_delta_vs_m3"] = float("nan")
 
     if rows:
         append_core_results(rows, dp.CORE_EXPERIMENT_RESULTS)

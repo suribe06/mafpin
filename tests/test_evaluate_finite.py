@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import unittest
+
 import numpy as np
 import pandas as pd
 
-from recommender.data import evaluate_single_split, rating_reasonableness_limit
+from recommender.data import evaluate_single_split, metrics_are_reasonable, rating_reasonableness_limit
 
 
 class _InfPredictor:
@@ -13,19 +15,23 @@ class _InfPredictor:
         return np.full(len(user), np.inf, dtype=float)
 
 
-def test_evaluate_single_split_non_finite_predictions() -> None:
-    test_df = pd.DataFrame({"UserId": [0, 1], "ItemId": [0, 1], "Rating": [3.0, 4.0]})
-    metrics = evaluate_single_split(_InfPredictor(), test_df)
-    assert metrics["rmse"] == float("inf")
-    assert metrics["mae"] == float("inf")
-    assert metrics["r2"] == float("-inf")
+class EvaluateFiniteTests(unittest.TestCase):
+    def test_evaluate_single_split_non_finite_predictions(self) -> None:
+        test_df = pd.DataFrame({"UserId": [0, 1], "ItemId": [0, 1], "Rating": [3.0, 4.0]})
+        metrics = evaluate_single_split(_InfPredictor(), test_df)
+        self.assertEqual(metrics["rmse"], float("inf"))
+        self.assertEqual(metrics["mae"], float("inf"))
+        self.assertEqual(metrics["r2"], float("-inf"))
 
+    def test_rating_reasonableness_limit(self) -> None:
+        self.assertEqual(rating_reasonableness_limit(pd.Series([0.5, 5.0])), 45.0)
 
-def test_rating_reasonableness_limit() -> None:
-    assert rating_reasonableness_limit(pd.Series([0.5, 5.0])) == 45.0
+    def test_metrics_are_reasonable_rejects_degenerate_rmse(self) -> None:
+        ratings = pd.Series([1.0, 5.0])
+        self.assertTrue(metrics_are_reasonable({"rmse": 0.9}, ratings))
+        self.assertFalse(metrics_are_reasonable({"rmse": 1e28}, ratings))
+        self.assertFalse(metrics_are_reasonable({"rmse": float("inf")}, ratings))
 
 
 if __name__ == "__main__":
-    test_evaluate_single_split_non_finite_predictions()
-    test_rating_reasonableness_limit()
-    print("ok")
+    unittest.main()
