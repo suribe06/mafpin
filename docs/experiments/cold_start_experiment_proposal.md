@@ -1,6 +1,10 @@
 # Propuesta de experimento: cold-start de usuarios
 
-**Estado:** propuesta metodologica, no ejecutada  
+**Estado:** propuesta metodologica + implementacion en `recommender.experiment.cold_start`  
+**Comandos:** ver [cold_start_commands.md](cold_start_commands.md).  
+**Findings:** ver [cold_start_findings.md](cold_start_findings.md).  
+**MovieLens cold strata:** usar `--mode controlled --split leave_k` (leave-last
+deja solo `>10` porque todo usuario tiene ≥20 ratings).  
 **Relacion con el articulo:** experimento adicional para probar si la capa de atributos de red/comunidad/frontera ayuda especialmente cuando el usuario tiene poco historial de ratings.  
 **Modelos objetivo:** M1, M2, M3 y, solo como extension condicionada, M4c/M4d.
 
@@ -31,7 +35,7 @@ Preguntas secundarias:
 
 | ID | Hipotesis | Evidencia esperada |
 | --- | --- | --- |
-| H1 | M3 mejora mas que M1 en usuarios con pocos ratings. | Delta RMSE M3-M1 mas grande en `1-3` y `4-10` que en `>10`. |
+| H1 | M3 mejora a M1 en usuarios con pocos ratings (H1-gain). Opcionalmente, la ganancia es mayor que en warm (H1-stronger). | Δ RMSE M3−M1 > 0 en `1-3`/`4-10` (N≥10). H1-stronger: mean Δ cold > Δ warm. |
 | H2 | M3 supera a M2 en cold-start moderado. | La capa comunidad/frontera aporta mas que centralidad sola. |
 | H3 | M4c/M4d no deben asumirse ganadoras. | Solo se reportan como utiles si superan a M3 por estrato con evidencia estadistica. |
 | H4 | El cold-start puro de 0 ratings requiere atributos externos o sociales. | MovieLens no lo puede resolver con NetInf si el usuario no aparece en train; Ciao podria evaluarlo con trust graph. |
@@ -241,7 +245,8 @@ python -m recommender.experiment.cold_start \
   --output-dir data/ciao/cold_start
 ```
 
-Estas funciones aun no existen; son una propuesta de implementacion para que el experimento quede incorporado al pipeline.
+Estas funciones estan implementadas en `recommender.experiment.cold_start`.
+Ver comandos exactos en [cold_start_commands.md](cold_start_commands.md).
 
 ## 13. Riesgos metodologicos
 
