@@ -144,7 +144,11 @@ def _write_eval_outputs(
         user_strata=user_strata,
         rmse_by_variant=rmse_by_variant,
     )
-    artifacts.write_csv(paths.USER_DELTAS, deltas)
+    artifacts.upsert_frame(
+        paths.USER_DELTAS,
+        deltas,
+        keys=["dataset", "mode", "UserId"],
+    )
     boot = bootstrap_delta_table(
         deltas,
         dataset=dataset,
@@ -152,7 +156,11 @@ def _write_eval_outputs(
         n_samples=bootstrap_samples,
         seed=seed,
     )
-    artifacts.write_csv(paths.BOOTSTRAP_CIS, boot)
+    artifacts.upsert_frame(
+        paths.BOOTSTRAP_CIS,
+        boot,
+        keys=["dataset", "mode", "stratum", "comparison"],
+    )
     artifacts.write_readme(paths, mode=mode, dataset=dataset)
 
 

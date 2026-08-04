@@ -337,7 +337,7 @@ def build_success_summary(
                 "## Scope note",
                 "",
                 "Mode `controlled` rebuilds NetInf under `data/<ds>/cold_start/`. "
-                "Leave-last keeps natural historial depth; on MovieLens that often "
+                "Leave-last keeps natural historical depth; on MovieLens that often "
                 "yields only `>10`. Use `--split leave_k` to force cold strata.",
             ]
         )

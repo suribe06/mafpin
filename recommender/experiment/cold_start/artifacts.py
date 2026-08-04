@@ -52,9 +52,20 @@ Primary tables:
 
 def upsert_results(path: Path, rows: list[dict[str, Any]], keys: list[str]) -> None:
     """Append rows and dedupe on *keys* (keep last)."""
-    df_new = pd.DataFrame(rows)
-    if path.exists():
-        df_old = pd.read_csv(path)
-        df_new = pd.concat([df_old, df_new], ignore_index=True)
-        df_new = df_new.drop_duplicates(subset=keys, keep="last")
-    write_csv(path, df_new)
+    upsert_frame(path, pd.DataFrame(rows), keys)
+
+
+def upsert_frame(path: Path, frame: pd.DataFrame, keys: list[str]) -> None:
+    """Merge *frame* into an existing CSV, deduping on *keys* (keep last).
+
+    Prevents diagnostic/controlled/zero-shot runs from wiping each other's
+    deltas or bootstrap rows when they share ``--output-dir``.
+    """
+    if path.exists() and not frame.empty:
+        old = pd.read_csv(path)
+        frame = pd.concat([old, frame], ignore_index=True)
+        missing = [k for k in keys if k not in frame.columns]
+        if missing:
+            raise ValueError(f"upsert keys missing from frame: {missing}")
+        frame = frame.drop_duplicates(subset=keys, keep="last")
+    write_csv(path, frame)

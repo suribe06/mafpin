@@ -166,6 +166,67 @@ class PathsAndVariantTests(unittest.TestCase):
             self.assertTrue(paths.BASE.exists())
             self.assertEqual(paths.RESULTS.name, "cold_start_results.csv")
 
+    def test_upsert_frame_keeps_other_modes(self) -> None:
+        from pathlib import Path
+        import tempfile
+
+        from recommender.experiment.cold_start.artifacts import upsert_frame
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "boot.csv"
+            upsert_frame(
+                path,
+                pd.DataFrame(
+                    [
+                        {
+                            "dataset": "ml",
+                            "mode": "diagnostic",
+                            "stratum": "1-3",
+                            "comparison": "M3_vs_M1",
+                            "mean_delta": 0.1,
+                        }
+                    ]
+                ),
+                keys=["dataset", "mode", "stratum", "comparison"],
+            )
+            upsert_frame(
+                path,
+                pd.DataFrame(
+                    [
+                        {
+                            "dataset": "ml",
+                            "mode": "controlled",
+                            "stratum": "1-3",
+                            "comparison": "M3_vs_M1",
+                            "mean_delta": 0.2,
+                        }
+                    ]
+                ),
+                keys=["dataset", "mode", "stratum", "comparison"],
+            )
+            # Re-run controlled → replace controlled row, keep diagnostic.
+            upsert_frame(
+                path,
+                pd.DataFrame(
+                    [
+                        {
+                            "dataset": "ml",
+                            "mode": "controlled",
+                            "stratum": "1-3",
+                            "comparison": "M3_vs_M1",
+                            "mean_delta": 0.3,
+                        }
+                    ]
+                ),
+                keys=["dataset", "mode", "stratum", "comparison"],
+            )
+            out = pd.read_csv(path)
+            self.assertEqual(len(out), 2)
+            diag = out[out["mode"] == "diagnostic"]["mean_delta"].iloc[0]
+            ctrl = out[out["mode"] == "controlled"]["mean_delta"].iloc[0]
+            self.assertAlmostEqual(float(diag), 0.1)
+            self.assertAlmostEqual(float(ctrl), 0.3)
+
     def test_cold_start_paths_resolves_relative_output_dir(self) -> None:
         paths = ColdStartPaths("movielens", root="data/movielens/cold_start")
         self.assertTrue(paths.CASCADES.is_absolute())

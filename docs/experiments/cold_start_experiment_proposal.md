@@ -176,20 +176,30 @@ Y una segunda tabla resumida:
 
 ## 10. Criterios de exito
 
-El experimento apoyaria la narrativa cold-start si:
+Criterios alineados con el auto-report (`success_summary.md`) y
+[cold_start_findings.md](cold_start_findings.md):
 
-1. M3 mejora a M1 en `1-3` y/o `4-10` con mayor margen que en `>10`.
-2. M3 mejora a M2 en los estratos cold-start, mostrando que frontera/comunidad aporta mas que centralidad sola.
-3. Los intervalos de confianza de M3-M1 y M3-M2 no son compatibles con una diferencia trivial.
-4. M4c/M4d se reportan solo si mejoran M3; si no, quedan como resultado negativo informativo.
+El experimento **apoya** una narrativa de beneficio de side-info en cold si:
 
-El experimento no apoyaria la narrativa cold-start si:
+1. **H1-gain:** M3 mejora a M1 en `1-3` y/o `4-10` (Δ RMSE > 0, N≥10).
+2. **H2:** M3 mejora a M2 en esos estratos (comunidad/frontera > centralidad sola).
+3. Los CIs bootstrap per-user de M3 vs M1 en cold no cruzan 0.
+4. **H3:** M4c/M4d se reportan solo si mejoran M3; si no, resultado negativo informativo.
 
-1. M3 solo mejora en usuarios warm.
-2. M2 explica todo el beneficio y M3 no agrega nada.
-3. Las mejoras en `1-3` y `4-10` son numericamente pequenas y estadisticamente inciertas.
-4. La cobertura cae demasiado, especialmente en CiaoDVD.
+Criterio **mas fuerte** (opcional, no requerido para la narrativa debil):
 
+5. **H1-stronger:** la ganancia media en cold es mayor que en `>10`. Si H1-gain
+   PASS y H1-stronger FAIL, reportar *beneficio general de side-info*, no
+   amplificacion especifica de cold-start.
+
+El experimento **no apoya** ni siquiera la narrativa debil si:
+
+1. M3 no mejora a M1 en cold (H1-gain FAIL) o solo mejora de forma trivial/incierta.
+2. M2 explica todo el beneficio y M3 no agrega nada de forma consistente.
+3. La cobertura de features cae demasiado, especialmente en CiaoDVD.
+
+**H4** (track aparte, `--mode zero_shot_trust`): M2_trust y/o M3_trust mejoran
+a M1 en estrato `0`. H1/H2 no aplican a ese track.
 ## 11. Artefactos a producir
 
 Para que otro autor pueda reproducir y auditar el experimento, se deben generar:
@@ -219,35 +229,40 @@ Campos minimos de `user_strata.csv`:
 | `has_lph_features` | Si M3 puede construir atributos de comunidad/frontera. |
 | `has_trust_features` | Solo CiaoDVD/Epinions; si existe en grafo de confianza. |
 
-## 12. Comandos propuestos
+## 12. Comandos
 
-Una interfaz deseable seria:
+Interfaz real (detalle en [cold_start_commands.md](cold_start_commands.md)):
 
 ```bash
+# MovieLens: leave-k para poblar estratos cold (usuarios ≥20 ratings)
 python -m recommender.experiment.cold_start \
   --dataset movielens \
-  --split per_user_chrono \
-  --strata 0 1-3 4-10 warm \
+  --mode controlled \
+  --split leave_k \
   --variants M1 M2 M3 M4c M4d \
   --seed 42 \
   --output-dir data/movielens/cold_start
-```
 
-Para CiaoDVD:
-
-```bash
+# Ciao: leave-last (estratos cold naturales) + zero-shot trust
 python -m recommender.experiment.cold_start \
   --dataset ciao \
-  --split per_user_chrono \
-  --strata 0 1-3 4-10 warm \
-  --variants M1 M2 M3 M4c M4d M2_trust M3_trust \
+  --mode controlled \
+  --variants M1 M2 M3 M4c M4d \
+  --seed 42 \
+  --output-dir data/ciao/cold_start
+
+python -m recommender.experiment.cold_start \
+  --dataset ciao \
+  --mode zero_shot_trust \
+  --variants M1 M2_trust M3_trust \
   --seed 42 \
   --output-dir data/ciao/cold_start
 ```
 
-Estas funciones estan implementadas en `recommender.experiment.cold_start`.
-Ver comandos exactos en [cold_start_commands.md](cold_start_commands.md).
-
+Modos: `diagnostic` | `controlled` | `zero_shot_trust` | `report`.
+En `controlled`, `--split` es `leave_last` (default) o `leave_k`.
+Implementacion: `recommender.experiment.cold_start`.
+Findings: [cold_start_findings.md](cold_start_findings.md).
 ## 13. Riesgos metodologicos
 
 **Fuga de informacion.** El riesgo principal es calcular la red inferida, comunidades o LPH usando ratings que luego se usan como test. La regla debe ser estricta: todo atributo de usuario usado por el modelo debe calcularse solo con informacion disponible en train.
@@ -262,13 +277,30 @@ Ver comandos exactos en [cold_start_commands.md](cold_start_commands.md).
 
 ## 14. Redaccion sugerida para el articulo
 
-Si el experimento se ejecuta y M3 mejora en usuarios cold-start:
+Si H1-gain PASS y H1-stronger FAIL (patron observado en Ciao controlled y, debil,
+en MovieLens leave-k):
 
-> The strongest gains of the boundary-aware attribute layer appear in users with limited training history. This supports the interpretation that LPH-derived community-boundary attributes act as useful side information when rating-derived user factors are underdetermined.
+> Network- and community-derived user attributes improve rating prediction for
+> users with limited training history, but the gains are not larger than those
+> observed for warm users. We therefore interpret the attributes as useful
+> general side information under sparsity, rather than as a cold-start-specific
+> amplifier.
 
-Si el experimento no muestra mejora clara:
+Si H1-stronger tambien PASS:
 
-> The cold-start stratification indicates that the current NetInf-derived attributes improve global rating prediction but do not yet solve user cold-start. This is expected for pure zero-rating users, who cannot appear in the inferred cascade network without external side information.
+> The strongest relative gains of the boundary-aware attribute layer appear in
+> users with limited training history, supporting the interpretation that
+> LPH-derived community-boundary attributes act as useful side information when
+> rating-derived user factors are underdetermined.
+
+Si H1-gain FAIL (p.ej. MovieLens leave-k con CIs que cruzan 0):
+
+> Cold-start stratification indicates that NetInf-derived attributes improve
+> global rating prediction in the core evaluation but do not yet yield a
+> statistically reliable cold-user advantage under the leave-k protocol. Pure
+> zero-rating users remain out of reach for NetInf without external side
+> information; on CiaoDVD, explicit trust centrality (M2_trust) provides that
+> signal.
 
 ## 15. Decision editorial
 
