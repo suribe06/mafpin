@@ -167,6 +167,7 @@ def calculate_centrality_for_network(
 
 def calculate_centrality_for_all_models(
     dataset: str | None = None,
+    paths: DatasetPaths | None = None,
 ) -> dict[str, int]:
     """
     Process every inferred network for all three diffusion models.
@@ -175,11 +176,12 @@ def calculate_centrality_for_all_models(
         dataset: Dataset name.  Defaults to ``Datasets.DEFAULT``.  Used to
             locate inferred networks and write centrality outputs into the
             correct dataset-scoped subdirectory.
+        paths: Optional path bundle (e.g. cold-start). Defaults to DatasetPaths.
 
     Returns:
         Dict mapping model name → number of successfully processed files.
     """
-    dp = DatasetPaths(dataset or Datasets.DEFAULT)
+    dp = paths or DatasetPaths(dataset or Datasets.DEFAULT)
     summary: dict[str, int] = {}
     for model_name in Models.ALL:
         model_dir = dp.NETWORKS / model_name

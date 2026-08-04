@@ -77,10 +77,34 @@ VARIANT_SPECS: dict[str, dict[str, Any]] = {
         "social_mode": "boundary_downweight",
         "social_normalization": "normalized_laplacian",
     },
+    "M2_trust": {
+        "run_id": "m2_trust",
+        "log_name": None,
+        "needs_network": False,
+        "social_regularization": False,
+        "include_communities": False,
+        "social_mode": None,
+        "social_normalization": None,
+        "trust_features": True,
+        "trust_include_communities": False,
+    },
+    "M3_trust": {
+        "run_id": "m3_trust",
+        "log_name": None,
+        "needs_network": False,
+        "social_regularization": False,
+        "include_communities": True,
+        "social_mode": None,
+        "social_normalization": None,
+        "trust_features": True,
+        "trust_include_communities": True,
+    },
 }
 
 ALL_VARIANT_IDS: list[str] = list(VARIANT_SPECS.keys())
 CORE_VARIANT_IDS: list[str] = ["M1", "M2", "M3", "M4a", "M4b", "M4c", "M4d"]
+COLD_START_VARIANT_IDS: list[str] = ["M1", "M2", "M3", "M4c", "M4d"]
+TRUST_VARIANT_IDS: list[str] = ["M1", "M2_trust", "M3_trust"]
 
 
 def variant_cli_flags(variant_id: str) -> dict[str, Any]:

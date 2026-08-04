@@ -75,7 +75,7 @@ class FinalEvalTests(unittest.TestCase):
                 return_value=user_attrs,
             ),
             patch(
-                "recommender.experiment.final_eval._train_enhanced_final",
+                "recommender.experiment.final_eval.train_enhanced_final",
                 return_value=fake_model,
             ) as train_mock,
         ):

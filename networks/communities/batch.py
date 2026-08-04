@@ -118,6 +118,7 @@ def calculate_communities_for_all_models(
     dataset: str | None = None,
     symmetrization: str = "union",
     boundary_percentile: float = 20.0,
+    paths: DatasetPaths | None = None,
 ) -> dict[str, int]:
     """
     Detect communities and compute LPH for all inferred networks across all models.
@@ -129,11 +130,12 @@ def calculate_communities_for_all_models(
         dataset:             Dataset name.  Defaults to ``Datasets.DEFAULT``.
         symmetrization:      Directed→undirected conversion method.
         boundary_percentile: Percentile threshold for the ``is_boundary`` flag.
+        paths:               Optional path bundle (cold-start). Defaults to DatasetPaths.
 
     Returns:
         Dict mapping model name → number of successfully processed files.
     """
-    dp = DatasetPaths(dataset or Datasets.DEFAULT)
+    dp = paths or DatasetPaths(dataset or Datasets.DEFAULT)
     summary: dict[str, int] = {}
     for model_name in Models.ALL:
         model_dir = dp.NETWORKS / model_name

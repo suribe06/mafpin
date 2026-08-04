@@ -53,18 +53,30 @@ class SocialEdges:
     max_weight: float
 
 
-def _network_file(dataset: str, model_name: str, network_index: int) -> Path:
+def _network_file(
+    dataset: str,
+    model_name: str,
+    network_index: int,
+    paths: DatasetPaths | None = None,
+) -> Path:
     short = Models.SHORT[model_name]
+    dp = paths or DatasetPaths(dataset)
     return (
-        DatasetPaths(dataset).NETWORKS
+        dp.NETWORKS
         / model_name
         / f"inferred-network-{short}-{network_index:03d}.txt"
     )
 
 
-def _community_file(dataset: str, model_name: str, network_index: int) -> Path:
+def _community_file(
+    dataset: str,
+    model_name: str,
+    network_index: int,
+    paths: DatasetPaths | None = None,
+) -> Path:
+    dp = paths or DatasetPaths(dataset)
     return (
-        DatasetPaths(dataset).COMMUNITIES
+        dp.COMMUNITIES
         / model_name
         / f"communities_{model_name}_{network_index:03d}.csv"
     )
@@ -74,9 +86,10 @@ def load_community_frame(
     dataset: str,
     model_name: str,
     network_index: int,
+    paths: DatasetPaths | None = None,
 ) -> pd.DataFrame:
     """Load the raw community CSV used to derive social edge weights."""
-    path = _community_file(dataset, model_name, network_index)
+    path = _community_file(dataset, model_name, network_index, paths=paths)
     if not path.exists():
         raise FileNotFoundError(f"Community file not found: {path}")
     return pd.read_csv(path).set_index("UserId")
@@ -167,6 +180,7 @@ def build_social_edges(
     symmetrization: str = "union",
     normalization: SocialNormalization = "mean_weight",
     dtype: np.dtype | type = np.float32,
+    paths: DatasetPaths | None = None,
 ) -> SocialEdges:
     """Build weighted upper-triangle social COO arrays for patched cmfrec.
 
@@ -177,6 +191,7 @@ def build_social_edges(
             ``"n_edges"``     — divide by the number of retained edges (alias ``"edges"``).
             ``"normalized_laplacian"`` — apply degree-normalized edge weights.
             ``"none"``        — no normalization (raw weights).
+        paths: Optional path bundle (cold-start root). Defaults to DatasetPaths.
     """
     normalization_aliases = {"mean": "mean_weight", "edges": "n_edges"}
     normalized = normalization_aliases.get(normalization, normalization)
@@ -197,8 +212,10 @@ def build_social_edges(
             f"Unknown model_name {model_name!r}. Choose from {Models.ALL}."
         )
 
-    network_path = _network_file(dataset, model_name, network_index)
-    community_frame = load_community_frame(dataset, model_name, network_index)
+    network_path = _network_file(dataset, model_name, network_index, paths=paths)
+    community_frame = load_community_frame(
+        dataset, model_name, network_index, paths=paths
+    )
     graph, _ = load_as_networkx(network_path)
     graph_u = directed_to_undirected(graph, method=symmetrization)
 
