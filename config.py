@@ -59,6 +59,7 @@ class DatasetPaths:
         self.CORE_EXPERIMENT_RESULTS = base / "core_experiment_results.csv"
         self.CORE_EXPERIMENT_BY_NETWORK = base / "core_experiment_by_network.csv"
         self.LOGS = base / "logs"
+        self.COLD_START = base / "cold_start"
 
 
 class Datasets:

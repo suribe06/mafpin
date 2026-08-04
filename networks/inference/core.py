@@ -78,7 +78,8 @@ def infer_networks(
 
     if cascades_file is None:
         cascades_file = DatasetPaths(Datasets.DEFAULT).CASCADES
-    cascades_file = Path(cascades_file)
+    # Absolute path: NetInf subprocess uses cwd=networks/, so relative -i: breaks.
+    cascades_file = Path(cascades_file).expanduser().resolve()
 
     if not cascades_file.exists():
         print(f"Error: cascades file not found: {cascades_file}")
@@ -88,6 +89,9 @@ def infer_networks(
     if not Paths.NETINF_BIN.exists():
         print(f"Error: NetInf binary not found at {Paths.NETINF_BIN}")
         return False
+
+    if networks_dir is not None:
+        networks_dir = Path(networks_dir).expanduser().resolve()
 
     # -- Determine edge budget k (NetInf -e flag) ----------------------------
     if k_avg_degree is not None:
@@ -191,7 +195,14 @@ def infer_networks(
         output_file = netinf_cwd / f"{output_stem}.txt"
 
         if result.returncode != 0 or not output_file.exists():
-            pbar.write(f"  [{idx:03d}] FAILED (rc={result.returncode})")
+            err = (result.stderr or "").strip()
+            out = (result.stdout or "").strip()
+            hint = ""
+            if "Can not open file" in out or "Can not open file" in err:
+                hint = " (cascade path unreadable from NetInf cwd=networks/)"
+            pbar.write(
+                f"  [{idx:03d}] FAILED (rc={result.returncode}){hint}"
+            )
             edges_count.append(0)
             continue
 

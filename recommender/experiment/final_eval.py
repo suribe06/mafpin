@@ -25,7 +25,7 @@ from recommender.enhanced.social_regularization import (
 from recommender.experiment.variants import VARIANT_SPECS
 
 
-def _train_enhanced_final(
+def train_enhanced_final(
     train_df: pd.DataFrame,
     user_attributes: pd.DataFrame,
     *,
@@ -110,6 +110,10 @@ def evaluate_variant_global_test(
         "baseline_lambda": baseline_params["lambda_reg"],
     }
 
+    if spec.get("trust_features"):
+        raise NotImplementedError(
+            f"{variant_id} is evaluated via recommender.experiment.cold_start"
+        )
     if variant_id == "M1" or not spec["needs_network"]:
         model = train_final_model(
             train_df,
@@ -189,7 +193,7 @@ def evaluate_variant_global_test(
             raise FileNotFoundError(
                 f"Missing features for {model_name} network {net_idx}"
             )
-        model = _train_enhanced_final(
+        model = train_enhanced_final(
             train_df,
             user_attrs,
             k=int(hyperparameters["k"]),

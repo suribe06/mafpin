@@ -28,6 +28,7 @@ def load_network_features(
     include_cascade_stats: bool = True,
     dataset: str | None = None,
     feature_config: "dict[str, bool] | None" = None,
+    paths: DatasetPaths | None = None,
 ) -> pd.DataFrame | None:
     """
     Load centrality (and optionally community and cascade-stats) features for
@@ -49,11 +50,13 @@ def load_network_features(
         feature_config:         Dict mapping feature name → ``bool``.  Columns whose
                                 key is ``False`` are dropped.
                                 Defaults to ``SideUserFeatures.FEATURES``.
+        paths:                  Optional path bundle (e.g. cold-start root). Defaults
+                                to ``DatasetPaths(dataset)``.
 
     Returns:
         Raw feature DataFrame indexed by ``UserId``, or ``None`` if the file is missing.
     """
-    dp = DatasetPaths(dataset or Datasets.DEFAULT)
+    dp = paths or DatasetPaths(dataset or Datasets.DEFAULT)
     index_str = f"{network_index:03d}"
     centrality_dir = dp.CENTRALITY / model_name
     centrality_csv = centrality_dir / f"centrality_metrics_{model_name}_{index_str}.csv"
