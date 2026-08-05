@@ -2,6 +2,8 @@
 
 All plots are generated via `visualization/model_plots.py` and saved to `plots/models/` by default.
 
+Full CLI flag tables: [cli/visualization.md](cli/visualization.md).
+
 ---
 
 ## Quick reference

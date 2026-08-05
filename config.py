@@ -60,6 +60,7 @@ class DatasetPaths:
         self.CORE_EXPERIMENT_BY_NETWORK = base / "core_experiment_by_network.csv"
         self.LOGS = base / "logs"
         self.COLD_START = base / "cold_start"
+        self.ROUTE_B = base / "route_b"
 
 
 class Datasets:
@@ -136,6 +137,7 @@ class Defaults:
     # Community detection
     EPSILON = 0.25  # Demon merge threshold (lower → more communities)
     MIN_COM = 3  # minimum community size kept by Demon
+    COMMUNITY_SEED = 42  # Demon draws from the stdlib RNG; seed it for reproducibility
 
     # Matrix factorization
     K = 20  # number of latent factors

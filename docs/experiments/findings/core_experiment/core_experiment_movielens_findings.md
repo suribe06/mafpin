@@ -1,7 +1,7 @@
 # Core Experiment Findings — MovieLens (Phase 6)
 
 **Analysis date:** 2026-06-30 (updated after Phase 2 `final_eval`)  
-**Protocol:** [core_experiment_plan.md](../core_experiment_plan.md)  
+**Protocol:** [core_experiment_plan.md](../../core_experiment_plan.md)  
 **Primary result file:** `data/movielens/core_experiment_results.csv`  
 **Supporting sources:** Stage A/B logs (`data/movielens/logs/`), `experiment_manifest.json`, `network_selection_results.json`, `canonical_baseline.json`, MLflow (`mlruns/`, experiment `mafpin`)  
 **Dataset:** MovieLens (`ratings_small`), global temporal 80/20 split (80 003 train / 20 001 test), seed 42  
@@ -33,7 +33,7 @@ M3  →  + community / boundary attributes
 M4* →  + social regularisation on the inferred graph (mode a/b/c/d)
 ```
 
-**Planned pairwise comparisons** (see [core_experiment_plan.md](../core_experiment_plan.md)):
+**Planned pairwise comparisons** (see [core_experiment_plan.md](../../core_experiment_plan.md)):
 
 - **M2 vs M1** — value of network-derived centrality features  
 - **M3 vs M2** — value of community/boundary user attributes  
@@ -102,7 +102,7 @@ Phase 2 pipeline steps close the gaps identified in the first analysis pass:
 - `M4c_robustness` (`normalized_laplacian`) has Stage B CV logs only; **no `final_eval` row yet**.
 - SHAP (`shap_results.json`, 2026-05-20) predates this campaign.
 
-Commands to reproduce Phase 2: [core_experiment_commands.md](../core_experiment_commands.md) §10.
+Commands to reproduce Phase 2: [core_experiment_commands.md](../../core_experiment_commands.md) §10.
 
 ---
 
@@ -403,4 +403,4 @@ conda run --no-capture-output -n mafpin python pipeline.py \
   --cmf-method lbfgs --cmf-maxiter 25 --seed 42
 ```
 
-See [core_experiment_commands.md](../core_experiment_commands.md) §10 for full command sequence and per-variant options.
+See [core_experiment_commands.md](../../core_experiment_commands.md) §10 for full command sequence and per-variant options.

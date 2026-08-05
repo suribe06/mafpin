@@ -703,7 +703,10 @@ def call_fit_collective_explicit_lbfgs(
         nvars += <size_t>pbin * <size_t>(k_user + k)
     if Ib.shape[0]:
         nvars += <size_t>qbin * <size_t>(k_item + k)
-    cdef np.ndarray[real_t, ndim=1] values = np.empty(nvars, dtype = c_real_t)
+    # The C side random-initializes only the factor block and fills biases from X,
+    # so bias slots for rows present in U/I but absent from X are never written.
+    # Zero-init instead of np.empty: garbage there is an L-BFGS start point.
+    cdef np.ndarray[real_t, ndim=1] values = np.zeros(nvars, dtype = c_real_t)
 
     cdef np.ndarray[real_t, ndim=2] B_plus_bias = np.empty((0,0), dtype=c_real_t)
     cdef real_t *ptr_B_plus_bias = NULL
@@ -897,7 +900,8 @@ def call_fit_offsets_explicit_lbfgs_internal(
     cdef np.ndarray[real_t, ndim=2] Am = np.empty((m, k_sec+k+k_main), dtype=c_real_t)
     cdef np.ndarray[real_t, ndim=2] Bm = np.empty((n, k_sec+k+k_main), dtype=c_real_t)
 
-    cdef np.ndarray[real_t, ndim=1] values = np.empty(nvars, dtype = c_real_t)
+    # Same uninitialized-bias hazard as the collective L-BFGS path above.
+    cdef np.ndarray[real_t, ndim=1] values = np.zeros(nvars, dtype = c_real_t)
 
     cdef np.ndarray[real_t, ndim=2] Bm_plus_bias = np.empty((0,0), dtype=c_real_t)
     cdef real_t *ptr_Bm_plus_bias = NULL

@@ -1,8 +1,8 @@
 # Cold-start experiment findings
 
 **Analysis date:** 2026-08-04  
-**Protocol:** [cold_start_experiment_proposal.md](cold_start_experiment_proposal.md)  
-**Commands:** [cold_start_commands.md](cold_start_commands.md)  
+**Protocol:** [cold_start_experiment_proposal.md](../../cold_start_experiment_proposal.md)  
+**Commands:** [cold_start_commands.md](../../cold_start_commands.md)
 **Auto summaries:** `data/<ds>/cold_start/success_summary.md` (and `zero_shot_trust/` for Ciao)
 
 This note consolidates the controlled runs after the leave-k / report fixes. Machine-readable tables live under `data/`; this file is the interpretive summary for the paper.

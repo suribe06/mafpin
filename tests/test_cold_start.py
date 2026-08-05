@@ -51,9 +51,9 @@ class StratumTests(unittest.TestCase):
         )
         strata = build_user_strata(train, test)
         by_user = strata.set_index("user_id")
-        self.assertEqual(int(by_user.loc[0, "n_train_ratings"]), 2)
-        self.assertEqual(by_user.loc[0, "stratum"], "1-3")
-        self.assertEqual(int(by_user.loc[2, "n_train_ratings"]), 0)
+        self.assertEqual(int(by_user.at[0, "n_train_ratings"]), 2)
+        self.assertEqual(str(by_user.at[0, "stratum"]), "1-3")
+        self.assertEqual(int(by_user.at[2, "n_train_ratings"]), 0)
         self.assertEqual(by_user.loc[2, "stratum"], "0")
 
 
@@ -73,7 +73,7 @@ class SplitTests(unittest.TestCase):
         train, test = per_user_chrono_split(data, test_frac=0.2)
         # user 0: N=5 → n_test=ceil(1)=1 → last rating in test
         self.assertEqual(len(test[test["UserId"] == 0]), 1)
-        self.assertEqual(int(test[test["UserId"] == 0]["ItemId"].iloc[0]), 5)
+        self.assertEqual(int(pd.Series(test.loc[test["UserId"] == 0, "ItemId"]).iloc[0]), 5)
         self.assertEqual(len(train[train["UserId"] == 0]), 4)
         # user 1: N=1 → all in test
         self.assertTrue(train[train["UserId"] == 1].empty)
@@ -98,7 +98,7 @@ class SplitTests(unittest.TestCase):
         )
         out = dedupe_ratings(data)
         self.assertEqual(len(out), 2)
-        self.assertEqual(float(out.iloc[0]["Rating"]), 4.0)
+        self.assertEqual(float(pd.Series(out["Rating"]).iloc[0]), 4.0)
 
     def test_chrono_stable_tiebreak(self) -> None:
         # Same timestamp: later row order goes later in chrono → last = test.
@@ -222,13 +222,15 @@ class PathsAndVariantTests(unittest.TestCase):
             )
             out = pd.read_csv(path)
             self.assertEqual(len(out), 2)
-            diag = out[out["mode"] == "diagnostic"]["mean_delta"].iloc[0]
-            ctrl = out[out["mode"] == "controlled"]["mean_delta"].iloc[0]
-            self.assertAlmostEqual(float(diag), 0.1)
-            self.assertAlmostEqual(float(ctrl), 0.3)
+            diag = float(pd.Series(out.loc[out["mode"] == "diagnostic", "mean_delta"]).iloc[0])
+            ctrl = float(pd.Series(out.loc[out["mode"] == "controlled", "mean_delta"]).iloc[0])
+            self.assertAlmostEqual(diag, 0.1)
+            self.assertAlmostEqual(ctrl, 0.3)
 
     def test_cold_start_paths_resolves_relative_output_dir(self) -> None:
-        paths = ColdStartPaths("movielens", root="data/movielens/cold_start")
+        from pathlib import Path
+
+        paths = ColdStartPaths("movielens", root=Path("data/movielens/cold_start"))
         self.assertTrue(paths.CASCADES.is_absolute())
         self.assertTrue(str(paths.CASCADES).endswith("data/movielens/cold_start/cascades.txt"))
 

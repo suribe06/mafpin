@@ -14,7 +14,7 @@ from config import DatasetPaths, Paths
 class ColdStartPaths(DatasetPaths):
     """DatasetPaths rooted at ``data/<dataset>/cold_start/``."""
 
-    def __init__(self, dataset: str, root: Path | None = None) -> None:
+    def __init__(self, dataset: str, root: Path | str | None = None) -> None:
         # DatasetPaths.__init__ sets core attrs from data/<dataset>/; override after.
         super().__init__(dataset)
         # Absolute paths are required: NetInf runs with cwd=networks/, so a

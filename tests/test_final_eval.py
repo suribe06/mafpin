@@ -113,6 +113,18 @@ class FinalEvalTests(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["rmse_delta_vs_m3"], 0.0)
         self.assertAlmostEqual(rows[0]["rmse_delta_vs_m3"], -0.01)
 
+    def test_apply_final_eval_deltas_ignores_diverged_reference_rows(self) -> None:
+        rows = [
+            {"model_variant": "M1", "rmse": 0.93, "valid_metric_row": True},
+            {"model_variant": "M3", "rmse": 4.1e20, "valid_metric_row": False},
+            {"model_variant": "M4a", "rmse": 0.92, "valid_metric_row": True},
+        ]
+        apply_final_eval_deltas(rows, ratings=pd.Series([1.0, 5.0]))
+        self.assertAlmostEqual(rows[2]["rmse_delta_vs_baseline"], 0.01)
+        for row in rows:
+            if row["model_variant"] != "M3":
+                self.assertTrue(np.isnan(row["rmse_delta_vs_m3"]))
+
 
 if __name__ == "__main__":
     unittest.main()

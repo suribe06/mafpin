@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from config import DatasetPaths
@@ -92,6 +93,11 @@ def resolve_selected_network(
     selected = entry.get("selected_network")
     if selected:
         return dict(selected)
+    # Soft / trust clones reuse M3 network selection.
+    if variant_id in {"M3_soft", "M2_trust", "M3_trust"}:
+        alt = (variants.get("M3") or {}).get("selected_network")
+        if alt:
+            return dict(alt)
     # Fall back to M3 / first network-bearing variant.
     for key in ("M3", "M2", "M4c", "M4d"):
         alt = (variants.get(key) or {}).get("selected_network")
@@ -161,14 +167,15 @@ def remap_selected_network_to_paths(
     if edge_col in frame.columns and (frame[edge_col] > 0).any():
         usable = frame[frame[edge_col] > 0]
     target = selected.get("alpha_value")
+    usable = usable.reset_index(drop=True)
     if target is None or (isinstance(target, float) and pd.isna(target)):
-        best_i = int(usable.index[0])
+        best_i = 0
     else:
-        alphas = usable["alpha"].to_numpy(dtype=float)
-        best_i = int(usable.index[int((abs(alphas - float(target))).argmin())])
+        alphas = np.asarray(usable["alpha"], dtype=float)
+        best_i = int(np.argmin(np.abs(alphas - float(target))))
     remapped = dict(selected)
     remapped["alpha_index"] = int(best_i)
-    remapped["alpha_value"] = float(usable.loc[best_i, "alpha"])
+    remapped["alpha_value"] = float(usable.iloc[best_i]["alpha"])
     remapped["selection_source"] = (
         f"remapped_from_core_idx_{net_idx}_closest_alpha"
     )

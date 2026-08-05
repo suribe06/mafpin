@@ -173,7 +173,11 @@ def run_hyperparam_campaign(
                 model_name=sample_model_name or models[0],
                 network_index=0,
                 n_trials=social_n_trials,
-                max_ratings=social_search_max_ratings,
+                max_ratings=(
+                    social_search_max_ratings
+                    if social_search_max_ratings is not None
+                    else 5000
+                ),
                 maxiter=cmf_maxiter,
                 random_state=random_state,
                 nthreads=cmf_nthreads,

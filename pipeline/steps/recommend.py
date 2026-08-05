@@ -8,6 +8,9 @@ import sys
 from pipeline._cpu import _resolve_cmf_nthreads, _cpu_thread_limit
 from pipeline._artifacts import _check_artifact_manifest
 from pipeline._results import _print_best_hyperparams
+from typing import cast
+
+from recommender.enhanced.social_regularization import SocialMode
 
 
 def run_recommend(args: argparse.Namespace) -> None:
@@ -157,7 +160,7 @@ def run_recommend(args: argparse.Namespace) -> None:
             maxiter=args.cmf_maxiter,
             cmf_nthreads=cmf_nthreads,
             use_social_regularization=args.social_regularization,
-            social_mode=campaign.social_mode,
+            social_mode=cast(SocialMode, campaign.social_mode),
             lambda_social=campaign.lambda_social,
             social_beta=campaign.social_beta,
             social_gamma=campaign.social_gamma,

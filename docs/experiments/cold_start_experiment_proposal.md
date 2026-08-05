@@ -2,7 +2,7 @@
 
 **Estado:** propuesta metodologica + implementacion en `recommender.experiment.cold_start`  
 **Comandos:** ver [cold_start_commands.md](cold_start_commands.md).  
-**Findings:** ver [cold_start_findings.md](cold_start_findings.md).  
+**Findings:** ver [cold_start_findings.md](findings/cold_start/cold_start_findings.md).  
 **MovieLens cold strata:** usar `--mode controlled --split leave_k` (leave-last
 deja solo `>10` porque todo usuario tiene ≥20 ratings).  
 **Relacion con el articulo:** experimento adicional para probar si la capa de atributos de red/comunidad/frontera ayuda especialmente cuando el usuario tiene poco historial de ratings.  
@@ -177,7 +177,7 @@ Y una segunda tabla resumida:
 ## 10. Criterios de exito
 
 Criterios alineados con el auto-report (`success_summary.md`) y
-[cold_start_findings.md](cold_start_findings.md):
+[cold_start_findings.md](findings/cold_start/cold_start_findings.md):
 
 El experimento **apoya** una narrativa de beneficio de side-info en cold si:
 
@@ -262,7 +262,7 @@ python -m recommender.experiment.cold_start \
 Modos: `diagnostic` | `controlled` | `zero_shot_trust` | `report`.
 En `controlled`, `--split` es `leave_last` (default) o `leave_k`.
 Implementacion: `recommender.experiment.cold_start`.
-Findings: [cold_start_findings.md](cold_start_findings.md).
+Findings: [cold_start_findings.md](findings/cold_start/cold_start_findings.md).
 ## 13. Riesgos metodologicos
 
 **Fuga de informacion.** El riesgo principal es calcular la red inferida, comunidades o LPH usando ratings que luego se usan como test. La regla debe ser estricta: todo atributo de usuario usado por el modelo debe calcularse solo con informacion disponible en train.

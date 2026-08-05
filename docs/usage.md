@@ -2,6 +2,10 @@
 
 This guide walks through each step of the MAFPIN pipeline using `pipeline.py`.
 
+For the full flag reference across **all** entry points (pipeline, networks,
+recommender, experiments, visualization), see [cli/README.md](cli/README.md).
+Pipeline-only options: [cli/pipeline.md](cli/pipeline.md).
+
 ---
 
 ## Quick Start — Full Pipeline
@@ -300,36 +304,17 @@ Adding a new dataset only requires adding an entry to that dict and placing the 
 
 ## CLI Reference
 
-All options accepted by `pipeline.py`:
+The complete, up-to-date flag tables for `pipeline.py` (including Phase-2
+experiment steps, `--k-avg-degree`, `--preregister-networks`, `--run-id`,
+variants, and Route B flags) live in **[cli/pipeline.md](cli/pipeline.md)**.
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--all` | — | Run every step in order (mutually exclusive with `--steps`). |
-| `--steps STEP [STEP ...]` | — | One or more steps to run: `cascade`, `delta`, `inference`, `centrality`, `communities`, `recommend`, `hypertune`, `shap`. |
-| `--dataset {movielens,ciao,epinions}` | `movielens` | Dataset to use. Reads raw files from `datasets/<name>/`. |
-| `--model {exponential,powerlaw,rayleigh}` | *(all)* | Restrict inference/recommendation to a single diffusion model. |
-| `--n-alphas N` | `100` | Number of α values in the NetInf log-spaced grid. |
-| `--max-iter N` | `5000` | Maximum NetInf iterations per network. |
-| `--no-communities` | `False` | Exclude community features from the enhanced/social CMF. Communities are included by default. |
-| `--cmf-method {lbfgs,als}` | `lbfgs` | CMF optimizer used by pipeline recommender fits. Social regularization requires `lbfgs`. |
-| `--cmf-maxiter N` | `25` | L-BFGS iteration budget for CMF fits. |
-| `--cpu-fraction X` | `0.4` | Approximate fraction of detected CPU cores used by CMF/BLAS workloads when `--cmf-nthreads` is not set. |
-| `--cmf-nthreads N` | `0` | Explicit CMF/BLAS thread cap. `0` derives the cap from `--cpu-fraction`. |
-| `--log-file PATH` | `data/<dataset>/pipeline.log` | Tee pipeline stdout/stderr to a log file while preserving terminal output. |
-| `--no-log` | `False` | Disable the pipeline tee log file. |
-| `--social-regularization` | `False` | Enable Phase 6 social-regularized CMF in `recommend`, `hypertune`, and `shap`. |
-| `--social-mode MODE` | `boundary_downweight` | Social edge weighting mode: `uniform`, `community_jaccard`, `boundary_downweight`, or `bridge_preserve`. |
-| `--lambda-social X` | `0.001` | Fallback social regularization strength when no searched params are being used. |
-| `--social-beta X` | `0.5` | Boundary penalty parameter for social edge weighting. |
-| `--social-gamma X` | `1.0` | Shared-community gain parameter for `bridge_preserve`. |
-| `--social-normalization MODE` | `mean_weight` | Social edge normalization strategy: `none`, `mean`, `mean_weight`, `edges`, `n_edges`, `sum_weight`, or `normalized_laplacian`. Aliases `mean` and `edges` map to `mean_weight` and `n_edges`. |
-| `--social-search-max-ratings N` | `5000` | Rating cap for social Optuna search; use `0` to disable the cap. |
-| `--social-n-trials N` | `200` | Optuna trial budget for the larger social CMF search space. |
-| `--sample-networks N` | `5` | Networks sampled per model for the `recommend` step. |
-| `--k-networks N` | `20` | Networks sampled per model for the `shap` step. |
-| `--all-networks` | `False` | Use all available networks for SHAP (overrides `--k-networks`). |
-| `--seed N` | `42` | Random seed for network sampling in SHAP analysis. |
-| `--n-jobs N` | `1` | Worker processes for recommendation network evaluation. Use `-1` to use the CPU cap from `--cpu-fraction`. |
+Index of every CLI in the repo: **[cli/README.md](cli/README.md)**.
+
+Quick check of the installed parser:
+
+```bash
+python -m pipeline --help
+```
 
 ---
 

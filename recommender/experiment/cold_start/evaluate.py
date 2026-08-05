@@ -52,6 +52,9 @@ def _hyperparams_for_variant(
             "k": baseline_params["k"],
             "lambda_reg": baseline_params["lambda_reg"],
         }
+    if variant_id == "M3_soft" and not hp:
+        entry = (manifest.get("variants") or {}).get("M3") or {}
+        hp = dict(entry.get("hyperparameters") or {})
     if not hp:
         # Fall back to M3 / baseline when a variant was never run.
         m3 = ((manifest.get("variants") or {}).get("M3") or {}).get(
@@ -171,6 +174,25 @@ def train_variant_model(
         )
     user_attributes = _align_attrs(user_attributes)
 
+    if spec.get("soft_communities"):
+        from networks.artifacts import NetworkArtifacts
+        from recommender.experiment.route_b.soft_assignment import (
+            merge_soft_into_user_attributes,
+            soft_community_feature_frame,
+        )
+
+        arts = NetworkArtifacts(dataset, paths=paths)
+        com_csv = arts.communities_csv(model_name, net_idx)
+        if not com_csv.exists():
+            raise FileNotFoundError(f"Missing communities for soft assignment: {com_csv}")
+        com = pd.read_csv(com_csv).set_index("UserId")
+        soft = soft_community_feature_frame(
+            train_df,
+            com.reset_index(),
+            user_ids=list(map(int, user_attributes.index)),
+        )
+        user_attributes = merge_soft_into_user_attributes(user_attributes, soft)
+
     if spec["social_regularization"]:
         social_edges = build_social_edges(
             dataset=dataset,
@@ -250,7 +272,7 @@ def metrics_by_stratum(
     rows: list[dict[str, Any]] = []
     for stratum in STRATA_ORDER:
         users = stratum_users.get(stratum, set())
-        mask = test_df["UserId"].isin(users).to_numpy()
+        mask = test_df["UserId"].isin(list(users)).to_numpy()
         n_ratings = int(mask.sum())
         n_users = int(test_df.loc[mask, "UserId"].nunique()) if n_ratings else 0
         if n_ratings == 0:

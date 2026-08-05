@@ -4,6 +4,8 @@ Overlapping community detection algorithms (cdlib wrappers).
 
 from __future__ import annotations
 
+import random
+
 import networkx as nx
 from cdlib import algorithms  # type: ignore[import-untyped]
 
@@ -15,6 +17,7 @@ def detect_overlapping_communities(
     algorithm: str = "demon",
     epsilon: float = Defaults.EPSILON,
     min_community: int = Defaults.MIN_COM,
+    seed: int = Defaults.COMMUNITY_SEED,
 ) -> list[list[int]]:
     """
     Detect overlapping communities in *G*.
@@ -24,6 +27,7 @@ def detect_overlapping_communities(
         algorithm:     ``"demon"`` or ``"aslpaw"``.
         epsilon:       Merging threshold for Demon.
         min_community: Minimum community size for Demon.
+        seed:          Seed for the stdlib RNG the detectors draw from.
 
     Returns:
         List of communities, each community being a list of node IDs.
@@ -31,12 +35,22 @@ def detect_overlapping_communities(
     Raises:
         ValueError: If *algorithm* is not ``"demon"`` or ``"aslpaw"``.
     """
-    if algorithm == "demon":
-        result = algorithms.demon(G, epsilon=epsilon, min_com_size=min_community)
-    elif algorithm == "aslpaw":
-        result = algorithms.aslpaw(G)
-    else:
-        raise ValueError(f"Unknown algorithm: {algorithm!r}. Use 'demon' or 'aslpaw'.")
+    # Demon shuffles nodes and samples labels from the global ``random`` module and
+    # exposes no seed argument, so seeding it here is the only way to get stable
+    # memberships. Restore the caller's state: the pipeline shares this RNG.
+    rng_state = random.getstate()
+    random.seed(seed)
+    try:
+        if algorithm == "demon":
+            result = algorithms.demon(G, epsilon=epsilon, min_com_size=min_community)
+        elif algorithm == "aslpaw":
+            result = algorithms.aslpaw(G)
+        else:
+            raise ValueError(
+                f"Unknown algorithm: {algorithm!r}. Use 'demon' or 'aslpaw'."
+            )
+    finally:
+        random.setstate(rng_state)
 
     return [list(community) for community in result.communities]
 

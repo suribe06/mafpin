@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import networkx as nx
+import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 
@@ -11,13 +12,14 @@ from networks.social import compute_trust_features, load_trust_graph
 
 def encoded_trust_user_ids(user_enc: LabelEncoder, G: nx.DiGraph) -> set[int]:
     """Map raw trust-graph node IDs onto LabelEncoder user IDs."""
-    classes = set(map(int, user_enc.classes_))
+    classes = {int(c) for c in np.asarray(user_enc.classes_).tolist()}
     out: set[int] = set()
     for raw in G.nodes():
         raw_i = int(raw)
         if raw_i not in classes:
             continue
-        out.add(int(user_enc.transform([raw_i])[0]))
+        encoded = user_enc.transform([raw_i])
+        out.add(int(encoded[0]))
     return out
 
 
@@ -26,18 +28,24 @@ def map_trust_features_to_encoded(
     user_enc: LabelEncoder,
 ) -> pd.DataFrame:
     """Reindex trust centrality features onto encoded UserId."""
-    classes = set(map(int, user_enc.classes_))
+    classes = {int(c) for c in np.asarray(user_enc.classes_).tolist()}
     rows = []
     for raw_id, row in trust_df.iterrows():
-        raw_i = int(raw_id)
+        raw_i = int(raw_id)  # type: ignore[arg-type]
         if raw_i not in classes:
             continue
         encoded = int(user_enc.transform([raw_i])[0])
         rows.append({"UserId": encoded, **row.to_dict()})
     if not rows:
-        return pd.DataFrame(
-            columns=["trust_in_degree", "trust_out_degree", "trust_pagerank"]
-        ).rename_axis("UserId")
+        empty = pd.DataFrame(
+            {
+                "trust_in_degree": pd.Series(dtype=float),
+                "trust_out_degree": pd.Series(dtype=float),
+                "trust_pagerank": pd.Series(dtype=float),
+            }
+        )
+        empty.index.name = "UserId"
+        return empty
     frame = pd.DataFrame(rows).set_index("UserId")
     return frame
 
@@ -50,9 +58,14 @@ def _community_boundary_features(G: nx.DiGraph) -> pd.DataFrame:
     """
     undirected = G.to_undirected()
     if undirected.number_of_edges() == 0:
-        return pd.DataFrame(
-            columns=["trust_community_size", "trust_boundary_frac"]
-        ).rename_axis("UserId")
+        empty = pd.DataFrame(
+            {
+                "trust_community_size": pd.Series(dtype=float),
+                "trust_boundary_frac": pd.Series(dtype=float),
+            }
+        )
+        empty.index.name = "UserId"
+        return empty
 
     communities = list(nx.community.greedy_modularity_communities(undirected))
     node_to_com: dict[int, int] = {}
