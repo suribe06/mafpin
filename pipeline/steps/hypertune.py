@@ -15,11 +15,7 @@ def run_hypertune(args: argparse.Namespace) -> None:
 
     from config import DatasetPaths, MLflow as MlflowCfg, Models
     from recommender.data import load_and_split_dataset
-    from recommender.enhanced import (
-        load_network_features,
-        save_enhanced_search_results,
-        search_enhanced_params,
-    )
+    from recommender.enhanced.tuning import run_hyperparam_campaign
 
     dp = DatasetPaths(args.dataset)
     _check_artifact_manifest(args.dataset, context="hyperparameter tuning")
@@ -48,68 +44,35 @@ def run_hypertune(args: argparse.Namespace) -> None:
         _, train_df, _ = load_and_split_dataset(dataset=args.dataset)
         selected_models = [args.model] if args.model else Models.ALL
 
-        sample_features = None
-        sample_model_name = None
-        for _mn in selected_models:
-            sample_features = load_network_features(
-                _mn,
-                0,
-                include_communities=args.include_communities,
-                dataset=args.dataset,
-            )
-            if sample_features is not None:
-                sample_model_name = _mn
-                break
-
-        if sample_features is None:
-            print("No feature files found. Run --steps centrality first.")
-            sys.exit(1)
-
-        if args.social_regularization:
-            from recommender.enhanced.social_search import (
-                search_social_regularized_params,
-            )
-
-            print(
-                f"Searching best social CMF hyperparameters (Optuna TPE) "
-                f"using {sample_model_name} network #000 "
-                f"({args.social_n_trials} trials) …"
-            )
-            enhanced_search = search_social_regularized_params(
-                dataset=args.dataset,
-                model_name=sample_model_name or selected_models[0],
-                network_index=0,
-                n_trials=args.social_n_trials,
-                max_ratings=args.social_search_max_ratings,
-                maxiter=args.cmf_maxiter,
-                random_state=args.seed,
-                nthreads=cmf_nthreads,
-                include_user_attributes=True,
-                social_modes=(args.social_mode,),
-                social_normalization=args.social_normalization,
-                output_path=dp.SOCIAL_RESULTS,
-                train_df=train_df,
-            )
-            _artifact = dp.SOCIAL_RESULTS
-        else:
-            print(
-                f"Searching best enhanced hyperparameters (Optuna TPE — k, "
-                f"lambda_reg, w_main, w_user) using first "
-                f"{sample_model_name} network …"
-            )
-            enhanced_search = search_enhanced_params(
+        try:
+            campaign = run_hyperparam_campaign(
                 train_df,
-                sample_features,
-                n_trials=50,
-                n_splits=3,
-                method=args.cmf_method,
-                maxiter=args.cmf_maxiter,
+                dataset=args.dataset,
+                selected_models=selected_models,
+                include_communities=args.include_communities,
+                social_regularization=args.social_regularization,
+                social_mode=args.social_mode,
+                social_normalization=args.social_normalization,
+                lambda_social=args.lambda_social,
+                social_beta=args.social_beta,
+                social_gamma=args.social_gamma,
+                social_n_trials=args.social_n_trials,
+                social_search_max_ratings=args.social_search_max_ratings,
+                cmf_method=args.cmf_method,
+                cmf_maxiter=args.cmf_maxiter,
                 cmf_nthreads=cmf_nthreads,
                 random_state=args.seed,
+                search_baseline=False,
+                require_features=True,
             )
-            save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
-            _artifact = dp.ENHANCED_RESULTS
+        except (FileNotFoundError, RuntimeError) as exc:
+            print(exc)
+            sys.exit(1)
 
+        enhanced_search = campaign.enhanced_search
+        _artifact = (
+            dp.SOCIAL_RESULTS if args.social_regularization else dp.ENHANCED_RESULTS
+        )
         _print_best_hyperparams(
             "Social CMF" if args.social_regularization else "Enhanced CMF",
             enhanced_search,
@@ -118,7 +81,6 @@ def run_hypertune(args: argparse.Namespace) -> None:
         if _artifact.exists():
             mlflow.log_artifact(str(_artifact))
 
-    # --- plots ---------------------------------------------------------------
     from visualization.model_plots import (
         plot_convergence_analysis,
         plot_hyperparameter_search_results,

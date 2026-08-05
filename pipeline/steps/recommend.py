@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-from config import Defaults
 from pipeline._cpu import _resolve_cmf_nthreads, _cpu_thread_limit
 from pipeline._artifacts import _check_artifact_manifest
 from pipeline._results import _print_best_hyperparams
@@ -16,14 +15,10 @@ def run_recommend(args: argparse.Namespace) -> None:
 
     from config import DatasetPaths, MLflow as MlflowCfg, Models
     from recommender.baseline import save_search_results as _save_baseline
-    from recommender.baseline import search_baseline_params, train_final_model
+    from recommender.baseline import train_final_model
     from recommender.data import evaluate_single_split, load_and_split_dataset
-    from recommender.enhanced import (
-        load_network_features,
-        run_network_evaluation,
-        save_enhanced_search_results,
-        search_enhanced_params,
-    )
+    from recommender.enhanced import run_network_evaluation
+    from recommender.enhanced.tuning import run_hyperparam_campaign
 
     dp = DatasetPaths(args.dataset)
     _check_artifact_manifest(args.dataset, context="recommendation evaluation")
@@ -62,172 +57,67 @@ def run_recommend(args: argparse.Namespace) -> None:
 
         _, train_df, test_df = load_and_split_dataset(dataset=args.dataset)
         selected_models = [args.model] if args.model else Models.ALL
-        selected_social_mode = args.social_mode
-        selected_lambda_social = args.lambda_social
-        selected_social_beta = args.social_beta
-        selected_social_gamma = args.social_gamma
 
-        # Find first available feature file to represent the feature space.
-        sample_features = None
-        sample_model_name = None
-        for _mn in selected_models:
-            sample_features = load_network_features(
-                _mn,
-                0,
-                include_communities=args.include_communities,
+        try:
+            campaign = run_hyperparam_campaign(
+                train_df,
                 dataset=args.dataset,
+                selected_models=selected_models,
+                include_communities=args.include_communities,
+                social_regularization=args.social_regularization,
+                social_mode=args.social_mode,
+                social_normalization=args.social_normalization,
+                lambda_social=args.lambda_social,
+                social_beta=args.social_beta,
+                social_gamma=args.social_gamma,
+                social_n_trials=args.social_n_trials,
+                social_search_max_ratings=args.social_search_max_ratings,
+                cmf_method=args.cmf_method,
+                cmf_maxiter=args.cmf_maxiter,
+                cmf_nthreads=cmf_nthreads,
+                random_state=args.seed,
+                search_baseline=True,
+                require_features=False,
             )
-            if sample_features is not None:
-                sample_model_name = _mn
-                break
+        except RuntimeError as exc:
+            print(exc)
+            sys.exit(1)
 
-        enhanced_search = None
-        if sample_features is not None:
-            # Independent Optuna search for the baseline (k, lambda_reg).
-            print(
-                "Searching best baseline hyperparameters "
-                "(Optuna TPE — k, lambda_reg) …"
-            )
-            with mlflow.start_run(run_name="baseline_search", nested=True):
-                baseline_search = search_baseline_params(
-                    train_df,
-                    n_trials=50,
-                    n_splits=3,
-                    method=args.cmf_method,
-                    maxiter=args.cmf_maxiter,
-                    nthreads=cmf_nthreads,
-                    random_state=args.seed,
-                )
-            best_k_b = baseline_search["best_params"]["k"]
-            best_lambda_b = baseline_search["best_params"]["lambda_reg"]
-            _print_best_hyperparams("Baseline CMF", baseline_search)
-
-            if args.social_regularization:
-                from recommender.enhanced.social_search import (
-                    search_social_regularized_params,
-                )
-
-                print(
-                    f"Searching best social CMF hyperparameters (Optuna TPE) "
-                    f"using {sample_model_name} network #000 "
-                    f"({args.social_n_trials} trials) …"
-                )
-                with mlflow.start_run(run_name="social_search", nested=True):
-                    enhanced_search = search_social_regularized_params(
-                        dataset=args.dataset,
-                        model_name=sample_model_name or selected_models[0],
-                        network_index=0,
-                        n_trials=args.social_n_trials,
-                        max_ratings=args.social_search_max_ratings,
-                        maxiter=args.cmf_maxiter,
-                        random_state=args.seed,
-                        nthreads=cmf_nthreads,
-                        include_user_attributes=True,
-                        social_modes=(args.social_mode,),
-                        social_normalization=args.social_normalization,
-                        output_path=dp.SOCIAL_RESULTS,
-                        train_df=train_df,
-                    )
-                if not enhanced_search["best_params"]:
-                    print("Social hyperparameter search produced no usable trials.")
-                    sys.exit(1)
-            else:
-                # Independent Optuna search for the enhanced model.
-                print(
-                    f"Searching best enhanced hyperparameters (Optuna TPE — k, "
-                    f"lambda_reg, w_main, w_user) using first "
-                    f"{sample_model_name} network …"
-                )
-                with mlflow.start_run(run_name="enhanced_search", nested=True):
-                    enhanced_search = search_enhanced_params(
-                        train_df,
-                        sample_features,
-                        n_trials=50,
-                        n_splits=3,
-                        method=args.cmf_method,
-                        maxiter=args.cmf_maxiter,
-                        cmf_nthreads=cmf_nthreads,
-                        random_state=args.seed,
-                    )
-                save_enhanced_search_results(enhanced_search, path=dp.ENHANCED_RESULTS)
-            best_k_e = enhanced_search["best_params"]["k"]
-            best_lambda_e = enhanced_search["best_params"]["lambda_reg"]
-            best_w_main = enhanced_search["best_params"]["w_main"]
-            best_w_user = enhanced_search["best_params"]["w_user"]
-            if args.social_regularization:
-                selected_social_mode = enhanced_search["best_params"]["social_mode"]
-                selected_lambda_social = enhanced_search["best_params"]["lambda_social"]
-                selected_social_beta = enhanced_search["best_params"]["beta"]
-                selected_social_gamma = enhanced_search["best_params"]["gamma"]
-            _print_best_hyperparams(
-                "Social CMF" if args.social_regularization else "Enhanced CMF",
-                enhanced_search,
-            )
-        else:
+        if campaign.sample_features is None:
             print("No feature files found — using default params.")
-            best_k_b = Defaults.K
-            best_lambda_b = Defaults.LAMBDA_REG
-            best_k_e = Defaults.K
-            best_lambda_e = Defaults.LAMBDA_REG
-            best_w_main = Defaults.W_MAIN
-            best_w_user = Defaults.W_USER
-            baseline_search = {
-                "best_params": {"k": best_k_b, "lambda_reg": best_lambda_b},
-                "all_results": [],
-            }
-            enhanced_search = {
-                "best_params": (
-                    {
-                        "k": best_k_e,
-                        "lambda_reg": best_lambda_e,
-                        "w_main": best_w_main,
-                        "w_user": best_w_user,
-                        "lambda_social": selected_lambda_social,
-                        "social_mode": selected_social_mode,
-                        "beta": selected_social_beta,
-                        "gamma": selected_social_gamma,
-                    }
-                    if args.social_regularization
-                    else {
-                        "k": best_k_e,
-                        "lambda_reg": best_lambda_e,
-                        "w_main": best_w_main,
-                        "w_user": best_w_user,
-                    }
-                ),
-                "all_results": [],
-            }
-            _print_best_hyperparams("Baseline CMF", baseline_search)
-            _print_best_hyperparams(
-                "Social CMF" if args.social_regularization else "Enhanced CMF",
-                enhanced_search,
-            )
+
+        baseline_search = campaign.baseline_search
+        enhanced_search = campaign.enhanced_search
+        _print_best_hyperparams("Baseline CMF", baseline_search)
+        _print_best_hyperparams(
+            "Social CMF" if args.social_regularization else "Enhanced CMF",
+            enhanced_search,
+        )
 
         mlflow.log_params(
             {
-                "k_baseline": best_k_b,
-                "lambda_baseline": best_lambda_b,
-                "k_enhanced": best_k_e,
-                "lambda_enhanced": best_lambda_e,
-                "w_main": best_w_main,
-                "w_user": best_w_user,
-                "social_mode": selected_social_mode,
-                "lambda_social": selected_lambda_social,
-                "social_beta": selected_social_beta,
-                "social_gamma": selected_social_gamma,
+                "k_baseline": campaign.best_k_b,
+                "lambda_baseline": campaign.best_lambda_b,
+                "k_enhanced": campaign.best_k_e,
+                "lambda_enhanced": campaign.best_lambda_e,
+                "w_main": campaign.best_w_main,
+                "w_user": campaign.best_w_user,
+                "social_mode": campaign.social_mode,
+                "lambda_social": campaign.lambda_social,
+                "social_beta": campaign.social_beta,
+                "social_gamma": campaign.social_gamma,
                 "social_normalization": args.social_normalization,
             }
         )
 
-        # Train final baseline model with its own independently tuned k/lambda.
         print(
             f"Training final baseline: method={args.cmf_method}, "
-            f"k={best_k_b}, lambda_reg={best_lambda_b:.4f}"
+            f"k={campaign.best_k_b}, lambda_reg={campaign.best_lambda_b:.4f}"
         )
         baseline_model = train_final_model(
             train_df,
-            k=best_k_b,
-            lambda_reg=best_lambda_b,
+            k=campaign.best_k_b,
+            lambda_reg=campaign.best_lambda_b,
             method=args.cmf_method,
             maxiter=args.cmf_maxiter,
             nthreads=cmf_nthreads,
@@ -246,22 +136,20 @@ def run_recommend(args: argparse.Namespace) -> None:
             }
         )
 
-        # Persist the global test-set baseline RMSE.
         baseline_search["global_test_rmse"] = baseline_metrics["rmse"]
         _save_baseline(baseline_search, path=dp.BASELINE_RESULTS)
 
-        # Enhanced evaluation — pass pre-tuned enhanced params.
         all_results = run_network_evaluation(
             data=train_df,
             model_names=selected_models,
             include_communities=args.include_communities,
             sample_networks=999_999 if args.all_networks else args.sample_networks,
-            k=best_k_e,
-            lambda_reg=best_lambda_e,
-            w_main=best_w_main,
-            w_user=best_w_user,
-            baseline_k=best_k_b,
-            baseline_lambda=best_lambda_b,
+            k=campaign.best_k_e,
+            lambda_reg=campaign.best_lambda_e,
+            w_main=campaign.best_w_main,
+            w_user=campaign.best_w_user,
+            baseline_k=campaign.best_k_b,
+            baseline_lambda=campaign.best_lambda_b,
             compute_ranking=True,
             dataset=args.dataset,
             n_jobs=network_n_jobs,
@@ -269,10 +157,10 @@ def run_recommend(args: argparse.Namespace) -> None:
             maxiter=args.cmf_maxiter,
             cmf_nthreads=cmf_nthreads,
             use_social_regularization=args.social_regularization,
-            social_mode=selected_social_mode,
-            lambda_social=selected_lambda_social,
-            social_beta=selected_social_beta,
-            social_gamma=selected_social_gamma,
+            social_mode=campaign.social_mode,
+            lambda_social=campaign.lambda_social,
+            social_beta=campaign.social_beta,
+            social_gamma=campaign.social_gamma,
             social_normalization=args.social_normalization,
         )
 
@@ -294,7 +182,6 @@ def run_recommend(args: argparse.Namespace) -> None:
             social_path=dp.SOCIAL_RESULTS if args.social_regularization else None,
         )
 
-    # --- plots ---------------------------------------------------------------
     from visualization.model_plots import (
         plot_alpha_delta_rmse,
         plot_alpha_edges,
@@ -310,7 +197,7 @@ def run_recommend(args: argparse.Namespace) -> None:
     for _search, _prefix in [
         (baseline_search, "baseline"),
         (
-            enhanced_search if sample_features is not None else None,
+            enhanced_search if campaign.sample_features is not None else None,
             "social" if args.social_regularization else "enhanced",
         ),
     ]:
