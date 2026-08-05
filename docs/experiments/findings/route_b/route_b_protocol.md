@@ -4,7 +4,7 @@
 
 - **Fecha:** 4 de agosto de 2026 — versión 1.0
 - **Copia PDF entregada:** `protocolo_ruta_B_mafpin.pdf` (generada desde este documento)
-- **Findings relacionados:** [core_experiment_movielens_findings.md](core_experiment_movielens_findings.md) · [core_experiment_ciao_findings.md](core_experiment_ciao_findings.md) · [cold_start_findings.md](cold_start_findings.md)
+- **Findings relacionados:** [core_experiment_movielens_findings.md](../core_experiment/core_experiment_movielens_findings.md) · [core_experiment_ciao_findings.md](../core_experiment/core_experiment_ciao_findings.md) · [cold_start_findings.md](../cold_start/cold_start_findings.md)
 - **Comandos de ejecución:** [route_b_commands.md](route_b_commands.md)
 - **Pre-registro:** [route_b_preregistration.md](route_b_preregistration.md)
 - **Implementación:** branch `feat/route-b-experiments` (`recommender.experiment.route_b`, flags `--beyond-accuracy` / `--save-predictions`, variante cold-start `M3_soft`)
@@ -24,10 +24,10 @@ El protocolo está escrito para quien mantiene el repositorio: cada experimento 
 | M3 gana en test RMSE: −2.4% (MovieLens), −0.42% (Ciao) vs M1 | `core_experiment_*_findings.md` |
 | M3 vs M2 (valor de la capa LPH/comunidades): débil e inconsistente; H2 FAIL en Ciao | ídem |
 | M4c (regularización guiada por frontera) nunca supera a M3 en test RMSE | ídem |
-| H1-stronger (ganancia mayor en cold que en warm): FAIL en ambos datasets | `cold_start_findings.md` |
+| H1-stronger (ganancia mayor en cold que en warm): FAIL en ambos datasets | `findings/cold_start/cold_start_findings.md` |
 | CIs bootstrap cold M3 vs M1 en MovieLens cruzan 0 | ídem |
 | Zero-shot trust: M2_trust +0.125 RMSE (CI limpio); M3_trust **peor** que M2_trust | ídem |
-| M4c tiene el **mejor NDCG@10** en MovieLens pese a mal RMSE | `core_experiment_movielens_findings.md` §3.2 |
+| M4c tiene el **mejor NDCG@10** en MovieLens pese a mal RMSE | `findings/core_experiment/core_experiment_movielens_findings.md` §3.2 |
 
 **Diagnóstico que motiva la Ruta B:** las hipótesis se evaluaron casi exclusivamente en *error de rating global* (RMSE/MAE). La teoría de la fusión predice efectos en (a) **exposición intercomunitaria y diversidad** del ranking, y (b) **subpoblaciones de usuarios frontera**, no necesariamente en el promedio global. Además, nunca se verificó la **precondición** de la que depende $\tilde{h}_v$ según el propio paper de Appl. Sci.: la calidad y estabilidad de las comunidades detectadas sobre redes NetInf.
 
@@ -35,11 +35,11 @@ La Ruta B se organiza en **5 paquetes de trabajo (WP1–WP5)** más un árbol de
 
 ## 2. Reglas de higiene experimental (obligatorias en todos los WP)
 
-1. **Pre-registro.** Antes de ejecutar cualquier corrida, copiar las hipótesis B1–B5 y los umbrales de la sección 3 a un archivo `docs/experiments/route_b_preregistration.md`, con fecha y hash del commit. Los umbrales **no se modifican después de ver resultados**.
+1. **Pre-registro.** Antes de ejecutar cualquier corrida, copiar las hipótesis B1–B5 y los umbrales de la sección 3 a un archivo `docs/experiments/findings/route_b/route_b_preregistration.md`, con fecha y hash del commit. Los umbrales **no se modifican después de ver resultados**.
 2. **Congelamiento.** No se re-tunean hiperparámetros ni se re-seleccionan redes. Se reutilizan `experiment_manifest.json`, `canonical_baseline.json` y `network_selection_results.json` de la campaña core de cada dataset. Las métricas nuevas se calculan sobre **los mismos modelos congelados**.
 3. **Trazabilidad.** Cada corrida usa `--log-file` propio bajo `data/<dataset>/logs/route_b/` y `--run-id` propio. MLflow sigue activo; etiquetar corridas con `route_b` y `wp<k>`.
 4. **Estadística.** Toda afirmación comparativa se soporta con: (i) *deltas pareados per-user* con **CI bootstrap percentil al 95 % (1 000 remuestreos)** — reutilizar la implementación de `recommender/experiment/cold_start/evaluate.py` —, y (ii) **Wilcoxon de rangos con signo pareado** con corrección de **Holm** sobre la familia de comparaciones pre-registradas.
-5. **Sin selección de resultados.** Todos los resultados (positivos, nulos, negativos) se registran en `docs/experiments/route_b_wp<k>_findings.md`, con veredicto explícito contra los criterios pre-registrados.
+5. **Sin selección de resultados.** Todos los resultados (positivos, nulos, negativos) se registran en `docs/experiments/findings/route_b/route_b_wp<k>_findings.md`, con veredicto explícito contra los criterios pre-registrados.
 6. **Una trampa conocida a vigilar.** En MovieLens, M4a/M4b colapsan en ranking manteniendo RMSE decente. Una "mejora de diversidad" acompañada de colapso de accuracy **no cuenta como éxito** (ver umbral de guardia en WP1).
 
 ## 3. Hipótesis pre-registradas de la Ruta B
@@ -113,7 +113,7 @@ conda run --no-capture-output -n mafpin python pipeline.py \
 | `data/<ds>/route_b/beyond_accuracy_results.csv` | 1 fila por variante × métrica (globales + media per-user) |
 | `data/<ds>/route_b/beyond_accuracy_per_user.parquet` | valores per-user (insumo del bootstrap y de WP2) |
 | `data/<ds>/route_b/beyond_accuracy_bootstrap.csv` | CIs 95 % de deltas pareados per-user: M3−M2, M4c−M3, M4d−M3, M3−M1 |
-| `docs/experiments/route_b_wp1_findings.md` | tablas + veredicto contra criterios |
+| `docs/experiments/findings/route_b/route_b_wp1_findings.md` | tablas + veredicto contra criterios |
 
 ### 4.5. Qué debería verse para que la ruta sea viable (criterios WP1)
 
@@ -162,7 +162,7 @@ conda run --no-capture-output -n mafpin python -m recommender.experiment.boundar
 | `data/<ds>/route_b/boundary_strata_results.csv` | RMSE por variante × estrato (N usuarios y N ratings por celda) |
 | `data/<ds>/route_b/boundary_strata_bootstrap.csv` | CIs de deltas pareados por estrato |
 | `data/<ds>/route_b/cross_community_items_results.csv` | RMSE en subconjunto cross-community |
-| `docs/experiments/route_b_wp2_findings.md` | tablas + veredicto |
+| `docs/experiments/findings/route_b/route_b_wp2_findings.md` | tablas + veredicto |
 
 ### 5.5. Qué debería verse para que la ruta sea viable (criterios WP2)
 
@@ -193,7 +193,7 @@ conda run --no-capture-output -n mafpin python scripts/route_b_wp3_community_sta
 
 ### 6.3. Artefactos esperados
 
-`data/<ds>/route_b/community_stability.csv` (una fila por par de configuraciones comparadas: ρ Spearman, Jaccard B10, métricas de calidad) y `docs/experiments/route_b_wp3_findings.md`.
+`data/<ds>/route_b/community_stability.csv` (una fila por par de configuraciones comparadas: ρ Spearman, Jaccard B10, métricas de calidad) y `docs/experiments/findings/route_b/route_b_wp3_findings.md`.
 
 ### 6.4. Qué debería verse (criterios WP3 — precondición, no GO/NO-GO de publicación)
 
@@ -245,7 +245,7 @@ conda run --no-capture-output -n mafpin python -m recommender.experiment.cold_st
 
 ### 7.4. Artefactos esperados
 
-`data/<ds>/route_b/external_baselines_results.csv`, `data/epinions/core_experiment_results.csv`, `data/<ds>/route_b/multiseed_results.csv`, y `docs/experiments/route_b_wp4_findings.md`.
+`data/<ds>/route_b/external_baselines_results.csv`, `data/epinions/core_experiment_results.csv`, `data/<ds>/route_b/multiseed_results.csv`, y `docs/experiments/findings/route_b/route_b_wp4_findings.md`.
 
 ### 7.5. Qué debería verse para que la ruta sea viable (criterios WP4)
 
@@ -285,7 +285,7 @@ conda run --no-capture-output -n mafpin python -m recommender.experiment.cold_st
 
 ```
         ┌────────────┐
-        │ Pre-registro│  docs/experiments/route_b_preregistration.md
+        │ Pre-registro│  docs/experiments/findings/route_b/route_b_preregistration.md
         └──────┬─────┘
      ┌─────────┴──────────┐
      ▼                    ▼
@@ -310,7 +310,7 @@ conda run --no-capture-output -n mafpin python -m recommender.experiment.cold_st
 
 ## 11. Registro de resultados
 
-1. Cada WP produce `docs/experiments/route_b_wp<k>_findings.md` con: fecha, commit, comandos exactos, tablas, y **veredicto explícito** (GO fuerte / GO débil / GO parcial / NO-GO) citando los umbrales de este protocolo.
+1. Cada WP produce `docs/experiments/findings/route_b/route_b_wp<k>_findings.md` con: fecha, commit, comandos exactos, tablas, y **veredicto explícito** (GO fuerte / GO débil / GO parcial / NO-GO) citando los umbrales de este protocolo.
 2. Artefactos tabulares bajo `data/<dataset>/route_b/` (nunca sobrescribir artefactos de la campaña core).
 3. MLflow: tags `route_b=true`, `wp=<k>`.
 4. Al cierre: `docs/experiments/route_b_decision.md` con la rama del árbol de WP6 elegida y su justificación.
@@ -343,7 +343,7 @@ $$\mathrm{CCE@}K(u) = \frac{1}{K}\sum_{i \in \mathrm{top}K(u)} \mathbf{1}\left[D
 
 **Estratos de frontera.** Percentiles de $\tilde{h}_v$ calculados **solo entre usuarios presentes en la red congelada de M3**: B10 $= \{u : \tilde{h}_u \leq P_{10}\}$, B25, MID $= (P_{25}, P_{75})$, E75 $= \{u : \tilde{h}_u \geq P_{75}\}$.
 
-## Apéndice B — Checklist de pre-registro (copiar a `route_b_preregistration.md`)
+## Apéndice B — Checklist de pre-registro (copiar a `route_b/route_b_preregistration.md`)
 
 - [ ] Fecha, autor y hash del commit del código con el que se ejecutará.
 - [ ] Hipótesis B1–B5 copiadas literalmente con sus umbrales.

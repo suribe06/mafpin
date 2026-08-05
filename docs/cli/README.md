@@ -29,7 +29,7 @@ Narrative walkthroughs (when to run what) live elsewhere:
 - [Usage guide](../usage.md) — step-by-step pipeline tutorial
 - [Core experiment commands](../experiments/core_experiment_commands.md)
 - [Cold-start commands](../experiments/cold_start_commands.md)
-- [Route B commands](../experiments/route_b_commands.md)
+- [Route B commands](../experiments/findings/route_b/route_b_commands.md)
 - [Visualization guide](../visualization.md)
 
 ---

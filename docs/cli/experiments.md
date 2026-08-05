@@ -8,7 +8,7 @@ experiment docs; this page documents **flags and invocation**.
 | --- | --- |
 | [core_experiment_plan.md](../experiments/core_experiment_plan.md) | [core_experiment_commands.md](../experiments/core_experiment_commands.md) |
 | [cold_start_experiment_proposal.md](../experiments/cold_start_experiment_proposal.md) | [cold_start_commands.md](../experiments/cold_start_commands.md) |
-| [route_b_protocol.md](../experiments/route_b_protocol.md) | [route_b_commands.md](../experiments/route_b_commands.md) |
+| [route_b_protocol.md](../experiments/findings/route_b/route_b_protocol.md) | [route_b_commands.md](../experiments/findings/route_b/route_b_commands.md) |
 
 ---
 
@@ -134,7 +134,7 @@ python -m recommender.experiment.route_b.boundary_strata \
 | `--variants` | IDs… | `M1 M2 M3 M4c M4d` | Variants to analyse. |
 
 Requires predictions from pipeline `final_eval` with `--save-predictions`.
-Protocol: [route_b_protocol.md](../experiments/route_b_protocol.md).
+Protocol: [route_b_protocol.md](../experiments/findings/route_b/route_b_protocol.md).
 
 > **Note:** Older notes may say `python -m recommender.experiment.boundary_strata`.
 > The module path is `recommender.experiment.route_b.boundary_strata`.

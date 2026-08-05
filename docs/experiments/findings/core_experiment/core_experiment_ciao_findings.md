@@ -1,7 +1,7 @@
 # Core Experiment Findings — Ciao (Phase 6)
 
 **Analysis date:** 2026-07-06 (Phase 2 refresh: `canonical_baseline --force` + `final_eval`, incl. `M4c_robustness`)  
-**Protocol:** [core_experiment_plan.md](../core_experiment_plan.md)  
+**Protocol:** [core_experiment_plan.md](../../core_experiment_plan.md)  
 **Primary result file:** `data/ciao/core_experiment_results.csv`  
 **Supporting sources:** Stage A/B logs (`data/ciao/logs/`), `experiment_manifest.json`, `network_selection_results.json`, `canonical_baseline.json`  
 **Dataset:** CiaoDVD, global temporal 80/20 split (28 852 train / 7 213 test), 2 248 users, 16 861 items, 36 065 ratings, seed 42  
@@ -33,7 +33,7 @@ M3  →  + community / boundary attributes
 M4* →  + social regularisation on the inferred graph (mode a/b/c/d)
 ```
 
-**Planned pairwise comparisons** (see [core_experiment_plan.md](../core_experiment_plan.md)):
+**Planned pairwise comparisons** (see [core_experiment_plan.md](../../core_experiment_plan.md)):
 
 - **M2 vs M1** — value of network-derived centrality features  
 - **M3 vs M2** — value of community/boundary user attributes  
@@ -101,7 +101,7 @@ Phase 2 pipeline steps match MovieLens:
 
 **Run configuration:** `--cmf-method lbfgs --cmf-maxiter 25 --n-jobs 1 --seed 42` throughout Stage B (sequential network evaluation). Batch via `./scripts/run_core_experiment.sh --dataset ciao`.
 
-Commands to reproduce Phase 2: [core_experiment_commands.md](../core_experiment_commands.md) §10.
+Commands to reproduce Phase 2: [core_experiment_commands.md](../../core_experiment_commands.md) §10.
 
 ---
 
@@ -452,4 +452,4 @@ $HOME/anaconda3/envs/mafpin/bin/python pipeline.py \
   --cmf-method lbfgs --cmf-maxiter 25 --seed 42
 ```
 
-See [core_experiment_commands.md](../core_experiment_commands.md) §10 for the full command sequence.
+See [core_experiment_commands.md](../../core_experiment_commands.md) §10 for the full command sequence.

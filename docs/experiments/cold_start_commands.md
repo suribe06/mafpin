@@ -3,7 +3,7 @@
 Comandos para el plan en [cold_start_experiment_proposal.md](cold_start_experiment_proposal.md).
 Implementación: `python -m recommender.experiment.cold_start`.
 Referencia de flags: [cli/experiments.md](../cli/experiments.md#cold-start--python--m-recommenderexperimentcold_start).
-**Findings (interpretación):** [cold_start_findings.md](cold_start_findings.md).
+**Findings (interpretación):** [cold_start_findings.md](findings/cold_start/cold_start_findings.md).
 
 Ejecutar desde la raíz del repo:
 

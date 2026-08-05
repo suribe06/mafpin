@@ -1,7 +1,7 @@
 # Ciao Explicit Trust Graph — Suggestions & Future Work
 
 **Status:** Proposal (post core experiment refresh, 2026-07-06)  
-**Related:** [core_experiment_ciao_findings.md](core_experiment_ciao_findings.md), [core_experiment_movielens_findings.md](core_experiment_movielens_findings.md), `networks/social.py`, `datasets/ciao/trust.txt`
+**Related:** [core_experiment_ciao_findings.md](findings/core_experiment/core_experiment_ciao_findings.md), [core_experiment_movielens_findings.md](findings/core_experiment/core_experiment_movielens_findings.md), `networks/social.py`, `datasets/ciao/trust.txt`
 
 ---
 

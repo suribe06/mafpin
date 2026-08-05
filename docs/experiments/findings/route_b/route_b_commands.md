@@ -2,7 +2,7 @@
 
 Protocolo: [route_b_protocol.md](route_b_protocol.md)  
 Pre-registro: [route_b_preregistration.md](route_b_preregistration.md)  
-Referencia de flags: [cli/experiments.md](../cli/experiments.md)  
+Referencia de flags: [cli/experiments.md](../../../cli/experiments.md)  
 Branch de implementación: `feat/route-b-experiments`
 
 Ejecutar desde la raíz del repo:
@@ -20,7 +20,7 @@ Artefactos bajo `data/<dataset>/route_b/` (no pisan el core).
 
 ## 0 — Pre-registro
 
-1. Edita `docs/experiments/route_b_preregistration.md`
+1. Edita `docs/experiments/findings/route_b/route_b_preregistration.md`
 2. Pon el hash: `git rev-parse HEAD`
 3. No cambies umbrales después de ver resultados
 
@@ -172,8 +172,8 @@ conda run --no-capture-output -n mafpin python -m unittest \
 
 Tras WP1+WP2+WP3, escribir:
 
-- `docs/experiments/route_b_wp1_findings.md`
-- `docs/experiments/route_b_wp2_findings.md`
-- `docs/experiments/route_b_wp3_findings.md`
+- `docs/experiments/findings/route_b/route_b_wp1_findings.md`
+- `docs/experiments/findings/route_b/route_b_wp2_findings.md`
+- `docs/experiments/findings/route_b/route_b_wp3_findings.md`
 
 y decidir GO / NO-GO antes de WP4.
