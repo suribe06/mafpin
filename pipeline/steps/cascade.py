@@ -6,43 +6,24 @@ import argparse
 
 
 def run_cascade(args: argparse.Namespace) -> None:
-    import pandas as pd
-
     from config import DatasetPaths, Datasets, Split
     from networks.cascades import generate_cascades_from_df, compute_cascade_user_stats
-    from recommender.data import split_data_temporal, split_data_single
+    from recommender.data import load_and_split_dataset
     from pipeline._artifacts import _write_artifact_manifest
 
     ds_name = args.dataset
     cfg = Datasets.CONFIG[ds_name]
     csv_path = Datasets.ROOT / ds_name / cfg["file"]
-    cols = [cfg["col_user"], cfg["col_item"], cfg["col_rating"], cfg["col_time"]]
-    df = pd.read_csv(  # type: ignore[call-overload]
-        csv_path,
-        sep=cfg["sep"],
-        header=cfg["header"],
-        usecols=cols,  # type: ignore[call-overload]
-        engine="python",
-    )
-    df.columns = pd.Index(["UserId", "ItemId", "Rating", "timestamp"])
 
-    # Apply the global split respecting config.Split.STRATEGY so that NetInf
-    # learns only from training interactions.  Pass all_user_ids=df["UserId"]
-    # so the cascade header declares the full user-ID space, keeping compact
-    # network IDs aligned with LabelEncoder (C-3 fix).
-    if Split.STRATEGY == "temporal":
-        train_df, test_df = split_data_temporal(df, test_size=Split.TEST_SIZE)
-    else:
-        train_df, test_df = split_data_single(
-            df, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
-        )
+    # One encoding path: LabelEncoder UserId/ItemId match recommender + NetInf
+    # compact IDs (C-3). Cascades are written from the encoded train split.
+    full_df, train_df, test_df = load_and_split_dataset(dataset=ds_name)
     generate_cascades_from_df(
         train_df,
-        all_user_ids=df["UserId"],
+        all_user_ids=full_df["UserId"],
         output_file=DatasetPaths(ds_name).CASCADES,
     )
 
-    # Persist split config so downstream steps can detect stale artifacts.
     temporal_cutoff = None
     if Split.STRATEGY == "temporal" and not train_df.empty:
         temporal_cutoff = train_df["timestamp"].max()
@@ -53,9 +34,9 @@ def run_cascade(args: argparse.Namespace) -> None:
         source_path=csv_path,
         train_rows=len(train_df),
         test_rows=len(test_df),
-        total_rows=len(df),
-        n_users=int(df["UserId"].nunique()),
-        n_items=int(df["ItemId"].nunique()),
+        total_rows=len(full_df),
+        n_users=int(full_df["UserId"].nunique()),
+        n_items=int(full_df["ItemId"].nunique()),
         temporal_cutoff=temporal_cutoff,
     )
 

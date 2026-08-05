@@ -8,7 +8,6 @@ social edges as COO arrays through ``CMF(lambda_social=..., social_row=...)``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -16,6 +15,7 @@ import pandas as pd
 import scipy.sparse as sp
 
 from config import DatasetPaths, Defaults, Models
+from networks.artifacts import NetworkArtifacts
 from networks.network_io import directed_to_undirected, load_as_networkx
 from recommender._cmfrec import CMF  # type: ignore[attr-defined]
 from recommender.data import evaluate_single_split
@@ -53,33 +53,8 @@ class SocialEdges:
     max_weight: float
 
 
-def _network_file(
-    dataset: str,
-    model_name: str,
-    network_index: int,
-    paths: DatasetPaths | None = None,
-) -> Path:
-    short = Models.SHORT[model_name]
-    dp = paths or DatasetPaths(dataset)
-    return (
-        dp.NETWORKS
-        / model_name
-        / f"inferred-network-{short}-{network_index:03d}.txt"
-    )
-
-
-def _community_file(
-    dataset: str,
-    model_name: str,
-    network_index: int,
-    paths: DatasetPaths | None = None,
-) -> Path:
-    dp = paths or DatasetPaths(dataset)
-    return (
-        dp.COMMUNITIES
-        / model_name
-        / f"communities_{model_name}_{network_index:03d}.csv"
-    )
+def _artifacts(dataset: str, paths: DatasetPaths | None = None) -> NetworkArtifacts:
+    return NetworkArtifacts(dataset, paths=paths)
 
 
 def load_community_frame(
@@ -89,7 +64,7 @@ def load_community_frame(
     paths: DatasetPaths | None = None,
 ) -> pd.DataFrame:
     """Load the raw community CSV used to derive social edge weights."""
-    path = _community_file(dataset, model_name, network_index, paths=paths)
+    path = _artifacts(dataset, paths).communities_csv(model_name, network_index)
     if not path.exists():
         raise FileNotFoundError(f"Community file not found: {path}")
     return pd.read_csv(path).set_index("UserId")
@@ -212,7 +187,7 @@ def build_social_edges(
             f"Unknown model_name {model_name!r}. Choose from {Models.ALL}."
         )
 
-    network_path = _network_file(dataset, model_name, network_index, paths=paths)
+    network_path = _artifacts(dataset, paths).network_txt(model_name, network_index)
     community_frame = load_community_frame(
         dataset, model_name, network_index, paths=paths
     )

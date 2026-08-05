@@ -129,28 +129,33 @@ def remap_selected_network_to_paths(
     closest ``alpha`` in ``inferred_edges_*.csv`` (needed when cold-start
     smoke runs use ``--n-alphas`` smaller than the core grid).
     """
-    from config import Models
+    from networks.artifacts import NetworkArtifacts
 
     if not selected:
         raise ValueError("selected_network is required")
     model_name = selected["diffusion_model"]
-    short = Models.SHORT[model_name]
     net_idx = int(selected["alpha_index"])
-    model_dir = paths.NETWORKS / model_name
-    exact = model_dir / f"inferred-network-{short}-{net_idx:03d}.txt"
+    # ColdStartPaths.BASE.name is "cold_start"; prefer dataset from paths.BASE parent.
+    dataset = getattr(paths, "BASE", paths.NETWORKS).parent.name
+    if dataset == "cold_start":
+        dataset = paths.BASE.parent.name
+    arts = NetworkArtifacts(dataset, paths=paths)
+    exact = arts.network_txt(model_name, net_idx)
     if exact.exists():
         return dict(selected)
 
-    edges_csv = model_dir / f"inferred_edges_{short}.csv"
+    edges_csv = arts.inferred_edges_csv(model_name)
     if not edges_csv.exists():
         raise FileNotFoundError(
-            f"Missing cold-start networks for {model_name} under {model_dir}. "
+            f"Missing cold-start networks for {model_name} under {paths.NETWORKS / model_name}. "
             "Re-run controlled without --skip-rebuild."
         )
     frame = pd.read_csv(edges_csv, sep="|")
     if "alpha" not in frame.columns or frame.empty:
         raise FileNotFoundError(f"Empty alpha grid in {edges_csv}")
-    # Prefer rows that actually produced edges when the column exists.
+    from config import Models
+
+    short = Models.SHORT[model_name]
     edge_col = f"inferred_edges_{short}"
     usable = frame
     if edge_col in frame.columns and (frame[edge_col] > 0).any():
@@ -167,7 +172,7 @@ def remap_selected_network_to_paths(
     remapped["selection_source"] = (
         f"remapped_from_core_idx_{net_idx}_closest_alpha"
     )
-    target_file = model_dir / f"inferred-network-{short}-{best_i:03d}.txt"
+    target_file = arts.network_txt(model_name, best_i)
     if not target_file.exists():
         raise FileNotFoundError(
             f"Remapped network missing: {target_file} "

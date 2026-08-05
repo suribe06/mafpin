@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler
 
 from config import DatasetPaths, Datasets, SideUserFeatures
+from networks.artifacts import NetworkArtifacts
 
 # Scaler type alias used inside the per-split loop.
 # WARNING: "normalizer" uses sklearn.preprocessing.Normalizer, which normalises
@@ -56,10 +57,10 @@ def load_network_features(
     Returns:
         Raw feature DataFrame indexed by ``UserId``, or ``None`` if the file is missing.
     """
-    dp = paths or DatasetPaths(dataset or Datasets.DEFAULT)
-    index_str = f"{network_index:03d}"
-    centrality_dir = dp.CENTRALITY / model_name
-    centrality_csv = centrality_dir / f"centrality_metrics_{model_name}_{index_str}.csv"
+    ds = dataset or Datasets.DEFAULT
+    dp = paths or DatasetPaths(ds)
+    arts = NetworkArtifacts(ds, paths=dp)
+    centrality_csv = arts.centrality_csv(model_name, network_index)
 
     if not centrality_csv.exists():
         return None
@@ -67,8 +68,7 @@ def load_network_features(
     df = pd.read_csv(centrality_csv)
 
     if include_communities:
-        community_dir = dp.COMMUNITIES / model_name
-        community_csv = community_dir / f"communities_{model_name}_{index_str}.csv"
+        community_csv = arts.communities_csv(model_name, network_index)
         if community_csv.exists():
             com_raw = pd.read_csv(community_csv)
             com_cols = ["UserId", "local_pluralistic_hom", "num_communities"]

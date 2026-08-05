@@ -1,8 +1,13 @@
 """
 CMF model training and evaluation with user-side attributes.
+
+Warm-split / scale / fit live here so social eval and final_eval share one core.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import Any
 
 import pandas as pd
 
@@ -10,6 +15,92 @@ from config import Defaults
 from recommender._cmfrec import CMF
 from recommender.data import evaluate_ranking, evaluate_single_split, split_data_single
 from recommender.enhanced.features import _SCALERS
+
+
+def filter_to_feature_users(
+    data: pd.DataFrame,
+    user_attributes: pd.DataFrame,
+) -> pd.DataFrame | None:
+    """Ratings restricted to users present in the feature matrix, or None."""
+    filtered = data.loc[data["UserId"].isin(list(user_attributes.index))].copy()
+    if filtered.empty:
+        print("  Warning: no overlap between rating users and network users.")
+        return None
+    return filtered
+
+
+def iter_warm_splits(
+    filtered: pd.DataFrame,
+    *,
+    n_splits: int = 5,
+    test_size: float = 0.2,
+) -> Iterator[tuple[int, pd.DataFrame, pd.DataFrame]]:
+    """Yield ``(split_idx, train_df, warm_test)``; skip empty warm tests (M-4)."""
+    for split_idx in range(n_splits):
+        train_df, test_df = split_data_single(
+            filtered, test_size=test_size, random_state=split_idx
+        )
+        seen_users = list(train_df["UserId"].unique())
+        seen_items = list(train_df["ItemId"].unique())
+        warm_test = test_df.loc[
+            test_df["UserId"].isin(seen_users) & test_df["ItemId"].isin(seen_items)
+        ].copy()
+        if warm_test.empty:
+            continue
+        yield split_idx, train_df, warm_test
+
+
+def scaled_u_matrix(
+    user_attributes: pd.DataFrame,
+    train_users: list[Any],
+    transform: str = "standard",
+) -> pd.DataFrame:
+    """Fit scaler on *train_users* only (M-2), return U frame with UserId column."""
+    if transform not in _SCALERS:
+        raise ValueError(
+            f"Unknown transform: {transform!r}. Use one of {list(_SCALERS)}."
+        )
+    scaler = _SCALERS[transform]()
+    scaler.fit(user_attributes.loc[train_users].values)
+    scaled_all = pd.DataFrame(
+        scaler.transform(user_attributes.values),
+        index=user_attributes.index,
+        columns=user_attributes.columns,
+    )
+    return scaled_all.rename_axis("UserId").reset_index()
+
+
+def fit_enhanced_cmf(
+    train_df: pd.DataFrame,
+    user_attributes: pd.DataFrame,
+    *,
+    k: int,
+    lambda_reg: float,
+    w_main: float = Defaults.W_MAIN,
+    w_user: float = Defaults.W_USER,
+    method: str = Defaults.CMF_METHOD,
+    maxiter: int = Defaults.CMF_MAXITER,
+    nthreads: int = -1,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
+    transform: str = "standard",
+) -> CMF:
+    """Scale user attributes on train users and fit enhanced CMF."""
+    train_users = sorted(train_df["UserId"].unique())
+    u_matrix = scaled_u_matrix(user_attributes, train_users, transform=transform)
+    kwargs: dict[str, Any] = {
+        "method": method,
+        "k": k,
+        "lambda_": lambda_reg,
+        "w_main": w_main,
+        "w_user": w_user,
+        "nthreads": nthreads,
+        "verbose": False,
+    }
+    if method == "lbfgs":
+        kwargs.update({"maxiter": maxiter, "random_state": random_state})
+    model = CMF(**kwargs)
+    model.fit(X=train_df, U=u_matrix)
+    return model
 
 
 def evaluate_cmf_with_user_attributes(
@@ -32,103 +123,41 @@ def evaluate_cmf_with_user_attributes(
     cmf_nthreads: int = -1,
 ) -> list[dict]:
     """
-    Evaluate enhanced CMF via repeated random train/test splits.
+    Evaluate enhanced CMF via repeated warm train/test splits.
 
-    The user-attribute matrix is passed as the ``U`` parameter to
-    :class:`cmfrec.CMF`.  Feature scaling is fitted on training users only
-    within each fold to prevent leakage (M-2).  A paired baseline CMF (no
-    side information) is evaluated on the same split and user subset so that
-    improvement is measured fairly (M-3).
-
-    Args:
-        data:             Full ratings DataFrame (0-based UserId from LabelEncoder).
-        user_attributes:  Raw (unscaled) feature DataFrame indexed by 0-based
-                          ``UserId`` (aligned with *data*).
-        k:                Number of latent factors.
-        lambda_reg:       L2 regularisation strength.
-        w_main:           Weight for the main rating-matrix reconstruction loss.
-        w_user:           Weight for the user side-information reconstruction loss.
-        method:           CMF optimizer. Defaults to the pipeline-wide method.
-        maxiter:          L-BFGS iteration budget.
-        random_state:     Base seed for L-BFGS initialization.
-        n_splits:         Number of random splits.
-        test_size:        Test fraction.
-        transform:        Scaler to apply per fold — ``"standard"``, ``"minmax"``,
-                          or ``"normalizer"``.
-        baseline_k:       Number of latent factors for the paired plain-CMF baseline.
-        baseline_lambda:  L2 regularisation for the paired baseline.
-        compute_ranking:  When ``True``, compute NDCG@K, Precision@K, Recall@K, and MRR.
-        ranking_k:        Cut-off for rank-based metrics.  Defaults to 10.
-        cmf_nthreads:     Number of BLAS threads for cmfrec.  Use ``1`` in
-                          multi-process contexts to avoid oversubscription.
-
-    Returns:
-        List of per-split result dicts with keys ``rmse_enhanced``,
-        ``rmse_baseline``, ``improvement`` (baseline − enhanced), and
-        (when *compute_ranking* is ``True``) ``ndcg_at_k``, ``precision_at_k``,
-        ``recall_at_k``, ``mrr``.
+    Feature scaling is fitted on training users only (M-2).  A paired baseline
+    CMF (no side information) shares the same split (M-3).
     """
     if transform not in _SCALERS:
         raise ValueError(
             f"Unknown transform: {transform!r}. Use one of {list(_SCALERS)}."
         )
 
-    valid_users = list(user_attributes.index)
-    filtered = data[data["UserId"].isin(valid_users)]
-
-    if filtered.empty:
-        print("  Warning: no overlap between rating users and network users.")
+    filtered = filter_to_feature_users(data, user_attributes)
+    if filtered is None:
         return []
 
     results: list[dict] = []
-    for split_idx in range(n_splits):
-        train_df, test_df = split_data_single(
-            filtered, test_size=test_size, random_state=split_idx  # type: ignore[arg-type]
+    for split_idx, train_df, warm_test in iter_warm_splits(
+        filtered, n_splits=n_splits, test_size=test_size
+    ):
+        enhanced_model = fit_enhanced_cmf(
+            train_df,
+            user_attributes,
+            k=k,
+            lambda_reg=lambda_reg,
+            w_main=w_main,
+            w_user=w_user,
+            method=method,
+            maxiter=maxiter,
+            nthreads=cmf_nthreads,
+            random_state=random_state + split_idx,
+            transform=transform,
         )
-
-        # Warm-test filtering: restrict test to users/items seen in training.
-        # Keeps the non-social and social evaluation paths consistent (M-4).
-        seen_users = list(train_df["UserId"].unique())
-        seen_items = list(train_df["ItemId"].unique())
-        warm_test = test_df.loc[
-            test_df["UserId"].isin(seen_users) & test_df["ItemId"].isin(seen_items)
-        ].copy()
-        if warm_test.empty:
-            continue
-
-        # M-2: fit scaler on training users only to prevent leakage.
-        train_users = sorted(train_df["UserId"].unique())
-        train_feats = user_attributes.loc[train_users]
-        scaler = _SCALERS[transform]()
-        scaler.fit(train_feats.values)
-        scaled_all = pd.DataFrame(
-            scaler.transform(user_attributes.values),
-            index=user_attributes.index,
-            columns=user_attributes.columns,
-        )
-        u_matrix = scaled_all.rename_axis("UserId").reset_index()
-
-        # Enhanced model
-        enhanced_kwargs = {
-            "method": method,
-            "k": k,
-            "lambda_": lambda_reg,
-            "w_main": w_main,
-            "w_user": w_user,
-            "nthreads": cmf_nthreads,
-            "verbose": False,
-        }
-        if method == "lbfgs":
-            enhanced_kwargs.update(
-                {"maxiter": maxiter, "random_state": random_state + split_idx}
-            )
-        enhanced_model = CMF(**enhanced_kwargs)
-        enhanced_model.fit(X=train_df, U=u_matrix)
         enhanced_rmse = evaluate_single_split(enhanced_model, warm_test)["rmse"]
 
-        # M-3: paired baseline on the same filtered subset.
         if baseline_k is not None and baseline_lambda is not None:
-            baseline_kwargs = {
+            baseline_kwargs: dict[str, Any] = {
                 "method": method,
                 "k": baseline_k,
                 "lambda_": baseline_lambda,
@@ -150,11 +179,9 @@ def evaluate_cmf_with_user_attributes(
             "rmse_baseline": baseline_rmse,
             "improvement": baseline_rmse - enhanced_rmse,
         }
-
         if compute_ranking:
             ranking = evaluate_ranking(enhanced_model, train_df, warm_test, k=ranking_k)
             result.update(ranking)
-
         results.append(result)
 
     return results

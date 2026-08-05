@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from config import Defaults, Models
+from networks.artifacts import NetworkArtifacts
 from networks.cascades import compute_cascade_user_stats, generate_cascades_from_df
 from networks.centrality.batch import calculate_centrality_for_all_models
 from networks.communities.batch import calculate_communities_for_all_models
@@ -15,15 +16,11 @@ from recommender.experiment.cold_start.paths import ColdStartPaths
 
 
 def _count_network_files(paths: ColdStartPaths) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for model_name in Models.ALL:
-        model_dir = paths.NETWORKS / model_name
-        if not model_dir.exists():
-            counts[model_name] = 0
-            continue
-        counts[model_name] = len(list(model_dir.glob("inferred-network-*.txt")))
-    return counts
-
+    arts = NetworkArtifacts(paths.BASE.parent.name, paths=paths)
+    return {
+        model_name: len(arts.list_network_indices(model_name))
+        for model_name in Models.ALL
+    }
 
 def run_feature_pipeline(
     dataset: str,
