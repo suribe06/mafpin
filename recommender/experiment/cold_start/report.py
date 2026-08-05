@@ -13,27 +13,41 @@ from recommender.experiment.cold_start.strata import STRATA_ORDER
 _MIN_USERS_FOR_CLAIM = 10
 
 
+def _last_float(frame: pd.DataFrame, column: str) -> float:
+    series = frame[column]
+    if not isinstance(series, pd.Series) or series.empty:
+        return float("nan")
+    return float(series.iloc[-1])
+
+
+def _last_int(frame: pd.DataFrame, column: str) -> int:
+    series = frame[column]
+    if not isinstance(series, pd.Series) or series.empty:
+        return 0
+    return int(series.iloc[-1])
+
+
 def _mean_rmse(results: pd.DataFrame, variant: str, stratum: str) -> float:
-    subset = results[
+    subset = results.loc[
         (results["model_variant"] == variant) & (results["stratum"] == stratum)
-    ]
+    ].copy()
     if subset.empty:
         return float("nan")
-    return float(subset["rmse"].iloc[-1])
+    return _last_float(subset, "rmse")
 
 
 def _stratum_n_users(results: pd.DataFrame, stratum: str) -> int:
-    subset = results[results["stratum"] == stratum]
+    subset = results.loc[results["stratum"] == stratum].copy()
     if subset.empty or "n_users" not in subset.columns:
         return 0
-    return int(subset["n_users"].iloc[-1])
+    return _last_int(subset, "n_users")
 
 
 def _stratum_n_ratings(results: pd.DataFrame, stratum: str) -> int:
-    subset = results[results["stratum"] == stratum]
+    subset = results.loc[results["stratum"] == stratum].copy()
     if subset.empty or "n_ratings" not in subset.columns:
         return 0
-    return int(subset["n_ratings"].iloc[-1])
+    return _last_int(subset, "n_ratings")
 
 
 def _fmt(value: float) -> str:
@@ -61,21 +75,21 @@ def _bootstrap_section(
             "| --- | --- | ---: | ---: | ---: | ---: |",
         ]
     )
-    for row in bootstrap.itertuples(index=False):
+    for _, row in bootstrap.iterrows():
         lines.append(
-            f"| {row.stratum} | {row.comparison} | {_fmt(row.mean_delta)} | "
-            f"{_fmt(row.ci_low)} | {_fmt(row.ci_high)} | {int(row.n_users)} |"
+            f"| {row['stratum']} | {row['comparison']} | {_fmt(float(row['mean_delta']))} | "
+            f"{_fmt(float(row['ci_low']))} | {_fmt(float(row['ci_high']))} | {int(row['n_users'])} |"
         )
     cold_ci = bootstrap[
-        (bootstrap["comparison"].isin(ci_comparisons))
-        & (bootstrap["stratum"].isin(ci_strata))
+        (bootstrap["comparison"].isin(list(ci_comparisons)))
+        & (bootstrap["stratum"].isin(list(ci_strata)))
         & (bootstrap["n_users"] >= _MIN_USERS_FOR_CLAIM)
     ]
     ci_ok = False
     if not cold_ci.empty:
         ci_ok = all(
-            pd.notna(r.ci_low) and float(r.ci_low) > 0
-            for r in cold_ci.itertuples(index=False)
+            pd.notna(v) and float(v) > 0
+            for v in cold_ci["ci_low"].tolist()
         )
     lines.append("")
     lines.append(
@@ -289,10 +303,10 @@ def build_success_summary(
                 "| --- | --- | ---: | ---: | ---: | ---: |",
             ]
         )
-        for row in bootstrap.itertuples(index=False):
+        for _, row in bootstrap.iterrows():
             lines.append(
-                f"| {row.stratum} | {row.comparison} | {_fmt(row.mean_delta)} | "
-                f"{_fmt(row.ci_low)} | {_fmt(row.ci_high)} | {int(row.n_users)} |"
+                f"| {row['stratum']} | {row['comparison']} | {_fmt(float(row['mean_delta']))} | "
+                f"{_fmt(float(row['ci_low']))} | {_fmt(float(row['ci_high']))} | {int(row['n_users'])} |"
             )
         cold_ci = bootstrap[
             (bootstrap["comparison"] == "M3_vs_M1")
@@ -302,8 +316,8 @@ def build_success_summary(
         ci_ok = False
         if not cold_ci.empty:
             ci_ok = all(
-                pd.notna(r.ci_low) and float(r.ci_low) > 0
-                for r in cold_ci.itertuples(index=False)
+                pd.notna(v) and float(v) > 0
+                for v in cold_ci["ci_low"].tolist()
             )
         lines.append("")
         lines.append(
@@ -360,12 +374,12 @@ def write_success_summary(
         raise FileNotFoundError(f"Missing results: {results_path}")
     results = pd.read_csv(results_path)
     if "mode" in results.columns:
-        results = results[results["mode"] == mode]
-    bootstrap = None
+        results = results.loc[results["mode"] == mode].copy()
+    bootstrap: pd.DataFrame | None = None
     if bootstrap_path.exists():
         bootstrap = pd.read_csv(bootstrap_path)
         if "mode" in bootstrap.columns:
-            bootstrap = bootstrap[bootstrap["mode"] == mode]
+            bootstrap = bootstrap.loc[bootstrap["mode"] == mode].copy()
     text = build_success_summary(
         results, bootstrap, dataset=dataset, mode=mode
     )

@@ -272,7 +272,7 @@ def metrics_by_stratum(
     rows: list[dict[str, Any]] = []
     for stratum in STRATA_ORDER:
         users = stratum_users.get(stratum, set())
-        mask = test_df["UserId"].isin(users).to_numpy()
+        mask = test_df["UserId"].isin(list(users)).to_numpy()
         n_ratings = int(mask.sum())
         n_users = int(test_df.loc[mask, "UserId"].nunique()) if n_ratings else 0
         if n_ratings == 0:

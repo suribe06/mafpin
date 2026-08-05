@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from config import DatasetPaths
@@ -166,14 +167,15 @@ def remap_selected_network_to_paths(
     if edge_col in frame.columns and (frame[edge_col] > 0).any():
         usable = frame[frame[edge_col] > 0]
     target = selected.get("alpha_value")
+    usable = usable.reset_index(drop=True)
     if target is None or (isinstance(target, float) and pd.isna(target)):
-        best_i = int(usable.index[0])
+        best_i = 0
     else:
-        alphas = usable["alpha"].to_numpy(dtype=float)
-        best_i = int(usable.index[int((abs(alphas - float(target))).argmin())])
+        alphas = np.asarray(usable["alpha"], dtype=float)
+        best_i = int(np.argmin(np.abs(alphas - float(target))))
     remapped = dict(selected)
     remapped["alpha_index"] = int(best_i)
-    remapped["alpha_value"] = float(usable.loc[best_i, "alpha"])
+    remapped["alpha_value"] = float(usable.iloc[best_i]["alpha"])
     remapped["selection_source"] = (
         f"remapped_from_core_idx_{net_idx}_closest_alpha"
     )

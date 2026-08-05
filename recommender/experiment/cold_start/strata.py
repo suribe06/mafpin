@@ -33,8 +33,12 @@ def build_user_strata(
     columns among ``appears_in_netinf_graph``, ``has_centrality_features``,
     ``has_lph_features``, ``has_trust_features``.
     """
-    train_counts = train_df.groupby("UserId").size().rename("n_train_ratings")
-    test_counts = test_df.groupby("UserId").size().rename("n_test_ratings")
+    train_counts = pd.Series(
+        train_df.groupby("UserId").size(), name="n_train_ratings"
+    )
+    test_counts = pd.Series(
+        test_df.groupby("UserId").size(), name="n_test_ratings"
+    )
     users = sorted(set(train_counts.index) | set(test_counts.index))
     frame = pd.DataFrame({"user_id": users}).set_index("user_id")
     frame["n_train_ratings"] = train_counts.reindex(users).fillna(0).astype(int)
@@ -63,8 +67,8 @@ def build_user_strata(
 def strata_user_map(user_strata: pd.DataFrame) -> dict[str, set[int]]:
     """Return stratum → set of user ids (with test ratings)."""
     out: dict[str, set[int]] = {s: set() for s in STRATA_ORDER}
-    for row in user_strata.itertuples(index=False):
-        out.setdefault(str(row.stratum), set()).add(int(row.user_id))
+    for _, row in user_strata.iterrows():
+        out.setdefault(str(row["stratum"]), set()).add(int(row["user_id"]))
     return out
 
 
@@ -110,8 +114,9 @@ def per_user_rmse(
         & (np.abs(y_pred) <= limit)
     )
     frame["err2"] = np.where(sane, err2, np.nan)
-    grouped = frame.groupby("UserId")["err2"]
-    return np.sqrt(grouped.mean()).rename("rmse")
+    means = frame.groupby("UserId")["err2"].mean()
+    means_s = pd.Series(means, dtype=float)
+    return pd.Series(np.sqrt(means_s.to_numpy()), index=means_s.index, name="rmse")
 
 
 def build_user_deltas(
@@ -122,11 +127,19 @@ def build_user_deltas(
     rmse_by_variant: dict[str, pd.Series],
 ) -> pd.DataFrame:
     """Wide per-user RMSE table plus M3−M1 / M3−M2 (or trust) deltas."""
-    base = user_strata[["user_id", "stratum", "n_train_ratings", "n_test_ratings"]].copy()
-    base = base.rename(columns={"user_id": "UserId"})
+    cols = ["user_id", "stratum", "n_train_ratings", "n_test_ratings"]
+    base = user_strata.loc[:, cols].copy()
+    base.columns = pd.Index(["UserId", "stratum", "n_train_ratings", "n_test_ratings"])
     for variant_id, series in rmse_by_variant.items():
-        base[f"rmse_{variant_id}"] = base["UserId"].map(series)
-
+        lookup = {
+            int(k): float(v)
+            for k, v in zip(
+                np.asarray(series.index).tolist(),
+                np.asarray(series, dtype=float).tolist(),
+            )
+        }
+        uids = [int(u) for u in np.asarray(base["UserId"]).tolist()]
+        base[f"rmse_{variant_id}"] = [lookup.get(uid, float("nan")) for uid in uids]
     m3_col = "rmse_M3" if "rmse_M3" in base.columns else (
         "rmse_M3_trust" if "rmse_M3_trust" in base.columns else None
     )
@@ -200,8 +213,9 @@ def bootstrap_delta_table(
         for col, comparison in comparisons:
             if col not in subset.columns:
                 continue
+            col_s = pd.Series(subset[col], dtype=float)
             stats = bootstrap_mean_ci(
-                subset[col].to_numpy(dtype=float),
+                col_s.to_numpy(dtype=float),
                 n_samples=n_samples,
                 seed=seed,
             )

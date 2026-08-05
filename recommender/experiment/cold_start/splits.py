@@ -110,7 +110,8 @@ def per_user_leave_k_split(
     train_parts: list[pd.DataFrame] = []
     test_parts: list[pd.DataFrame] = []
     dropped_early = 0
-    for uid, group in data.groupby("UserId", sort=False):
+    for uid_key, group in data.groupby("UserId", sort=False):
+        uid = int(uid_key)  # type: ignore[arg-type]
         ordered = group.sort_values(["timestamp", "_ord"], kind="mergesort")
         n = len(ordered)
         n_test = max(1, int(math.ceil(test_frac * n)))
@@ -120,7 +121,7 @@ def per_user_leave_k_split(
         early = ordered.iloc[:-n_test]
         late = ordered.iloc[-n_test:]
         test_parts.append(late)
-        cap = assignment[int(uid)]
+        cap = assignment[uid]
         if cap is None:
             train_parts.append(early)
         elif cap <= 0:
@@ -203,10 +204,13 @@ def zero_shot_trust_split(
     if not zero_shot_users:
         raise ValueError("No overlap between trust-graph users and rating users")
     zero_set = set(zero_shot_users)
-    test_df = data[data["UserId"].isin(zero_set)].copy()
-    train_df = data[~data["UserId"].isin(zero_set)].copy()
-    if train_df.empty:
+    zero_list = list(zero_set)
+    test_df = data[data["UserId"].isin(zero_list)].copy()
+    train_df = data[~data["UserId"].isin(zero_list)].copy()
+    if isinstance(train_df, pd.Series) or train_df.empty:
         raise ValueError("Zero-shot split left an empty train set")
+    assert isinstance(test_df, pd.DataFrame)
+    assert isinstance(train_df, pd.DataFrame)
     return train_df, test_df, zero_shot_users
 
 

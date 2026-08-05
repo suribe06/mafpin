@@ -261,7 +261,7 @@ def run_controlled(args: argparse.Namespace) -> None:
         rebuild_info = run_feature_pipeline(
             args.dataset,
             train_df,
-            all_user_ids=full_df["UserId"],
+            all_user_ids=list(map(int, full_df["UserId"].tolist())),
             paths=paths,
             n_alphas=args.n_alphas,
             max_iter=args.max_iter,
