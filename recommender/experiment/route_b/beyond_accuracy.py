@@ -96,9 +96,10 @@ def ild_latent(
 def novelty_at_k(top_items: list[int], popularity: pd.Series) -> float:
     vals = []
     for iid in top_items:
-        p = float(popularity.get(iid, 0.0))
-        p = max(p, 1e-12)
-        vals.append(-np.log2(p))
+        raw = popularity.get(iid, 0.0)
+        pop = float(0.0 if raw is None or (isinstance(raw, float) and np.isnan(raw)) else raw)
+        pop = max(pop, 1e-12)
+        vals.append(-np.log2(pop))
     return float(np.mean(vals)) if vals else float("nan")
 
 
@@ -149,7 +150,7 @@ def compute_beyond_accuracy_metrics(
 ) -> tuple[dict[str, float], pd.DataFrame]:
     """Return (aggregate dict, per-user DataFrame)."""
     com = communities if communities is not None else load_frozen_communities(dataset)
-    user_coms = com["community_set"]
+    user_coms = pd.Series(com["community_set"])
     item_dom = item_dominant_communities(train_df, user_coms)
     top_by_user = _top_k_for_users(model, train_df, test_df, k=k)
     pop = _item_popularity(train_df)

@@ -46,7 +46,8 @@ def per_user_rmse_from_predictions(preds: pd.DataFrame) -> pd.Series:
     err2 = (preds["Rating"] - preds["Prediction"]) ** 2
     frame = preds[["UserId"]].copy()
     frame["err2"] = err2
-    return np.sqrt(frame.groupby("UserId")["err2"].mean()).rename("rmse")
+    means = pd.Series(frame.groupby("UserId")["err2"].mean(), dtype=float)
+    return pd.Series(np.sqrt(means.to_numpy()), index=means.index, name="rmse")
 
 
 def load_variant_predictions(path: Path) -> pd.DataFrame:
@@ -72,7 +73,7 @@ def run_boundary_strata(
     com = load_frozen_communities(dataset)
     if "lph_score" not in com.columns:
         raise ValueError("Frozen communities CSV lacks lph_score")
-    strata = assign_lph_strata(com["lph_score"], min_n=min_n)
+    strata = assign_lph_strata(pd.Series(com["lph_score"]), min_n=min_n)
 
     rmse_by_variant: dict[str, pd.Series] = {}
     for vid in variants:
@@ -93,7 +94,8 @@ def run_boundary_strata(
     strata_rows: list[dict[str, Any]] = []
     boot_rows: list[dict[str, Any]] = []
     for stratum in ("B10", "B25", "MID", "E75"):
-        users = set(strata[strata == stratum].index.astype(int))
+        mask = strata == stratum
+        users = {int(i) for i in list(pd.Series(strata).loc[mask].index)}
         for vid, series in rmse_by_variant.items():
             vals = series.reindex(sorted(users)).dropna()
             strata_rows.append(
@@ -156,7 +158,7 @@ def run_boundary_strata(
         from recommender.data import load_and_split_dataset
 
         _full, train_df, _test = load_and_split_dataset(dataset=dataset)
-        item_dom = item_dominant_communities(train_df, com["community_set"])
+        item_dom = item_dominant_communities(train_df, pd.Series(com["community_set"]))
         rows = []
         for vid, series in rmse_by_variant.items():
             pred_path = paths.prediction_path(vid)
@@ -166,12 +168,12 @@ def run_boundary_strata(
                 continue
             p = load_variant_predictions(pred_path)
             mask = []
-            for row in p.itertuples(index=False):
-                uid = int(row.UserId)
-                iid = int(row.ItemId)
+            for _, row in p.iterrows():
+                uid = int(row["UserId"])
+                iid = int(row["ItemId"])
                 ucom = com["community_set"].get(uid, set()) if uid in com.index else set()
                 d = item_dom.get(iid, set())
-                mask.append(bool(ucom) and bool(d) and d.isdisjoint(ucom))
+                mask.append(bool(ucom) and bool(d) and set(ucom).isdisjoint(d))
             p = p.copy()
             p["_cross"] = mask
             sub = p[p["_cross"]]

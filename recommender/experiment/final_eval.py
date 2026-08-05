@@ -228,7 +228,8 @@ def evaluate_variant_global_test(
     if save_predictions_path is not None:
         from recommender.data import predict_ratings
 
-        pred = test_df[["UserId", "ItemId", "Rating"]].copy()
+        pred = test_df.loc[:, ["UserId", "ItemId", "Rating"]].copy()
+        assert isinstance(pred, pd.DataFrame)
         pred["Prediction"] = predict_ratings(model, pred)
         pred["variant"] = variant_id
         save_predictions_path.parent.mkdir(parents=True, exist_ok=True)
@@ -420,7 +421,7 @@ def run_final_eval(
     apply_final_eval_deltas(
         rows,
         canonical_baseline_rmse=baseline_search.get("global_test_rmse"),
-        ratings=test_df["Rating"],
+        ratings=pd.Series(test_df["Rating"]),
     )
     if beyond_accuracy and rows:
         ba_rows = []
@@ -538,7 +539,7 @@ def run_canonical_baseline(
                 random_state=fit_seed,
             )
             candidate = evaluate_single_split(model, test_df)
-            if metrics_are_reasonable(candidate, test_df["Rating"]):
+            if metrics_are_reasonable(candidate, pd.Series(test_df["Rating"])):
                 test_metrics = candidate
                 break
 

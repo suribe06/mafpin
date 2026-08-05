@@ -16,7 +16,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from networks.artifacts import NetworkArtifacts  # noqa: E402
-from networks.communities.detection import detect_overlapping_communities  # noqa: E402
+from networks.communities.detection import (  # noqa: E402
+    compute_node_community_membership,
+    detect_overlapping_communities,
+)
 from networks.communities.lph import compute_lph_paper  # noqa: E402
 from networks.network_io import directed_to_undirected, load_as_networkx  # noqa: E402
 from recommender.experiment.route_b.communities_freeze import (  # noqa: E402
@@ -27,21 +30,25 @@ from recommender.experiment.route_b.paths import RouteBPaths  # noqa: E402
 
 def _lph_series_from_csv(path: Path) -> pd.Series:
     df = pd.read_csv(path)
-    return df.set_index("UserId")["lph_score"].astype(float)
+    return pd.Series(df.set_index("UserId")["lph_score"], dtype=float)
 
 
 def _b10_set(lph: pd.Series) -> set[int]:
-    if lph.dropna().empty:
+    clean = pd.Series(lph, dtype=float).dropna()
+    if clean.empty:
         return set()
-    thr = float(np.nanpercentile(lph.dropna().to_numpy(dtype=float), 10))
-    return set(lph[lph <= thr].index.astype(int))
+    thr = float(np.nanpercentile(clean.to_numpy(dtype=float), 10))
+    mask = clean <= thr
+    return {int(i) for i in list(clean.loc[mask].index)}
 
 
 def _spearman(a: pd.Series, b: pd.Series) -> float:
     joined = pd.concat([a.rename("a"), b.rename("b")], axis=1).dropna()
     if len(joined) < 5:
         return float("nan")
-    return float(joined["a"].corr(joined["b"], method="spearman"))
+    a = pd.Series(joined["a"], dtype=float)
+    b = pd.Series(joined["b"], dtype=float)
+    return float(a.corr(b, method="spearman"))
 
 
 def _jaccard(a: set[int], b: set[int]) -> float:
@@ -53,10 +60,12 @@ def _jaccard(a: set[int], b: set[int]) -> float:
 
 
 def _recompute_lph(network_path: Path, algorithm: str, seed: int) -> pd.Series:
+    del seed  # detection API has no seed; keep signature for callers
     graph, _ = load_as_networkx(network_path)
     undirected = directed_to_undirected(graph, method="union")
-    membership = detect_overlapping_communities(
-        undirected, algorithm=algorithm, random_state=seed
+    communities = detect_overlapping_communities(undirected, algorithm=algorithm)
+    membership = compute_node_community_membership(
+        list(map(int, undirected.nodes())), communities
     )
     lph_scores, _s, _d = compute_lph_paper(undirected, membership)
     return pd.Series(lph_scores, dtype=float)
@@ -177,7 +186,7 @@ def run_stability(
     out.to_csv(paths.COMMUNITY_STABILITY, index=False)
     print(f"Community stability → {paths.COMMUNITY_STABILITY}")
     # Quick console verdict
-    neigh = out[out["comparison"] == "alpha_neighbor"]["spearman_lph"].dropna()
+    neigh = pd.Series(out.loc[out["comparison"] == "alpha_neighbor", "spearman_lph"]).dropna()
     if len(neigh):
         rho = float(neigh.mean())
         verdict = (

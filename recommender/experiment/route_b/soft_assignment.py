@@ -24,9 +24,9 @@ def build_community_item_profiles(
         com["community_set"] if "community_set" in com.columns else pd.Series(dtype=object)
     )
     profiles: dict[int, Counter] = defaultdict(Counter)
-    for row in train_df.itertuples(index=False):
-        uid = int(row.UserId)
-        iid = int(row.ItemId)
+    for _, row in train_df.iterrows():
+        uid = int(row["UserId"])
+        iid = int(row["ItemId"])
         coms = user_coms.get(uid, set()) if uid in user_coms.index else set()
         if not isinstance(coms, set) or not coms:
             continue

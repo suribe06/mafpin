@@ -91,9 +91,9 @@ def load_frozen_communities(
     if "UserId" not in frame.columns:
         raise ValueError(f"No UserId in {csv_path}")
     frame = frame.set_index("UserId")
-    frame["community_set"] = frame.get(
-        "community_ids", pd.Series(dtype=object)
-    ).map(parse_community_ids)
+    if "community_ids" not in frame.columns:
+        frame["community_ids"] = ""
+    frame["community_set"] = frame["community_ids"].map(parse_community_ids)
     return frame
 
 
@@ -106,9 +106,9 @@ def item_dominant_communities(
 
     # user_communities: UserId → set[int]
     item_to_coms: dict[int, Counter] = {}
-    for row in train_df.itertuples(index=False):
-        uid = int(row.UserId)
-        iid = int(row.ItemId)
+    for _, row in train_df.iterrows():
+        uid = int(row["UserId"])
+        iid = int(row["ItemId"])
         coms = user_communities.get(uid, set())
         if not coms:
             continue
