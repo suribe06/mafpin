@@ -143,6 +143,40 @@ def save_manifest(manifest: dict[str, Any], path: Path) -> None:
     print(f"Experiment manifest saved → {path}")
 
 
+def import_manifest_from_logs(
+    dataset: str,
+    *,
+    variant_ids: list[str] | None = None,
+    all_variants: bool = False,
+) -> dict[str, Any]:
+    """Build and persist the experiment manifest from recommend logs."""
+    dp = DatasetPaths(dataset)
+    log_dir = dp.LOGS
+    if not log_dir.exists():
+        print(f"WARNING: log directory missing: {log_dir}")
+
+    if variant_ids is not None:
+        resolved = variant_ids
+    elif all_variants:
+        resolved = [v for v in VARIANT_SPECS if v != "M1"]
+    else:
+        resolved = [v for v in CORE_VARIANT_IDS if v != "M1"]
+
+    manifest = build_manifest_from_logs(
+        dataset,
+        log_dir=log_dir,
+        variant_ids=resolved,
+    )
+    n = len(manifest.get("variants", {}))
+    print(f"Imported {n} variant(s) from {log_dir}")
+    if n == 0:
+        print(
+            "No logs found. Expected files like data/<dataset>/logs/m3_recommend.log"
+        )
+    save_manifest(manifest, dp.EXPERIMENT_MANIFEST)
+    return manifest
+
+
 def load_manifest(dataset: str) -> dict[str, Any]:
     path = DatasetPaths(dataset).EXPERIMENT_MANIFEST
     if not path.exists():
@@ -162,6 +196,8 @@ def archive_recommend_run(
     social_path: Path | None = None,
 ) -> Path:
     """Copy recommend JSON artifacts and network CSV snapshots under runs/<run_id>/."""
+    from networks.artifacts import NetworkArtifacts
+
     dp = DatasetPaths(dataset)
     dest = dp.RUNS / run_id
     dest.mkdir(parents=True, exist_ok=True)
@@ -172,11 +208,11 @@ def archive_recommend_run(
 
     metrics_dir = dest / "network_metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
+    arts = NetworkArtifacts(dataset, paths=dp)
     for model_name in Models.ALL:
-        short = Models.SHORT[model_name]
-        src_csv = dp.NETWORKS / model_name / f"inferred_edges_{short}.csv"
+        src_csv = arts.inferred_edges_csv(model_name)
         if src_csv.exists():
-            shutil.copy2(src_csv, metrics_dir / f"inferred_edges_{short}.csv")
+            shutil.copy2(src_csv, metrics_dir / src_csv.name)
 
     meta = {
         "run_id": run_id,
