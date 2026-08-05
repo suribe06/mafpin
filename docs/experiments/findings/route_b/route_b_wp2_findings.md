@@ -47,11 +47,12 @@
 1. **B2 no es testeable con potencia.** Todas las celdas frontera (B10/B25) tienen N < 30; en MovieLens están vacías. La hipótesis de "ganancia concentrada en frontera" no se puede sostener ni refutar con estos datos.
 2. **Donde sí hay potencia (E75, MID), la ganancia no es frontera-específica.** En MovieLens M3−M1 es positivo y con CI que excluye 0 tanto en MID como en E75 (usuarios core) — es una mejora **amplia**, no de frontera. Y **M3−M2 es nulo en todos lados**: las comunidades (M3) no aportan sobre las features de centralidad (M2).
 3. **Señal contraria en Ciao E75:** en el estrato mejor poblado (390 usuarios core), M3 es **ligeramente peor** que M1 (CI [−0.008, −0.001], excluye 0). Lo contrario de "M3 ayuda".
-4. **Cross-community:** único indicio a favor. M3 tiene el menor RMSE en ratings cross-community de MovieLens (0.805) y M4c el menor en Ciao (0.807), consistente con la subida de CCE en WP1. Pero son n pequeños (373 / 66) y sin CI, así que es indicativo, no concluyente.
+4. **El estrato frontera no mide lo que la hipótesis supone.** `is_boundary` sale de un percentil bajo de $\tilde{h}_v$, y un usuario **sin comunidad** cuyos vecinos sí la tienen recibe δv alto, así que cae en el estrato frontera sin estar puenteando nada: 268 de los 450 usuarios marcados frontera en Ciao tienen `num_communities = 0` (149 de 186 en MovieLens). Peor, 1202 usuarios de Ciao (53 %) comparten exactamente el mismo $\tilde{h}_v$ = 1.2648 — el valor λ del caso de membresía vacía —, y 182 de MovieLens (27 %) comparten 1.8410, de modo que los cortes por percentil dentro de esa masa son arbitrarios. Además del problema de N, esto significa que B2 tal como está operacionalizada **mezcla puentes reales con periferia sin comunidad**. Redefinir el estrato exigiendo `num_communities ≥ 2` es requisito antes de volver a testear B2.
+5. **Cross-community:** único indicio a favor. M3 tiene el menor RMSE en ratings cross-community de MovieLens (0.805) y M4c el menor en Ciao (0.807), consistente con la subida de CCE en WP1. Pero son n pequeños (373 / 66) y sin CI, así que es indicativo, no concluyente.
 
 ## Veredicto
 
-**B2 NO SOPORTADA (principalmente por falta de potencia).** Los estratos frontera no se pueden poblar a N ≥ 30 con la partición actual; donde hay potencia, la ganancia de M3 es amplia (no de frontera) y desaparece frente a M2. El único guiño a favor es el RMSE cross-community, que habría que confirmar con más datos y CI.
+**B2 NO SOPORTADA (principalmente por falta de potencia).** Los estratos frontera no se pueden poblar a N ≥ 30 con la partición actual; donde hay potencia, la ganancia de M3 es amplia (no de frontera) y desaparece frente a M2. El único guiño a favor es el RMSE cross-community, que habría que confirmar con más datos y CI. A esto se suma un problema de validez de constructo (punto 4): el estrato frontera actual está mayoritariamente compuesto por usuarios sin comunidad, no por puentes.
 
 ---
 
