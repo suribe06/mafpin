@@ -17,7 +17,8 @@ from recommender.data import (
     evaluate_single_split,
     metrics_are_reasonable,
 )
-from recommender.enhanced.features import _SCALERS, load_network_features
+from recommender.enhanced.features import load_network_features
+from recommender.enhanced.model import fit_enhanced_cmf
 from recommender.enhanced.social_regularization import (
     build_social_edges,
     fit_social_cmf_model,
@@ -39,29 +40,19 @@ def train_enhanced_final(
     random_state: int,
     transform: str = "standard",
 ) -> CMF:
-    train_users = sorted(train_df["UserId"].unique())
-    scaler = _SCALERS[transform]()
-    scaler.fit(user_attributes.loc[train_users].values)
-    scaled_all = pd.DataFrame(
-        scaler.transform(user_attributes.values),
-        index=user_attributes.index,
-        columns=user_attributes.columns,
+    return fit_enhanced_cmf(
+        train_df,
+        user_attributes,
+        k=k,
+        lambda_reg=lambda_reg,
+        w_main=w_main,
+        w_user=w_user,
+        method=method,
+        maxiter=maxiter,
+        nthreads=nthreads,
+        random_state=random_state,
+        transform=transform,
     )
-    u_matrix = scaled_all.rename_axis("UserId").reset_index()
-    kwargs: dict[str, Any] = {
-        "method": method,
-        "k": k,
-        "lambda_": lambda_reg,
-        "w_main": w_main,
-        "w_user": w_user,
-        "nthreads": nthreads,
-        "verbose": False,
-    }
-    if method == "lbfgs":
-        kwargs.update({"maxiter": maxiter, "random_state": random_state})
-    model = CMF(**kwargs)
-    model.fit(X=train_df, U=u_matrix)
-    return model
 
 
 def load_canonical_baseline(dataset: str) -> dict[str, Any]:
@@ -279,3 +270,220 @@ def append_core_results(rows: list[dict[str, Any]], path: Path) -> None:
     df_new.to_csv(tmp, index=False)
     tmp.replace(path)
     print(f"Core experiment results → {path}")
+
+
+def run_final_eval(
+    dataset: str,
+    *,
+    variant_ids: list[str] | None = None,
+    all_variants: bool = False,
+    cmf_method: str = Defaults.CMF_METHOD,
+    cmf_maxiter: int = Defaults.CMF_MAXITER,
+    cmf_nthreads: int = 1,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
+) -> list[dict[str, Any]]:
+    """Run global-test final eval for core experiment variants (MLflow + skip rules)."""
+    import mlflow
+
+    from config import MLflow as MlflowCfg
+    from recommender.data import load_and_split_dataset
+    from recommender.experiment.manifest import load_manifest
+    from recommender.experiment.variants import CORE_VARIANT_IDS
+
+    dp = DatasetPaths(dataset)
+    manifest = load_manifest(dataset)
+    baseline_search = load_canonical_baseline(dataset)
+    baseline_params = baseline_search["best_params"]
+
+    selection_path = dp.NETWORK_SELECTION
+    network_selection: dict = {}
+    if selection_path.exists():
+        network_selection = json.loads(selection_path.read_text(encoding="utf-8"))
+
+    _, train_df, test_df = load_and_split_dataset(dataset=dataset)
+
+    if all_variants or not variant_ids:
+        resolved = list(CORE_VARIANT_IDS)
+    else:
+        resolved = list(variant_ids)
+
+    mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
+    mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
+
+    rows: list[dict[str, Any]] = []
+    with mlflow.start_run(run_name="final_eval"):
+        mlflow.log_param("dataset", dataset)
+        mlflow.log_param("variants", ",".join(resolved))
+
+        for variant_id in resolved:
+            print(f"\n--- Final eval: {variant_id} ---", flush=True)
+            spec = VARIANT_SPECS[variant_id]
+            entry = manifest.get("variants", {}).get(variant_id, {})
+            hyperparams = entry.get("hyperparameters") or {}
+
+            if variant_id == "M1":
+                hyperparams = dict(baseline_params)
+            elif not hyperparams:
+                print(f"  SKIP {variant_id}: no hyperparameters in manifest")
+                continue
+
+            selected = None
+            if spec["needs_network"]:
+                selected = entry.get("selected_network") or network_selection.get(
+                    "variants", {}
+                ).get(variant_id)
+                if not selected:
+                    print(
+                        f"  SKIP {variant_id}: no selected network (run network_selection)"
+                    )
+                    continue
+
+            with mlflow.start_run(run_name=f"final_{variant_id}", nested=True):
+                row = evaluate_variant_global_test(
+                    variant_id,
+                    train_df,
+                    test_df,
+                    dataset=dataset,
+                    hyperparameters=hyperparams,
+                    baseline_params=baseline_params,
+                    selected_network=selected,
+                    method=cmf_method,
+                    maxiter=cmf_maxiter,
+                    nthreads=cmf_nthreads,
+                    random_state=random_state,
+                )
+                rows.append(row)
+                print(
+                    f"  Global test — RMSE: {row['rmse']:.4f}  "
+                    f"MAE: {row['mae']:.4f}  R²: {row['r2']:.4f}  "
+                    f"NDCG@10: {row['ndcg_at_10']:.4f}",
+                    flush=True,
+                )
+                mlflow.log_metrics(
+                    {
+                        "rmse": row["rmse"],
+                        "mae": row["mae"],
+                        "r2": row["r2"],
+                        "ndcg_at_10": row["ndcg_at_10"],
+                    }
+                )
+
+    apply_final_eval_deltas(
+        rows,
+        canonical_baseline_rmse=baseline_search.get("global_test_rmse"),
+        ratings=test_df["Rating"],
+    )
+    if rows:
+        append_core_results(rows, dp.CORE_EXPERIMENT_RESULTS)
+    else:
+        print("No final_eval rows produced.")
+    return rows
+
+
+_CANONICAL_TEST_ATTEMPTS = 3
+
+
+def run_canonical_baseline(
+    dataset: str,
+    *,
+    force: bool = False,
+    cmf_method: str = Defaults.CMF_METHOD,
+    cmf_maxiter: int = Defaults.CMF_MAXITER,
+    cmf_nthreads: int = 1,
+    random_state: int = Defaults.CMF_RANDOM_STATE,
+    n_trials: int = 50,
+) -> dict[str, Any] | None:
+    """Optuna + global-test canonical M1 baseline; skip if file exists unless *force*."""
+    import mlflow
+
+    from config import MLflow as MlflowCfg
+    from recommender.baseline import save_search_results, search_baseline_params, train_final_model
+    from recommender.data import load_and_split_dataset
+
+    dp = DatasetPaths(dataset)
+    dest = dp.CANONICAL_BASELINE
+    if dest.exists() and not force:
+        existing = json.loads(dest.read_text(encoding="utf-8"))
+        params = existing.get("best_params", {})
+        print(
+            f"Canonical baseline already exists → {dest}\n"
+            f"  k={params.get('k')} lambda_reg={params.get('lambda_reg')}\n"
+            "  Pass --force to re-run Optuna search."
+        )
+        return existing
+
+    mlflow.set_tracking_uri(MlflowCfg.TRACKING_URI)
+    mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
+
+    _, train_df, test_df = load_and_split_dataset(dataset=dataset)
+    with mlflow.start_run(run_name="canonical_baseline"):
+        mlflow.log_params(
+            {
+                "dataset": dataset,
+                "n_trials": n_trials,
+                "n_cv_splits": 3,
+                "cmf_method": cmf_method,
+            }
+        )
+        print(f"Searching canonical baseline hyperparameters ({n_trials} Optuna trials) …")
+        search = search_baseline_params(
+            train_df,
+            n_trials=n_trials,
+            n_splits=3,
+            method=cmf_method,
+            maxiter=cmf_maxiter,
+            nthreads=cmf_nthreads,
+            random_state=random_state,
+        )
+        best = search["best_params"]
+        print(f"Best baseline CV params: {best}")
+
+        test_metrics: dict[str, float] | None = None
+        candidate: dict[str, float] = {"rmse": float("nan")}
+        for attempt in range(_CANONICAL_TEST_ATTEMPTS):
+            fit_seed = random_state + attempt
+            if attempt:
+                print(
+                    f"Retrying canonical baseline global test "
+                    f"(attempt {attempt + 1}/{_CANONICAL_TEST_ATTEMPTS}, seed={fit_seed}) …"
+                )
+            model = train_final_model(
+                train_df,
+                k=best["k"],
+                lambda_reg=best["lambda_reg"],
+                method=cmf_method,
+                maxiter=cmf_maxiter,
+                nthreads=cmf_nthreads,
+                random_state=fit_seed,
+            )
+            candidate = evaluate_single_split(model, test_df)
+            if metrics_are_reasonable(candidate, test_df["Rating"]):
+                test_metrics = candidate
+                break
+
+        if test_metrics is None:
+            last_rmse = candidate["rmse"] if candidate else float("nan")
+            raise RuntimeError(
+                f"Canonical baseline global test metrics degenerate after "
+                f"{_CANONICAL_TEST_ATTEMPTS} attempt(s) (last RMSE={last_rmse}). "
+                "Re-run with --force or a different --seed."
+            )
+
+        search["global_test_rmse"] = test_metrics["rmse"]
+        search["global_test_mae"] = test_metrics["mae"]
+        search["global_test_r2"] = test_metrics["r2"]
+        print(
+            f"Canonical baseline (global test) — RMSE: {test_metrics['rmse']:.4f}  "
+            f"MAE: {test_metrics['mae']:.4f}  R²: {test_metrics['r2']:.4f}"
+        )
+        mlflow.log_metrics(
+            {
+                "baseline_rmse": test_metrics["rmse"],
+                "baseline_mae": test_metrics["mae"],
+                "baseline_r2": test_metrics["r2"],
+            }
+        )
+
+    save_search_results(search, path=dest)
+    print(f"Canonical baseline saved → {dest}")
+    return search

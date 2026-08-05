@@ -10,10 +10,15 @@ import numpy as np
 import pandas as pd
 
 from config import DatasetPaths, Datasets, Models, Defaults
+from networks.artifacts import NetworkArtifacts
 from recommender.baseline import train_model
-from recommender.data import evaluate_ranking, evaluate_single_split, rating_reasonableness_limit, split_data_single
+from recommender.data import evaluate_ranking, evaluate_single_split, rating_reasonableness_limit
 from recommender.enhanced.features import load_network_features
-from recommender.enhanced.model import evaluate_cmf_with_user_attributes
+from recommender.enhanced.model import (
+    evaluate_cmf_with_user_attributes,
+    filter_to_feature_users,
+    iter_warm_splits,
+)
 from recommender.enhanced.social_regularization import (
     SocialNormalization,
     SocialMode,
@@ -23,58 +28,12 @@ from recommender.enhanced.social_regularization import (
 from recommender.enhanced.workers import _worker_init, _eval_network_worker
 
 
-def _index_suffix_from_underscore(path: object) -> int | None:
-    try:
-        return int(getattr(path, "stem").rsplit("_", 1)[-1])
-    except (AttributeError, TypeError, ValueError):
-        return None
-
-
-def _index_suffix_from_dash(path: object) -> int | None:
-    try:
-        return int(getattr(path, "stem").rsplit("-", 1)[-1])
-    except (AttributeError, TypeError, ValueError):
-        return None
-
-
 def _available_centrality_indices(dp: DatasetPaths, model_name: str) -> list[int]:
-    indices = {
-        idx
-        for idx in (
-            _index_suffix_from_underscore(path)
-            for path in (dp.CENTRALITY / model_name).glob(
-                f"centrality_metrics_{model_name}_*.csv"
-            )
-        )
-        if idx is not None
-    }
-    return sorted(indices)
+    return NetworkArtifacts(dp.BASE.name, paths=dp).list_centrality_indices(model_name)
 
 
 def _available_social_indices(dp: DatasetPaths, model_name: str) -> list[int]:
-    short = Models.SHORT[model_name]
-    centrality = set(_available_centrality_indices(dp, model_name))
-    networks = {
-        idx
-        for idx in (
-            _index_suffix_from_dash(path)
-            for path in (dp.NETWORKS / model_name).glob(
-                f"inferred-network-{short}-*.txt"
-            )
-        )
-        if idx is not None
-    }
-    communities = {
-        idx
-        for idx in (
-            _index_suffix_from_underscore(path)
-            for path in (dp.COMMUNITIES / model_name).glob(
-                f"communities_{model_name}_*.csv"
-            )
-        )
-        if idx is not None
-    }
-    return sorted(centrality & networks & communities)
+    return NetworkArtifacts(dp.BASE.name, paths=dp).list_complete_indices(model_name)
 
 
 def evaluate_single_network(
@@ -218,11 +177,8 @@ def evaluate_social_cmf_with_user_attributes(
     method: str = Defaults.CMF_METHOD,
 ) -> list[dict]:
     """Evaluate social-regularized CMF on repeated warm train/test splits."""
-    valid_users = list(user_attributes.index)
-    filtered = cast(pd.DataFrame, data.loc[data["UserId"].isin(valid_users)].copy())
-
-    if filtered.empty:
-        print("  Warning: no overlap between rating users and network users.")
+    filtered = filter_to_feature_users(data, user_attributes)
+    if filtered is None:
         return []
 
     social_edges = build_social_edges(
@@ -241,21 +197,9 @@ def evaluate_social_cmf_with_user_attributes(
         return []
 
     results: list[dict] = []
-    for split_idx in range(n_splits):
-        train_df, test_df = split_data_single(
-            filtered, test_size=test_size, random_state=split_idx
-        )
-        seen_users = list(train_df["UserId"].unique())
-        seen_items = list(train_df["ItemId"].unique())
-        warm_test = cast(
-            pd.DataFrame,
-            test_df.loc[
-                test_df["UserId"].isin(seen_users) & test_df["ItemId"].isin(seen_items)
-            ].copy(),
-        )
-        if warm_test.empty:
-            continue
-
+    for split_idx, train_df, warm_test in iter_warm_splits(
+        filtered, n_splits=n_splits, test_size=test_size
+    ):
         social_model, social_metrics = fit_social_cmf_split(
             train_df,
             warm_test,
@@ -336,8 +280,9 @@ def _save_rmses(
                        both modes can coexist in the same results CSV.
     """
     dp = DatasetPaths(dataset or Datasets.DEFAULT)
-    model_short = Models.SHORT[model_name]
-    results_file = dp.NETWORKS / model_name / f"inferred_edges_{model_short}.csv"
+    results_file = NetworkArtifacts(
+        dataset or Datasets.DEFAULT, paths=dp
+    ).inferred_edges_csv(model_name)
 
     if not results_file.exists():
         return
