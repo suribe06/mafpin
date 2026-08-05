@@ -212,6 +212,12 @@ def evaluate_variant_global_test(
 
     metrics = evaluate_single_split(model, test_df)
     ranking = evaluate_ranking(model, train_df, test_df, k=ranking_k)
+    reasonable = metrics_are_reasonable(metrics, pd.Series(test_df["Rating"]))
+    if not reasonable:
+        print(
+            f"  WARNING: {variant_id} RMSE {metrics['rmse']:.4g} is off the rating "
+            "scale — the fit diverged; row flagged invalid_metric_row"
+        )
     row.update(
         {
             "rmse": metrics["rmse"],
@@ -221,7 +227,7 @@ def evaluate_variant_global_test(
             "precision_at_10": ranking["precision_at_k"],
             "recall_at_10": ranking["recall_at_k"],
             "mrr": ranking["mrr"],
-            "valid_metric_row": bool(np.isfinite(metrics["rmse"])),
+            "valid_metric_row": reasonable,
         }
     )
 
@@ -262,7 +268,11 @@ def apply_final_eval_deltas(
 ) -> None:
     """Set rmse_delta_vs_baseline / rmse_delta_vs_m3 from the same-session M1 row."""
     m1_rmse = next(
-        (float(r["rmse"]) for r in rows if r.get("model_variant") == "M1"),
+        (
+            float(r["rmse"])
+            for r in rows
+            if r.get("model_variant") == "M1" and r.get("valid_metric_row", True)
+        ),
         None,
     )
     if m1_rmse is None and canonical_baseline_rmse is not None:
@@ -270,8 +280,13 @@ def apply_final_eval_deltas(
         if ratings is None or metrics_are_reasonable(candidate, ratings):
             m1_rmse = float(canonical_baseline_rmse)
 
+    # A diverged reference would turn every delta into garbage, so ignore it.
     m3_rmse = next(
-        (float(r["rmse"]) for r in rows if r.get("model_variant") == "M3"),
+        (
+            float(r["rmse"])
+            for r in rows
+            if r.get("model_variant") == "M3" and r.get("valid_metric_row", True)
+        ),
         None,
     )
     for row in rows:
