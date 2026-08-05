@@ -2,6 +2,7 @@
 
 Comandos exactos con `pipeline.py` para el plan en [core_experiment_plan.md](core_experiment_plan.md).
 Sin scripts auxiliares: solo flags del CLI.
+Referencia de flags: [cli/experiments.md](../cli/experiments.md), [cli/pipeline.md](../cli/pipeline.md).
 
 Ejecutar desde la raíz del repo:
 

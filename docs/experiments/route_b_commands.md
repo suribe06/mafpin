@@ -2,6 +2,7 @@
 
 Protocolo: [route_b_protocol.md](route_b_protocol.md)  
 Pre-registro: [route_b_preregistration.md](route_b_preregistration.md)  
+Referencia de flags: [cli/experiments.md](../cli/experiments.md)  
 Branch de implementación: `feat/route-b-experiments`
 
 Ejecutar desde la raíz del repo:

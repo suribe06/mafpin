@@ -13,7 +13,8 @@ The core hypothesis is that user centrality metrics and community structure in i
 | [docs/methodology.md](docs/methodology.md) | Cascade generation, alpha grid, NetInf, CMF formulation |
 | [docs/lph.md](docs/lph.md) | Local Pluralistic Homophily definition and Demon algorithm |
 | [docs/centrality_metrics.md](docs/centrality_metrics.md) | All seven centrality metrics with formulas |
-| [docs/usage.md](docs/usage.md) | Step-by-step CLI and Python API guide |
+| [docs/usage.md](docs/usage.md) | Step-by-step pipeline walkthrough and Python API |
+| [docs/cli/README.md](docs/cli/README.md) | **CLI reference** (pipeline, networks, recommender, experiments, plots) |
 | [docs/hyperparameter_tuning.md](docs/hyperparameter_tuning.md) | Optuna TPE search, parameter ranges, two-baseline strategy |
 | [docs/social_regularization.md](docs/social_regularization.md) | Phase 6 boundary-guided social regularization module reference |
 | [docs/reports/social_smoke_test.md](docs/reports/social_smoke_test.md) | Phase 6 social regularization smoke-test report |
@@ -69,7 +70,8 @@ Pipeline runs append progress to `data/<dataset>/pipeline.log` by default.
 Use `tail -f data/movielens/pipeline.log` to watch long runs from another
 terminal.
 
-See [docs/usage.md](docs/usage.md) for the full reference.
+See [docs/usage.md](docs/usage.md) for the walkthrough and
+[docs/cli/](docs/cli/README.md) for the full CLI flag reference.
 
 ## Project Structure
 
