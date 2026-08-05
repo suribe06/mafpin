@@ -5,6 +5,9 @@
 - **Fecha:** 4 de agosto de 2026 — versión 1.0
 - **Copia PDF entregada:** `protocolo_ruta_B_mafpin.pdf` (generada desde este documento)
 - **Findings relacionados:** [core_experiment_movielens_findings.md](core_experiment_movielens_findings.md) · [core_experiment_ciao_findings.md](core_experiment_ciao_findings.md) · [cold_start_findings.md](cold_start_findings.md)
+- **Comandos de ejecución:** [route_b_commands.md](route_b_commands.md)
+- **Pre-registro:** [route_b_preregistration.md](route_b_preregistration.md)
+- **Implementación:** branch `feat/route-b-experiments` (`recommender.experiment.route_b`, flags `--beyond-accuracy` / `--save-predictions`, variante cold-start `M3_soft`)
 
 ---
 

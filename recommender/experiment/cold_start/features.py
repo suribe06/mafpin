@@ -92,6 +92,11 @@ def resolve_selected_network(
     selected = entry.get("selected_network")
     if selected:
         return dict(selected)
+    # Soft / trust clones reuse M3 network selection.
+    if variant_id in {"M3_soft", "M2_trust", "M3_trust"}:
+        alt = (variants.get("M3") or {}).get("selected_network")
+        if alt:
+            return dict(alt)
     # Fall back to M3 / first network-bearing variant.
     for key in ("M3", "M2", "M4c", "M4d"):
         alt = (variants.get(key) or {}).get("selected_network")

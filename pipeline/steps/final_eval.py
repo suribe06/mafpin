@@ -18,4 +18,6 @@ def run_final_eval(args: argparse.Namespace) -> None:
         cmf_maxiter=args.cmf_maxiter,
         cmf_nthreads=_resolve_cmf_nthreads(args),
         random_state=args.seed,
+        beyond_accuracy=bool(getattr(args, "beyond_accuracy", False)),
+        save_predictions=bool(getattr(args, "save_predictions", False)),
     )

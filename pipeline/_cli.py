@@ -240,6 +240,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Process all core experiment variants (M1–M4d).",
     )
     parser.add_argument(
+        "--beyond-accuracy",
+        action="store_true",
+        help="Route B WP1: also compute CCE/ILD/novelty/coverage on final_eval.",
+    )
+    parser.add_argument(
+        "--save-predictions",
+        action="store_true",
+        help="Route B WP2: write per-rating predictions under data/<ds>/route_b/predictions/.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Force re-run when canonical_baseline already exists.",

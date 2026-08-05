@@ -99,11 +99,22 @@ VARIANT_SPECS: dict[str, dict[str, Any]] = {
         "trust_features": True,
         "trust_include_communities": True,
     },
+    "M3_soft": {
+        "run_id": "m3_soft_communities",
+        "log_name": None,
+        "needs_network": True,
+        "social_regularization": False,
+        "include_communities": True,
+        "social_mode": None,
+        "social_normalization": None,
+        "soft_communities": True,
+    },
 }
 
 ALL_VARIANT_IDS: list[str] = list(VARIANT_SPECS.keys())
 CORE_VARIANT_IDS: list[str] = ["M1", "M2", "M3", "M4a", "M4b", "M4c", "M4d"]
 COLD_START_VARIANT_IDS: list[str] = ["M1", "M2", "M3", "M4c", "M4d"]
+SOFT_COLD_START_VARIANT_IDS: list[str] = ["M1", "M2", "M3", "M3_soft"]
 TRUST_VARIANT_IDS: list[str] = ["M1", "M2_trust", "M3_trust"]
 
 

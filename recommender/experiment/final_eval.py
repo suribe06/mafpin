@@ -79,6 +79,8 @@ def evaluate_variant_global_test(
     nthreads: int = 1,
     random_state: int = Defaults.CMF_RANDOM_STATE,
     ranking_k: int = 10,
+    save_predictions_path: Path | None = None,
+    beyond_accuracy: bool = False,
 ) -> dict[str, Any]:
     """Train on full train split and evaluate once on the global test split."""
     spec = VARIANT_SPECS[variant_id]
@@ -222,6 +224,32 @@ def evaluate_variant_global_test(
             "valid_metric_row": bool(np.isfinite(metrics["rmse"])),
         }
     )
+
+    if save_predictions_path is not None:
+        from recommender.data import predict_ratings
+
+        pred = test_df[["UserId", "ItemId", "Rating"]].copy()
+        pred["Prediction"] = predict_ratings(model, pred)
+        pred["variant"] = variant_id
+        save_predictions_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            pred.to_parquet(save_predictions_path, index=False)
+        except Exception:
+            # ponytail: parquet engine optional; CSV always works
+            pred.to_csv(save_predictions_path.with_suffix(".csv"), index=False)
+        print(f"  Predictions → {save_predictions_path}")
+
+    if beyond_accuracy:
+        from recommender.experiment.route_b.beyond_accuracy import (
+            compute_beyond_accuracy_metrics,
+        )
+
+        agg, per_user = compute_beyond_accuracy_metrics(
+            model, train_df, test_df, dataset=dataset, k=ranking_k
+        )
+        row.update({f"ba_{k}": v for k, v in agg.items()})
+        row["_beyond_accuracy_per_user"] = per_user
+
     return row
 
 
@@ -281,6 +309,8 @@ def run_final_eval(
     cmf_maxiter: int = Defaults.CMF_MAXITER,
     cmf_nthreads: int = 1,
     random_state: int = Defaults.CMF_RANDOM_STATE,
+    beyond_accuracy: bool = False,
+    save_predictions: bool = False,
 ) -> list[dict[str, Any]]:
     """Run global-test final eval for core experiment variants (MLflow + skip rules)."""
     import mlflow
@@ -288,9 +318,13 @@ def run_final_eval(
     from config import MLflow as MlflowCfg
     from recommender.data import load_and_split_dataset
     from recommender.experiment.manifest import load_manifest
+    from recommender.experiment.route_b.paths import RouteBPaths
     from recommender.experiment.variants import CORE_VARIANT_IDS
 
     dp = DatasetPaths(dataset)
+    route_paths = RouteBPaths(dataset)
+    if beyond_accuracy or save_predictions:
+        route_paths.ensure_dirs()
     manifest = load_manifest(dataset)
     baseline_search = load_canonical_baseline(dataset)
     baseline_params = baseline_search["best_params"]
@@ -311,9 +345,12 @@ def run_final_eval(
     mlflow.set_experiment(MlflowCfg.EXPERIMENT_NAME)
 
     rows: list[dict[str, Any]] = []
+    ba_per_user_frames: list[pd.DataFrame] = []
     with mlflow.start_run(run_name="final_eval"):
         mlflow.log_param("dataset", dataset)
         mlflow.log_param("variants", ",".join(resolved))
+        mlflow.log_param("route_b", str(beyond_accuracy or save_predictions))
+        mlflow.set_tags({"route_b": str(beyond_accuracy or save_predictions).lower()})
 
         for variant_id in resolved:
             print(f"\n--- Final eval: {variant_id} ---", flush=True)
@@ -338,6 +375,9 @@ def run_final_eval(
                     )
                     continue
 
+            pred_path = (
+                route_paths.prediction_path(variant_id) if save_predictions else None
+            )
             with mlflow.start_run(run_name=f"final_{variant_id}", nested=True):
                 row = evaluate_variant_global_test(
                     variant_id,
@@ -351,7 +391,15 @@ def run_final_eval(
                     maxiter=cmf_maxiter,
                     nthreads=cmf_nthreads,
                     random_state=random_state,
+                    save_predictions_path=pred_path,
+                    beyond_accuracy=beyond_accuracy,
                 )
+                per_user = row.pop("_beyond_accuracy_per_user", None)
+                if per_user is not None and isinstance(per_user, pd.DataFrame):
+                    tmp = per_user.copy()
+                    tmp.insert(0, "model_variant", variant_id)
+                    tmp.insert(0, "dataset", dataset)
+                    ba_per_user_frames.append(tmp)
                 rows.append(row)
                 print(
                     f"  Global test — RMSE: {row['rmse']:.4f}  "
@@ -359,24 +407,57 @@ def run_final_eval(
                     f"NDCG@10: {row['ndcg_at_10']:.4f}",
                     flush=True,
                 )
-                mlflow.log_metrics(
-                    {
-                        "rmse": row["rmse"],
-                        "mae": row["mae"],
-                        "r2": row["r2"],
-                        "ndcg_at_10": row["ndcg_at_10"],
-                    }
-                )
+                metrics_log = {
+                    "rmse": row["rmse"],
+                    "mae": row["mae"],
+                    "r2": row["r2"],
+                    "ndcg_at_10": row["ndcg_at_10"],
+                }
+                if beyond_accuracy and "ba_cce_at_k_mean" in row:
+                    metrics_log["cce_at_10"] = float(row["ba_cce_at_k_mean"])
+                mlflow.log_metrics(metrics_log)
 
     apply_final_eval_deltas(
         rows,
         canonical_baseline_rmse=baseline_search.get("global_test_rmse"),
         ratings=test_df["Rating"],
     )
-    if rows:
-        append_core_results(rows, dp.CORE_EXPERIMENT_RESULTS)
+    if beyond_accuracy and rows:
+        ba_rows = []
+        for row in rows:
+            ba_rows.append(
+                {
+                    "dataset": row["dataset"],
+                    "model_variant": row["model_variant"],
+                    **{k[3:]: v for k, v in row.items() if k.startswith("ba_")},
+                    "rmse": row.get("rmse"),
+                    "ndcg_at_10": row.get("ndcg_at_10"),
+                }
+            )
+        pd.DataFrame(ba_rows).to_csv(route_paths.BEYOND_ACCURACY, index=False)
+        print(f"Beyond-accuracy → {route_paths.BEYOND_ACCURACY}")
+        if ba_per_user_frames:
+            per_user_all = pd.concat(ba_per_user_frames, ignore_index=True)
+            try:
+                per_user_all.to_parquet(
+                    route_paths.BEYOND_ACCURACY_PER_USER, index=False
+                )
+            except Exception:
+                per_user_all.to_csv(
+                    route_paths.BEYOND_ACCURACY_PER_USER.with_suffix(".csv"),
+                    index=False,
+                )
+            print(f"Beyond-accuracy per-user → {route_paths.BEYOND_ACCURACY_PER_USER}")
+
+    # Keep core CSV free of Route B-only columns.
+    core_rows = [
+        {k: v for k, v in row.items() if not k.startswith("ba_")} for row in rows
+    ]
+    if core_rows:
+        append_core_results(core_rows, dp.CORE_EXPERIMENT_RESULTS)
     else:
         print("No final_eval rows produced.")
+
     return rows
 
 
