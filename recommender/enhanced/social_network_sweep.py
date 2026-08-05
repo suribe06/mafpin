@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 from typing import Iterable
 
@@ -12,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from config import DatasetPaths, Datasets, Defaults, Models
+from networks.artifacts import NetworkArtifacts
 from recommender.enhanced.social_regularization import SocialMode
 from recommender.enhanced.social_smoke_test import run_social_smoke_test
 
@@ -22,35 +22,7 @@ def _lambda_slug(value: float) -> str:
 
 def available_network_indices(dataset: str, model_name: str) -> list[int]:
     """Return indices that have network, centrality, and community artifacts."""
-    paths = DatasetPaths(dataset)
-    short = Models.SHORT[model_name]
-    patterns = {
-        "networks": (
-            paths.NETWORKS / model_name,
-            re.compile(rf"^inferred-network-{short}-(\d{{3}})\.txt$"),
-        ),
-        "centrality": (
-            paths.CENTRALITY / model_name,
-            re.compile(rf"^centrality_metrics_{model_name}_(\d{{3}})\.csv$"),
-        ),
-        "communities": (
-            paths.COMMUNITIES / model_name,
-            re.compile(rf"^communities_{model_name}_(\d{{3}})\.csv$"),
-        ),
-    }
-
-    available_sets: list[set[int]] = []
-    for directory, pattern in patterns.values():
-        if not directory.exists():
-            return []
-        indices = {
-            int(match.group(1))
-            for path in directory.iterdir()
-            if (match := pattern.match(path.name))
-        }
-        available_sets.append(indices)
-
-    return sorted(set.intersection(*available_sets)) if available_sets else []
+    return NetworkArtifacts(dataset).list_complete_indices(model_name)
 
 
 def sample_network_indices(
