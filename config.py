@@ -137,6 +137,7 @@ class Defaults:
     # Community detection
     EPSILON = 0.25  # Demon merge threshold (lower → more communities)
     MIN_COM = 3  # minimum community size kept by Demon
+    COMMUNITY_SEED = 42  # Demon draws from the stdlib RNG; seed it for reproducibility
 
     # Matrix factorization
     K = 20  # number of latent factors

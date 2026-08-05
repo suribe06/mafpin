@@ -60,10 +60,11 @@ def _jaccard(a: set[int], b: set[int]) -> float:
 
 
 def _recompute_lph(network_path: Path, algorithm: str, seed: int) -> pd.Series:
-    del seed  # detection API has no seed; keep signature for callers
     graph, _ = load_as_networkx(network_path)
     undirected = directed_to_undirected(graph, method="union")
-    communities = detect_overlapping_communities(undirected, algorithm=algorithm)
+    communities = detect_overlapping_communities(
+        undirected, algorithm=algorithm, seed=seed
+    )
     membership = compute_node_community_membership(
         list(map(int, undirected.nodes())), communities
     )
