@@ -78,9 +78,18 @@ conda run --no-capture-output -n mafpin python -m recommender.experiment.cold_st
 
 Criterio de replicación: Δ(M2_trust−M1) > 0 con CI limpio. No exigimos la misma magnitud, solo el mismo fenómeno.
 
-**A3. Ablación de centralidades (opcional pero barato).** Dentro de M2_trust, apagar familias de features (grado / betweenness / eigenvector / closeness) una a la vez para saber cuál carga el efecto. Esto convierte "las centralidades ayudan" en una afirmación mecánicamente interpretable, que es lo que un revisor va a pedir.
+**A3. Ablación de las features trust (opcional pero barato).** *(Corregido: la versión anterior hablaba de betweenness/eigenvector/closeness, que son features del core sobre la red inferida y no existen en este track.)* M2_trust usa exactamente **tres** features (`networks/social.py::compute_trust_features`): `trust_in_degree`, `trust_out_degree` y `trust_pagerank`; M3_trust añade `trust_community_size` y `trust_boundary_frac` (modularidad greedy sobre el grafo trust no dirigido — no DEMON ni LPH). Con solo tres features no hace falta SHAP: la ablación directa es más simple y más fuerte:
 
-**Salida A:** `docs/experiments/findings/route_b/trust_consolidation_findings.md` con las tablas multi-semilla, la replicación y veredicto. Si A1+A2 pasan, este resultado queda listo como claim central o como paper corto independiente.
+- **Leave-one-out:** re-entrenar M2_trust quitando una feature a la vez (3 fits) y **single-feature:** cada feature sola (3 fits), más el M2_trust completo. Siete fits por semilla — barato.
+- Comparar RMSE en estrato 0 con delta pareado per-user y CI bootstrap vs el M2_trust completo.
+- Reportar la correlación de Spearman entre las tres features sobre los usuarios del grafo trust: si `trust_pagerank` ≈ `trust_in_degree` (lo esperable), la historia interpretable es "número de seguidores", y eso se dice explícitamente.
+
+**Dos aclaraciones de alcance que conviene dejar escritas:**
+
+1. **El SHAP existente no aplica aquí.** `shap_results.json` (2026-05-20) se calculó sobre el modelo enhanced del core — red inferida, otras features, otro modelo. No responde nada sobre la interpretabilidad del positivo 1; la interpretabilidad de M2_trust sale de la ablación A3, no de ese SHAP.
+2. **A3 no reemplaza el trabajo sobre la red inferida.** El análisis de features del core (SHAP incluido, si se refresca) sigue viviendo en los frentes B y C. Son dos modelos distintos con dos preguntas distintas: A3 pregunta *qué ancla a un usuario sin ratings vía grafo explícito*; B/C preguntan *si la señal comunitaria de la red inferida aporta algo*.
+
+**Salida A:** `docs/experiments/findings/route_b/trust_consolidation_findings.md` con las tablas multi-semilla, la replicación, la ablación y veredicto. Si A1+A2 pasan, este resultado queda listo como claim central o como paper corto independiente.
 
 ### Frente B — Afinar el positivo M4c (verificar antes de celebrar)
 
