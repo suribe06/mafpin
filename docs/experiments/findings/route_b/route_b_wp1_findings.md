@@ -1,48 +1,56 @@
 # WP1 — Beyond-accuracy (hallazgos)
 
-**Fecha:** 2026-08-05  
+**Fecha:** 2026-08-07 (re-run per-user temporal, MovieLens)  
 **Branch:** `feat/route-b-experiments`  
 **Hipótesis:** B1 — Variantes con señal de frontera (M3, M4c, M4d) suben CCE@10, ILD@10 y/o cobertura vs M1/M2 **sin** degradar RMSE > 0.5 % relativo ni colapsar NDCG@10 (≥ 0.8 × NDCG@10 de M1).  
-**Fuente:** `data/<ds>/route_b/beyond_accuracy_results.csv` + `data/<ds>/core_experiment_results.csv`
+**Fuente:** `data/movielens/route_b/beyond_accuracy_results.csv`, `beyond_accuracy_bootstrap.csv`, `core_experiment_results.csv`  
+**Split:** per-user leave-last (`artifact_manifest` train 79 748 / test 20 256). Backup del run global-cutoff: `data/movielens/route_b_backup_global_cutoff_20260807/`.
 
-> **Nota de reproducibilidad:** los resultados de Ciao se regeneraron tras corregir el bug de sesgos sin inicializar en el L-BFGS del `cmfrec` vendorizado (arranque no reproducible). Todas las variantes de Ciao tienen ahora `valid_metric_row = True`.
+> **Ciao:** tablas previas (2026-08-05, cutoff global) **no** se regeneraron en este pase. No mezclar con MovieLens per-user.
 
-## MovieLens
+## MovieLens (per-user)
 
-| Var | RMSE | ΔRMSE rel vs M1 | NDCG@10 | Guardia NDCG (≥0.300) | CCE@10 | ILD | Novelty | Coverage | Gini |
-|---|---|---|---|---|---|---|---|---|---|
-| M1 | 1.0510 | — | 0.375 | — | 0.550 | 0.983 | 2.22 | 0.0079 | 0.9985 |
-| M2 | 1.0385 | −1.2 % | 0.373 | ✅ | 0.550 | 1.059 | 2.13 | 0.0081 | 0.9985 |
-| **M3** | 1.0287 | −2.1 % | **0.257** | ❌ | 0.575 | 1.046 | 3.15 | 0.0062 | 0.9986 |
-| M4a | 1.0322 | −1.8 % | 0.136 | ❌ | 0.505 | 0.869 | 4.39 | 0.0034 | 0.9988 |
-| M4b | 1.0410 | −0.9 % | 0.070 | ❌ | 0.332 | 0.924 | 7.10 | 0.0022 | 0.9988 |
-| **M4c** | 1.0421 | −0.8 % | **0.401** | ✅ | 0.575 | 0.825 | 2.16 | **0.0090** | 0.9983 |
-| M4d | 1.0243 | −2.5 % | 0.173 | ❌ | 0.556 | 0.809 | 3.70 | 0.0044 | 0.9988 |
+| Var | RMSE | ΔRMSE vs M1 | NDCG@10 | Guardia NDCG (≥0.8×M1=0.0396) | CCE@10 | ILD lat | Novelty | Coverage | Gini | N CCE |
+|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|
+| M1 | 0.9248 | — | 0.0495 | — | 0.680 | 1.040 | 3.01 | 0.0147 | 0.9980 | 281 |
+| M2 | 0.9088 | −1.73 % | 0.0490 | ✅ | 0.684 | 1.023 | 3.07 | 0.0129 | 0.9981 | 281 |
+| **M3** | 0.9087 | −1.73 % | **0.0496** | ✅ | **0.712** | 1.027 | 3.03 | 0.0106 | 0.9980 | 281 |
+| M4a | 0.9034 | −2.31 % | 0.0218 | ❌ | 0.651 | 0.914 | 6.24 | 0.0071 | 0.9984 | 281 |
+| M4b | 0.9172 | −0.82 % | 0.0218 | ❌ | 0.557 | 0.715 | 7.28 | 0.0092 | 0.9981 | 281 |
+| **M4c** | 0.9039 | −2.26 % | **0.0475** | ✅ | 0.676 | 0.894 | 3.38 | **0.0149** | 0.9979 | 281 |
+| M4d | 0.9030 | −2.36 % | 0.0299 | ❌ | 0.685 | 0.926 | 4.21 | 0.0051 | 0.9985 | 281 |
+
+Bootstrap CCE (pareado, N=281, Holm):
+
+| Comparación | mean Δ | CI 95 % | p Holm |
+|---|---:|---|---:|
+| M3−M2 | +0.028 | [0.018, 0.039] | \< 10⁻⁵ |
+| M3−M1 | +0.032 | [0.021, 0.044] | \< 10⁻⁸ |
+| M4c−M3 | −0.037 | [−0.050, −0.024] | \< 10⁻⁶ |
+| M4d−M3 | −0.027 | [−0.040, −0.014] | \< 10⁻³ |
+
+(Δ positivo ⇒ primera variante con más CCE.)
+
+## Lectura (MovieLens)
+
+1. **N CCE = 281** (antes ~16 bajo cutoff global). El beyond-accuracy ya no está sub-muestreado a un puñado de usuarios.
+2. **Guardia RMSE:** todas mejoran vs M1.
+3. **Guardia NDCG:** pasan M2, **M3**, **M4c**. Fallan M4a/M4b/M4d (ranking cae).
+4. **CCE:** **M3 es el claro ganador** vs M1/M2 (CI lejos de 0). M4c/M4d **bajan** CCE vs M3.
+5. **Cobertura:** máximo en **M4c** (0.0149), por encima de M1.
+6. **Novelty:** M4a/b/d (y algo M4c) suben novelty; ILD latente cae en M4 vs M3.
+7. Vs run global-cutoff: el “único caso limpio M4c” se **reformula**. Ahora el caso limpio de CCE+guardias es **M3**; M4c es limpio en **cobertura + RMSE + NDCG**, no en CCE.
+
+## Veredicto B1 (MovieLens per-user)
+
+**PARCIAL → más sólido que antes, pero no GO fuerte cross-métrica.**
+
+- **GO débil / titular M3:** CCE↑ significativo, NDCG y RMSE OK.
+- **GO débil / titular M4c:** cobertura↑, RMSE↓, NDCG OK; **no** CCE↑ vs M3.
+- No hay variante que suba CCE **y** cobertura **y** NDCG a la vez vs M1/M3.
+
+**WP4:** no disparar aún (sigue sin patrón multi-métrica limpio + Ciao pendiente).
 
 ## Ciao
 
-| Var | RMSE | ΔRMSE rel vs M1 | NDCG@10 | CCE@10 | ILD | Novelty | Coverage | Gini |
-|---|---|---|---|---|---|---|---|---|
-| M1 | 0.9256 | — | 0.0018 | 0.736 | 0.955 | 6.28 | 0.0019 | 0.9994 |
-| M2 | 0.9260 | +0.04 % | 0.0010 | 0.716 | 0.977 | 6.96 | 0.0024 | 0.9994 |
-| **M3** | 0.9217 | −0.4 % | 0.0006 | **0.764** | 0.974 | 7.09 | 0.0018 | 0.9994 |
-| M4a | 0.9242 | −0.2 % | 0.0007 | 0.731 | 0.408 | 6.99 | 0.0010 | 0.9994 |
-| M4b | 0.9250 | −0.1 % | 0.0007 | 0.731 | 0.623 | 6.84 | 0.0012 | 0.9994 |
-| M4c | 0.9238 | −0.2 % | 0.0011 | 0.725 | 0.801 | 6.96 | 0.0017 | 0.9994 |
-| M4d | 0.9292 | +0.4 % | 0.0011 | 0.725 | 0.212 | 7.07 | 0.0009 | 0.9994 |
-
-## Lectura
-
-1. **Guardia RMSE:** se cumple en todas las variantes de ambos datasets (ninguna degrada > 0.5 % vs M1; casi todas mejoran).
-2. **Tensión RMSE ↔ ranking (MovieLens):** las variantes que más bajan RMSE (M3, M4a, M4b, M4d) **colapsan el NDCG@10**. Solo **M2** y **M4c** conservan el ranking; M4c incluso lo mejora (0.401 > 0.375) y además tiene la **mayor cobertura** (0.0090) y CCE al alza (0.575). Ese es el único caso limpio de "beyond-accuracy sin costo de accuracy" en MovieLens.
-3. **CCE:** M3 sube CCE en ambos datasets (ML 0.575 vs 0.550; Ciao 0.764 vs 0.736) — señal consistente de que las comunidades empujan recomendaciones cross-community. Pero en ML el precio es el NDCG.
-4. **Ciao tiene ranking degenerado:** NDCG@10 ≈ 0.001 para todas las variantes. La guardia NDCG no es informativa en Ciao (los deltas son ruido cerca de cero); B1 en Ciao se juzga solo por RMSE + CCE/cobertura.
-5. **ILD/novelty:** el proxy `ild_latent` no reemplaza la ILD por géneros primaria (no cableada; falta `movies.csv`). Tratar como diagnóstico.
-
-## Veredicto
-
-**B1 PARCIAL / DÉBIL.**
-
-- Hay **una** ganancia beyond-accuracy limpia: **M4c en MovieLens** (cobertura + CCE arriba, NDCG y RMSE dentro de guardia).
-- **M3 sube CCE en ambos datasets** pero, en MovieLens, a costa de un colapso de NDCG@10 → falla la guardia. En Ciao el NDCG es degenerado, así que no hay una historia de ranking que sostener.
-- No hay un patrón consistente cross-dataset de "M3/M4d ganan en beyond-accuracy sin costo". No es un GO fuerte.
+Sin re-run en este pase. Hallazgos 2026-08-05 siguen como referencia provisional bajo cutoff global.
