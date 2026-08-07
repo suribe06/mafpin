@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -47,7 +47,7 @@ def _wilcoxon_p(deltas: np.ndarray) -> float:
 
         # positive Δ ⇒ first variant better on metrics where higher is better
         res = wilcoxon(vals, zero_method="wilcox", alternative="two-sided")
-        return float(res.pvalue)
+        return float(cast(Any, res).pvalue)
     except Exception:
         return float("nan")
 

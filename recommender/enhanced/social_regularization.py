@@ -8,7 +8,7 @@ social edges as COO arrays through ``CMF(lambda_social=..., social_row=...)``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -153,7 +153,7 @@ def compute_boundary_mechanism_stats(
     beta: float = 0.5,
     symmetrization: str = "union",
     paths: DatasetPaths | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Edge-level diagnostics for ``boundary_downweight`` (B2 mechanism check).
 
     Compares community-Jaccard weights (before) to boundary-downweighted weights

@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -46,12 +47,11 @@ def _user_delta_table(
 ) -> pd.DataFrame:
     ba = pd.read_parquet(ba_per_user)
     # n_communities is a user property; take from any variant (prefer M1).
-    com = (
-        ba.loc[ba["model_variant"] == "M1", ["UserId", "n_communities"]]
-        if (ba["model_variant"] == "M1").any()
-        else ba.groupby("UserId", as_index=False)["n_communities"].first()
-    )
-    com = com.drop_duplicates("UserId")
+    if (ba["model_variant"] == "M1").any():
+        com = ba.loc[ba["model_variant"] == "M1", ["UserId", "n_communities"]]
+    else:
+        com = ba.groupby("UserId", as_index=False)["n_communities"].first()
+    com = cast(pd.DataFrame, com).drop_duplicates(subset=["UserId"])
 
     m1 = _per_user_rmse(predictions_dir / "M1.parquet")
     m4 = _per_user_rmse(predictions_dir / "M4c.parquet")
@@ -61,7 +61,7 @@ def _user_delta_table(
     # beyond-accuracy deltas (same users ranked)
     def _metric(variant: str, col: str) -> pd.Series:
         sub = ba.loc[ba["model_variant"] == variant, ["UserId", col]].drop_duplicates(
-            "UserId"
+            subset=["UserId"]
         )
         return sub.set_index("UserId")[col]
 
@@ -76,7 +76,7 @@ def _user_delta_table(
 def _correlation_summary(deltas: pd.DataFrame) -> dict:
     n_com = deltas["n_communities"].astype(float)
     rmse_d = deltas["rmse_delta_m4c_minus_m1"].astype(float)
-    spearman = spearmanr(n_com, rmse_d, nan_policy="omit")
+    spearman = cast(Any, spearmanr(n_com, rmse_d, nan_policy="omit"))
     zero = deltas[n_com <= 0]
     pos = deltas[n_com >= 1]
     multi = deltas[n_com >= 2]
