@@ -170,14 +170,17 @@ class Split:
     ``STRATEGY`` controls the split method:
     * ``"random"``   — shuffled split (sklearn ``train_test_split``); fast but
       may place earlier interactions in the test set.
-    * ``"temporal"`` — last ``TEST_SIZE`` fraction of each user's interactions
-      (by timestamp) are held out; guarantees test ratings are always *later*
-      than training ratings, simulating realistic deployment.
+    * ``"temporal"`` — last ``TEST_SIZE`` fraction of *each user's* interactions
+      (by timestamp) are held out; keeps users warm so social/side-info can
+      transfer. Cascades still use only the train slice (no rating leakage).
+    * ``"temporal_global"`` — last ``TEST_SIZE`` of all rows by global timestamp
+      (legacy). Creates a mostly cold-start test on sparse datasets; keep only
+      for reproducing old global-cutoff findings.
     """
 
     TEST_SIZE = 0.2  # fraction of ratings held out for testing
     RANDOM_STATE = 42  # seed for train_test_split (random strategy only)
-    STRATEGY = "temporal"  # "random" or "temporal"
+    STRATEGY = "temporal"  # "random" | "temporal" | "temporal_global"
 
 
 # ---------------------------------------------------------------------------

@@ -49,14 +49,24 @@ class SoftAssignmentTests(unittest.TestCase):
 
 class BeyondAccuracyHelperTests(unittest.TestCase):
     def test_cce_and_coverage(self) -> None:
+        # 1/K denominator: missing D(i) contributes 0, not skipped from K
         cce = cce_at_k(
             [1, 2, 3],
             user_coms={10},
-            item_dominant={1: {10}, 2: {99}, 3: {99}},
+            item_dominant={1: {10}, 2: {99}},  # item 3 missing → 0
         )
-        self.assertAlmostEqual(cce, 2 / 3)
+        self.assertAlmostEqual(cce, 1 / 3)
         cov = coverage_at_k({0: [1, 2], 1: [2, 3]}, n_items=5)
         self.assertAlmostEqual(cov, 3 / 5)
+
+    def test_assign_lph_excludes_zero_community_users(self) -> None:
+        from recommender.experiment.route_b.boundary_strata import assign_lph_strata
+
+        lph = pd.Series({0: 0.1, 1: 0.2, 2: 0.9, 3: 0.05}, dtype=float)
+        n_com = pd.Series({0: 2, 1: 1, 2: 2, 3: 0})
+        labels = assign_lph_strata(lph, min_n=1, n_communities=n_com)
+        self.assertEqual(labels.loc[3], "ISO")
+        self.assertNotEqual(labels.loc[0], "ISO")
 
 
 if __name__ == "__main__":

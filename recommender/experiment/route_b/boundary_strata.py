@@ -21,22 +21,34 @@ def assign_lph_strata(
     lph: pd.Series,
     *,
     min_n: int = 30,
+    n_communities: pd.Series | None = None,
 ) -> pd.Series:
     """Map users to B10 / B25 / MID / E75 by lph_score percentiles.
 
     Lower ``lph_score`` (h̃v) = stronger boundary in the Appl. Sci. convention
     used by this repo (see networks/communities/boundary.py).
+
+    Users with ``n_communities == 0`` (or missing) are labeled ``ISO`` and
+    excluded from percentile cut-points — empty membership is periphery, not
+    a multi-community bridge.
     """
-    valid = lph.dropna()
-    if valid.empty:
-        return pd.Series(dtype=object)
-    p10, p25, p75 = np.nanpercentile(valid.to_numpy(dtype=float), [10, 25, 75])
     labels = pd.Series(index=lph.index, dtype=object)
-    labels[lph <= p10] = "B10"
-    labels[(lph > p10) & (lph <= p25)] = "B25"
-    labels[(lph > p25) & (lph < p75)] = "MID"
-    labels[lph >= p75] = "E75"
-    # Merge tiny B10 into B25 if needed
+    if n_communities is not None:
+        eligible_mask = n_communities.reindex(lph.index).fillna(0).astype(float) > 0
+    else:
+        eligible_mask = lph.notna()
+
+    eligible = lph.loc[eligible_mask].dropna()
+    labels.loc[~eligible_mask] = "ISO"
+    if eligible.empty:
+        return labels
+
+    p10, p25, p75 = np.nanpercentile(eligible.to_numpy(dtype=float), [10, 25, 75])
+    labels.loc[eligible.index[eligible <= p10]] = "B10"
+    labels.loc[eligible.index[(eligible > p10) & (eligible <= p25)]] = "B25"
+    labels.loc[eligible.index[(eligible > p25) & (eligible < p75)]] = "MID"
+    labels.loc[eligible.index[eligible >= p75]] = "E75"
+    # Merge tiny B10 into B25 among eligible users only
     if int((labels == "B10").sum()) < min_n:
         labels = labels.replace({"B10": "B25"})
     return labels
@@ -73,7 +85,12 @@ def run_boundary_strata(
     com = load_frozen_communities(dataset)
     if "lph_score" not in com.columns:
         raise ValueError("Frozen communities CSV lacks lph_score")
-    strata = assign_lph_strata(pd.Series(com["lph_score"]), min_n=min_n)
+    n_com = com["community_set"].map(len) if "community_set" in com.columns else None
+    strata = assign_lph_strata(
+        pd.Series(com["lph_score"]),
+        min_n=min_n,
+        n_communities=n_com,
+    )
 
     rmse_by_variant: dict[str, pd.Series] = {}
     for vid in variants:

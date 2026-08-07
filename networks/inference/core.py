@@ -25,6 +25,71 @@ from networks.inference.subprocess_utils import (
 )
 
 
+def _run_one_netinf(
+    *,
+    idx: int,
+    alpha: float,
+    cascades_file: Path,
+    output_stem: str,
+    model: int,
+    k: int,
+    model_dir: Path,
+    edge_info_dir: Path,
+) -> tuple[int, float, int, bool]:
+    """Run one NetInf alpha; return (idx, alpha, edge_count, ok)."""
+    cmd = [
+        str(Paths.NETINF_BIN),
+        f"-i:{cascades_file}",
+        f"-o:{output_stem}",
+        f"-m:{model}",
+        f"-e:{k}",
+        f"-a:{alpha}",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=str(Paths.NETINF_BIN.parent),
+            check=False,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        print(f"  [{idx:03d}] subprocess error: {exc}")
+        return idx, float(alpha), 0, False
+
+    netinf_cwd = Paths.NETINF_BIN.parent
+    output_file = netinf_cwd / f"{output_stem}.txt"
+    if result.returncode != 0 or not output_file.exists():
+        err = (result.stderr or "").strip()
+        out = (result.stdout or "").strip()
+        hint = ""
+        if "Can not open file" in out or "Can not open file" in err:
+            hint = " (cascade path unreadable from NetInf cwd=networks/)"
+        print(f"  [{idx:03d}] FAILED (rc={result.returncode}){hint}")
+        return idx, float(alpha), 0, False
+
+    edge_count = 0
+    try:
+        in_edges = False
+        with open(output_file, "r", encoding="utf-8") as fh:
+            for raw_line in fh:
+                stripped = raw_line.strip()
+                if not stripped:
+                    in_edges = True
+                    continue
+                if in_edges:
+                    edge_count += 1
+    except Exception as exc:  # pylint: disable=broad-except
+        print(f"  [{idx:03d}] parse error: {exc}")
+        return idx, float(alpha), 0, False
+
+    shutil.move(str(output_file), model_dir / output_file.name)
+    edge_info_src = netinf_cwd / f"{output_stem}-edge.info"
+    if edge_info_src.exists():
+        shutil.move(str(edge_info_src), edge_info_dir / edge_info_src.name)
+    return idx, float(alpha), edge_count, True
+
+
 def infer_networks(
     cascades_file: str | Path | None = None,
     n: int = Defaults.N_ALPHAS,
@@ -34,6 +99,7 @@ def infer_networks(
     name_output: str = "inferred-network",
     r: float = Defaults.RANGE_R,
     networks_dir: Path | None = None,
+    n_jobs: int = 1,
 ) -> bool:
     """
     Run NetInf for every alpha in a log-spaced grid and save the results.
@@ -65,6 +131,8 @@ def infer_networks(
         r:              Multiplicative range factor for the alpha grid.
         networks_dir:   Root directory for output networks.  Defaults to
             ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
+        n_jobs:         Parallel NetInf workers (ThreadPool; each job is a
+            subprocess). ``1`` = sequential.
 
     Returns:
         ``True`` on success, ``False`` otherwise.
@@ -150,89 +218,47 @@ def infer_networks(
     # -- Prepare output directories  -----------------------------------------
     model_dir, edge_info_dir = _create_output_dirs(model_name, networks_dir)
 
+    workers = max(1, int(n_jobs))
     print(f"\nStarting inference — model: {model_name}, max_iter: {max_iter}")
-    print(f"Output directory: {model_dir}\n")
+    print(f"Output directory: {model_dir}")
+    print(f"Parallel NetInf workers: {workers}\n")
 
-    edges_count: list[int] = []
-    successful_runs: int = 0
+    edges_count = [0] * n
+    successful_runs = 0
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from tqdm import tqdm
 
-    pbar = tqdm(
-        enumerate(alpha_values),
-        total=n,
-        desc=f"{model_name[:4].upper()} alpha sweep",
-        unit="net",
-        dynamic_ncols=True,
-    )
-    for idx, alpha in pbar:
-        output_stem = f"{name_output}-{model_suffix}-{idx:03d}"
-        pbar.set_postfix(alpha=f"{alpha:.2e}")
+    jobs = [
+        {
+            "idx": idx,
+            "alpha": float(alpha),
+            "cascades_file": cascades_file,
+            "output_stem": f"{name_output}-{model_suffix}-{idx:03d}",
+            "model": model,
+            "k": k,
+            "model_dir": model_dir,
+            "edge_info_dir": edge_info_dir,
+        }
+        for idx, alpha in enumerate(alpha_values)
+    ]
 
-        cmd = [
-            str(Paths.NETINF_BIN),
-            f"-i:{cascades_file}",
-            f"-o:{output_stem}",
-            f"-m:{model}",
-            f"-e:{k}",
-            f"-a:{alpha}",
-        ]
-
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=str(Paths.NETINF_BIN.parent),
-                check=False,
-            )
-        except Exception as exc:  # pylint: disable=broad-except
-            print(f"subprocess error: {exc}")
-            edges_count.append(0)
-            continue
-
-        netinf_cwd = Paths.NETINF_BIN.parent
-        output_file = netinf_cwd / f"{output_stem}.txt"
-
-        if result.returncode != 0 or not output_file.exists():
-            err = (result.stderr or "").strip()
-            out = (result.stdout or "").strip()
-            hint = ""
-            if "Can not open file" in out or "Can not open file" in err:
-                hint = " (cascade path unreadable from NetInf cwd=networks/)"
-            pbar.write(
-                f"  [{idx:03d}] FAILED (rc={result.returncode}){hint}"
-            )
-            edges_count.append(0)
-            continue
-
-        # Count inferred edges (second block of the output file)
-        try:
-            edge_count = 0
-            in_edges = False
-            with open(output_file, "r", encoding="utf-8") as fh:
-                for raw_line in fh:
-                    stripped = raw_line.strip()
-                    if not stripped:
-                        in_edges = True
-                        continue
-                    if in_edges:
-                        edge_count += 1
-            edges_count.append(edge_count)
-            pbar.set_postfix(alpha=f"{alpha:.2e}", edges=edge_count)
-        except Exception as exc:  # pylint: disable=broad-except
-            pbar.write(f"  [{idx:03d}] parse error: {exc}")
-            edges_count.append(0)
-
-        # Relocate network file
-        shutil.move(str(output_file), model_dir / output_file.name)
-
-        # Relocate edge info file if present
-        edge_info_src = netinf_cwd / f"{output_stem}-edge.info"
-        if edge_info_src.exists():
-            shutil.move(str(edge_info_src), edge_info_dir / edge_info_src.name)
-
-        successful_runs += 1
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_run_one_netinf, **job) for job in jobs]
+        pbar = tqdm(
+            as_completed(futures),
+            total=n,
+            desc=f"{model_name[:4].upper()} alpha sweep",
+            unit="net",
+            dynamic_ncols=True,
+        )
+        for fut in pbar:
+            idx, alpha, edge_count, ok = fut.result()
+            edges_count[idx] = edge_count
+            if ok:
+                successful_runs += 1
+            pbar.set_postfix(alpha=f"{alpha:.2e}", edges=edge_count, ok=ok)
 
     # Clean up any stragglers
     _cleanup_leftover_edge_info(model_suffix, edge_info_dir)

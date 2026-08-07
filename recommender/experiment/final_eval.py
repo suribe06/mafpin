@@ -16,6 +16,7 @@ from recommender.data import (
     evaluate_ranking,
     evaluate_single_split,
     metrics_are_reasonable,
+    warm_test_slice,
 )
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.model import fit_enhanced_cmf
@@ -212,6 +213,20 @@ def evaluate_variant_global_test(
 
     metrics = evaluate_single_split(model, test_df)
     ranking = evaluate_ranking(model, train_df, test_df, k=ranking_k)
+    warm = warm_test_slice(train_df, test_df)
+    if len(warm) > 0:
+        warm_metrics = evaluate_single_split(model, warm)
+        warm_ranking = evaluate_ranking(model, train_df, warm, k=ranking_k)
+    else:
+        warm_metrics = {"rmse": float("nan"), "mae": float("nan"), "r2": float("nan")}
+        warm_ranking = {
+            "ndcg_at_k": float("nan"),
+            "precision_at_k": float("nan"),
+            "recall_at_k": float("nan"),
+            "mrr": float("nan"),
+        }
+    train_users = list(train_df["UserId"].unique())
+    n_cold_user = int((~test_df["UserId"].isin(train_users)).sum())
     reasonable = metrics_are_reasonable(metrics, pd.Series(test_df["Rating"]))
     if not reasonable:
         print(
@@ -227,6 +242,14 @@ def evaluate_variant_global_test(
             "precision_at_10": ranking["precision_at_k"],
             "recall_at_10": ranking["recall_at_k"],
             "mrr": ranking["mrr"],
+            "rmse_warm": warm_metrics["rmse"],
+            "mae_warm": warm_metrics["mae"],
+            "r2_warm": warm_metrics["r2"],
+            "ndcg_at_10_warm": warm_ranking["ndcg_at_k"],
+            "n_test": int(len(test_df)),
+            "n_warm_test": int(len(warm)),
+            "n_cold_user_test": n_cold_user,
+            "warm_test_frac": float(len(warm) / len(test_df)) if len(test_df) else 0.0,
             "valid_metric_row": reasonable,
         }
     )
@@ -461,8 +484,9 @@ def run_final_eval(
                     ba_per_user_frames.append(tmp)
                 rows.append(row)
                 print(
-                    f"  Global test — RMSE: {row['rmse']:.4f}  "
-                    f"MAE: {row['mae']:.4f}  R²: {row['r2']:.4f}  "
+                    f"  Test — RMSE: {row['rmse']:.4f}  "
+                    f"warm RMSE: {row['rmse_warm']:.4f}  "
+                    f"(warm {row['n_warm_test']}/{row['n_test']})  "
                     f"NDCG@10: {row['ndcg_at_10']:.4f}",
                     flush=True,
                 )
@@ -471,9 +495,15 @@ def run_final_eval(
                     "mae": row["mae"],
                     "r2": row["r2"],
                     "ndcg_at_10": row["ndcg_at_10"],
+                    "rmse_warm": float(row["rmse_warm"]),
+                    "n_warm_test": float(row["n_warm_test"]),
+                    "warm_test_frac": float(row["warm_test_frac"]),
                 }
                 if beyond_accuracy and "ba_cce_at_k_mean" in row:
                     metrics_log["cce_at_10"] = float(row["ba_cce_at_k_mean"])
+                    metrics_log["n_users_with_cce"] = float(
+                        row.get("ba_n_users_with_cce", float("nan"))
+                    )
                 mlflow.log_metrics(metrics_log)
 
     apply_final_eval_deltas(
@@ -500,6 +530,15 @@ def run_final_eval(
             )
             upsert_beyond_accuracy_per_user(
                 per_user_all, route_paths.BEYOND_ACCURACY_PER_USER
+            )
+            from recommender.experiment.route_b.beyond_accuracy_stats import (
+                write_beyond_accuracy_bootstrap,
+            )
+
+            write_beyond_accuracy_bootstrap(
+                per_user_all,
+                route_paths.BEYOND_ACCURACY_BOOTSTRAP,
+                seed=random_state,
             )
 
     # Keep core CSV free of Route B-only columns.

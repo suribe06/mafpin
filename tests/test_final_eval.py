@@ -50,6 +50,8 @@ class FinalEvalTests(unittest.TestCase):
         self.assertTrue(row["valid_metric_row"])
         self.assertGreaterEqual(row["rmse"], 0.0)
         self.assertIn("ndcg_at_10", row)
+        self.assertIn("rmse_warm", row)
+        self.assertIn("n_warm_test", row)
 
     def test_evaluate_variant_social_requires_selected_network(self) -> None:
         train = ratings_frame([(0, 0, 3.0)])

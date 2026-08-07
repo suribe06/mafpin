@@ -288,14 +288,19 @@ def _save_rmses(
         return
 
     df = pd.read_csv(results_file, sep="|")
-    _ranking_cols = ("ndcg_at_k", "precision_at_k", "recall_at_k", "mrr")
+    ranking_cols = tuple(f"{run_mode}_{c}" for c in (
+        "ndcg_at_k",
+        "precision_at_k",
+        "recall_at_k",
+        "mrr",
+    ))
     mode_cols = (
         f"{run_mode}_rmse_mean",
         f"{run_mode}_rmse_std",
         f"{run_mode}_baseline_rmse_mean",
         f"{run_mode}_improvement_pct",
     )
-    for col in mode_cols + _ranking_cols:
+    for col in mode_cols + ranking_cols:
         if col not in df.columns:
             df[col] = np.nan
 
@@ -317,8 +322,9 @@ def _save_rmses(
                 (mean_baseline - mean_enhanced) / mean_baseline
             ) * 100.0
 
-        for col in _ranking_cols:
-            col_vals = [r[col] for r in split_results if col in r]
+        bare = ("ndcg_at_k", "precision_at_k", "recall_at_k", "mrr")
+        for bare_col, col in zip(bare, ranking_cols):
+            col_vals = [r[bare_col] for r in split_results if bare_col in r]
             if col_vals:
                 df.loc[network_index, col] = float(np.mean(col_vals))
 

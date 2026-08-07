@@ -50,30 +50,12 @@ def per_user_chrono_split(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Per-user chronological leave-last split (§6.2 leave-last).
 
-    Dedupes exact rows, sorts by ``(timestamp, row_order)``, and holds out the
-    last ``max(1, ceil(test_frac * N))`` ratings as test.
+    Dedupes exact rows, then delegates to
+    :func:`recommender.data.split_data_temporal`.
     """
-    if "timestamp" not in data.columns:
-        raise ValueError("per_user_chrono_split requires a timestamp column")
-    if not 0.0 < test_frac < 1.0:
-        raise ValueError(f"test_frac must be in (0, 1), got {test_frac}")
+    from recommender.data import split_data_temporal
 
-    data = _with_stable_order(dedupe_ratings(data))
-    train_parts: list[pd.DataFrame] = []
-    test_parts: list[pd.DataFrame] = []
-    for _, group in data.groupby("UserId", sort=False):
-        ordered = group.sort_values(["timestamp", "_ord"], kind="mergesort")
-        n = len(ordered)
-        n_test = max(1, int(math.ceil(test_frac * n)))
-        if n_test >= n:
-            test_parts.append(ordered)
-            continue
-        test_parts.append(ordered.iloc[-n_test:])
-        train_parts.append(ordered.iloc[:-n_test])
-
-    train_df = _concat_drop_ord(train_parts, data)
-    test_df = _concat_drop_ord(test_parts, data)
-    return train_df, test_df
+    return split_data_temporal(dedupe_ratings(data), test_size=test_frac)
 
 
 def per_user_leave_k_split(
