@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -307,13 +307,56 @@ def append_core_results(rows: list[dict[str, Any]], path: Path) -> None:
     df_new = pd.DataFrame(rows)
     if path.exists():
         df_old = pd.read_csv(path)
-        df_new = pd.concat([df_old, df_new], ignore_index=True)
+        df_new = cast(pd.DataFrame, pd.concat([df_old, df_new], ignore_index=True))
         df_new = df_new.drop_duplicates(subset=["dataset", "model_variant"], keep="last")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     df_new.to_csv(tmp, index=False)
     tmp.replace(path)
     print(f"Core experiment results → {path}")
+
+
+def upsert_beyond_accuracy_results(rows: list[dict[str, Any]], path: Path) -> None:
+    """Merge beyond-accuracy rows by (dataset, model_variant); keep last.
+
+    ``final_eval`` is often called once per variant in a multi-seed loop. A plain
+    ``to_csv`` overwrite left only the last variant on disk (B1 archival bug).
+    """
+    df_new = pd.DataFrame(rows)
+    if path.exists() and path.stat().st_size > 0:
+        df_old = pd.read_csv(path)
+        df_new = cast(pd.DataFrame, pd.concat([df_old, df_new], ignore_index=True))
+        df_new = df_new.drop_duplicates(subset=["dataset", "model_variant"], keep="last")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    df_new.to_csv(tmp, index=False)
+    tmp.replace(path)
+    print(f"Beyond-accuracy → {path}")
+
+
+def upsert_beyond_accuracy_per_user(frame: pd.DataFrame, path: Path) -> None:
+    """Replace per-user beyond-accuracy rows for the variants present in *frame*."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    variants = list({str(v) for v in frame["model_variant"].tolist()})
+    if path.exists() and path.stat().st_size > 0:
+        try:
+            old = pd.read_parquet(path)
+        except Exception:
+            csv_fallback = path.with_suffix(".csv")
+            old = (
+                pd.read_csv(csv_fallback) if csv_fallback.exists() else pd.DataFrame()
+            )
+        if not old.empty and "model_variant" in old.columns:
+            keep = ~old["model_variant"].astype(str).isin(variants)
+            old = cast(pd.DataFrame, old.loc[keep])
+            frame = cast(pd.DataFrame, pd.concat([old, frame], ignore_index=True))
+    try:
+        frame.to_parquet(path, index=False)
+        print(f"Beyond-accuracy per-user → {path}")
+    except Exception:
+        csv_path = path.with_suffix(".csv")
+        frame.to_csv(csv_path, index=False)
+        print(f"Beyond-accuracy per-user → {csv_path}")
 
 
 def run_final_eval(
@@ -450,20 +493,14 @@ def run_final_eval(
                     "ndcg_at_10": row.get("ndcg_at_10"),
                 }
             )
-        pd.DataFrame(ba_rows).to_csv(route_paths.BEYOND_ACCURACY, index=False)
-        print(f"Beyond-accuracy → {route_paths.BEYOND_ACCURACY}")
+        upsert_beyond_accuracy_results(ba_rows, route_paths.BEYOND_ACCURACY)
         if ba_per_user_frames:
-            per_user_all = pd.concat(ba_per_user_frames, ignore_index=True)
-            try:
-                per_user_all.to_parquet(
-                    route_paths.BEYOND_ACCURACY_PER_USER, index=False
-                )
-            except Exception:
-                per_user_all.to_csv(
-                    route_paths.BEYOND_ACCURACY_PER_USER.with_suffix(".csv"),
-                    index=False,
-                )
-            print(f"Beyond-accuracy per-user → {route_paths.BEYOND_ACCURACY_PER_USER}")
+            per_user_all = cast(
+                pd.DataFrame, pd.concat(ba_per_user_frames, ignore_index=True)
+            )
+            upsert_beyond_accuracy_per_user(
+                per_user_all, route_paths.BEYOND_ACCURACY_PER_USER
+            )
 
     # Keep core CSV free of Route B-only columns.
     core_rows = [
@@ -581,6 +618,6 @@ def run_canonical_baseline(
             }
         )
 
-    save_search_results(search, path=dest)
-    print(f"Canonical baseline saved → {dest}")
-    return search
+        save_search_results(search, path=dest)
+        print(f"Canonical baseline saved → {dest}")
+        return search

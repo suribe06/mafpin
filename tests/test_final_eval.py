@@ -12,6 +12,8 @@ from fixtures import ratings_frame
 from recommender.experiment.final_eval import (
     apply_final_eval_deltas,
     evaluate_variant_global_test,
+    upsert_beyond_accuracy_per_user,
+    upsert_beyond_accuracy_results,
 )
 
 
@@ -124,6 +126,59 @@ class FinalEvalTests(unittest.TestCase):
         for row in rows:
             if row["model_variant"] != "M3":
                 self.assertTrue(np.isnan(row["rmse_delta_vs_m3"]))
+
+    def test_upsert_beyond_accuracy_keeps_prior_variants(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "beyond_accuracy_results.csv"
+            upsert_beyond_accuracy_results(
+                [{"dataset": "movielens", "model_variant": "M1", "item_coverage_at_k": 0.01}],
+                path,
+            )
+            upsert_beyond_accuracy_results(
+                [{"dataset": "movielens", "model_variant": "M4c", "item_coverage_at_k": 0.02}],
+                path,
+            )
+            upsert_beyond_accuracy_results(
+                [{"dataset": "movielens", "model_variant": "M1", "item_coverage_at_k": 0.015}],
+                path,
+            )
+            df = pd.read_csv(path)
+            self.assertEqual(set(df["model_variant"]), {"M1", "M4c"})
+            m1 = float(df.loc[df["model_variant"] == "M1", "item_coverage_at_k"].iloc[0])
+            self.assertAlmostEqual(m1, 0.015)
+
+    def test_upsert_beyond_accuracy_per_user_replaces_only_touched_variants(
+        self,
+    ) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "beyond_accuracy_per_user.parquet"
+            first = pd.DataFrame(
+                {
+                    "dataset": ["movielens", "movielens"],
+                    "model_variant": ["M1", "M1"],
+                    "UserId": [0, 1],
+                    "cce_at_k": [0.1, 0.2],
+                }
+            )
+            second = pd.DataFrame(
+                {
+                    "dataset": ["movielens"],
+                    "model_variant": ["M4c"],
+                    "UserId": [0],
+                    "cce_at_k": [0.5],
+                }
+            )
+            upsert_beyond_accuracy_per_user(first, path)
+            upsert_beyond_accuracy_per_user(second, path)
+            out = pd.read_parquet(path)
+            self.assertEqual(set(out["model_variant"]), {"M1", "M4c"})
+            self.assertEqual(int((out["model_variant"] == "M1").sum()), 2)
 
 
 if __name__ == "__main__":
