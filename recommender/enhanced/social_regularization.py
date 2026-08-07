@@ -144,6 +144,122 @@ def _edge_weight(
     raise ValueError(f"Unknown social mode: {mode!r}")
 
 
+def compute_boundary_mechanism_stats(
+    dataset: str,
+    model_name: str,
+    network_index: int,
+    user_index: pd.Index | range | list[int],
+    *,
+    beta: float = 0.5,
+    symmetrization: str = "union",
+    paths: DatasetPaths | None = None,
+) -> dict[str, object]:
+    """Edge-level diagnostics for ``boundary_downweight`` (B2 mechanism check).
+
+    Compares community-Jaccard weights (before) to boundary-downweighted weights
+    (after) on the undirected social graph restricted to *user_index*.
+    """
+    network_path = _artifacts(dataset, paths).network_txt(model_name, network_index)
+    community_frame = load_community_frame(
+        dataset, model_name, network_index, paths=paths
+    )
+    graph, _ = load_as_networkx(network_path)
+    graph_u = directed_to_undirected(graph, method=symmetrization)
+
+    users = {int(user) for user in user_index}
+    communities = _parse_community_sets(community_frame)
+    boundary = _boundary_intensity(community_frame)
+
+    n_edges = 0
+    n_endpoint_has_com = 0
+    n_both_have_com = 0
+    n_jaccard_pos = 0
+    n_downweighted = 0
+    n_dropped_by_boundary = 0
+    n_retained_bdw = 0
+    w_before: list[float] = []
+    w_after: list[float] = []
+
+    for source, target in graph_u.edges():
+        source_i = int(source)
+        target_i = int(target)
+        if source_i == target_i or source_i not in users or target_i not in users:
+            continue
+        n_edges += 1
+        c_u = communities.get(source_i, set())
+        c_v = communities.get(target_i, set())
+        has_u = bool(c_u)
+        has_v = bool(c_v)
+        if has_u or has_v:
+            n_endpoint_has_com += 1
+        if has_u and has_v:
+            n_both_have_com += 1
+
+        w_j = _edge_weight(
+            source_i,
+            target_i,
+            communities,
+            boundary,
+            "community_jaccard",
+            beta,
+            1.0,
+        )
+        w_b = _edge_weight(
+            source_i,
+            target_i,
+            communities,
+            boundary,
+            "boundary_downweight",
+            beta,
+            1.0,
+        )
+        if w_j > 0.0 and np.isfinite(w_j):
+            n_jaccard_pos += 1
+            w_before.append(float(w_j))
+            if w_b < w_j - 1e-12:
+                n_downweighted += 1
+            if w_b <= 0.0 or not np.isfinite(w_b):
+                n_dropped_by_boundary += 1
+            else:
+                n_retained_bdw += 1
+                w_after.append(float(w_b))
+
+    def _pct(xs: list[float], q: float) -> float:
+        if not xs:
+            return float("nan")
+        return float(np.quantile(np.asarray(xs, dtype=float), q))
+
+    return {
+        "dataset": dataset,
+        "diffusion_model": model_name,
+        "alpha_index": int(network_index),
+        "beta": float(beta),
+        "n_users": len(users),
+        "n_edges": n_edges,
+        "frac_endpoint_has_community": (
+            n_endpoint_has_com / n_edges if n_edges else float("nan")
+        ),
+        "frac_both_have_community": (
+            n_both_have_com / n_edges if n_edges else float("nan")
+        ),
+        "n_jaccard_positive": n_jaccard_pos,
+        "frac_jaccard_positive": n_jaccard_pos / n_edges if n_edges else float("nan"),
+        "frac_downweighted_given_jaccard": (
+            n_downweighted / n_jaccard_pos if n_jaccard_pos else float("nan")
+        ),
+        "frac_dropped_by_boundary_given_jaccard": (
+            n_dropped_by_boundary / n_jaccard_pos if n_jaccard_pos else float("nan")
+        ),
+        "n_retained_bdw": n_retained_bdw,
+        "w_jaccard_mean": float(np.mean(w_before)) if w_before else float("nan"),
+        "w_jaccard_p50": _pct(w_before, 0.5),
+        "w_bdw_mean": float(np.mean(w_after)) if w_after else float("nan"),
+        "w_bdw_p50": _pct(w_after, 0.5),
+        "w_bdw_p10": _pct(w_after, 0.1),
+        "w_bdw_p90": _pct(w_after, 0.9),
+    }
+
+
 def build_social_edges(
     dataset: str,
     model_name: str,
