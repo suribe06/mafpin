@@ -1,6 +1,6 @@
 # Los dos positivos del proyecto y el plan para afinarlos
 
-**Fecha:** 2026-08-05
+**Fecha:** 2026-08-06
 **Rama:** `feat/route-b-experiments`
 **Contexto:** campaña core ([MovieLens](../core_experiment_movielens_findings.md), [Ciao](../core_experiment_ciao_findings.md)), [cold start](../cold_start_findings.md) y Ruta B ([WP1](route_b_wp1_findings.md), [WP2](route_b_wp2_findings.md), [WP3](route_b_wp3_findings.md)).
 
@@ -26,7 +26,7 @@ El CI bootstrap per-user de M2_trust vs M1 es [0.140, 0.150] — limpio, lejos d
 
 **La parte incómoda que hay que decir siempre:** las features comunitarias no solo no ayudaron — M3_trust pierde contra M2_trust por ~0.096. La señal está en la centralidad, no en las comunidades. Este positivo **no** valida la fusión LPH; valida "grafo social explícito + centralidad" para zero-shot.
 
-**Debilidades actuales:** un dataset, una semilla, hiperparámetros congelados de la campaña core. Nada de eso invalida el efecto (la magnitud y el CI son demasiado claros), pero para publicarlo como claim central hay que cerrar esos flancos.
+**Debilidades actuales:** un dataset, una semilla, hiperparámetros congelados de la campaña core. Nada de eso invalida el efecto (la magnitud y el CI son demasiado claros), pero para publicarlo como claim hay que cerrar esos flancos.
 
 ## Positivo 2 — M4c en MovieLens: beyond-accuracy sin pagar peaje
 
@@ -53,56 +53,64 @@ Para contraste: M3 y M4d bajan más el RMSE pero colapsan el NDCG (0.257 y 0.173
 
 ## El plan, en tres frentes
 
-La lógica es: **A** y **B** son baratos y verifican lo que ya tenemos; **C** es el experimento que decide si el positivo de la fusión se puede obtener *de forma segura* — es decir, con la precondición estructural corregida y criterios fijados antes de mirar los resultados. Reglas de higiene: las mismas del [protocolo](route_b_protocol.md) §2 (pre-registro, artefactos congelados intactos, CIs bootstrap 1 000 remuestreos, Wilcoxon+Holm, todo se reporta).
+Mapa de claims (importante: no son el mismo paper):
 
-### Frente A — Consolidar el positivo trust (bajo costo, alta prioridad)
+| Frente | Qué verifica | ¿Habla de LPH / fusión? |
+|---|---|---|
+| **A** (trust zero-shot) | Centralidad del grafo **explícito** ayuda sin ratings | **No.** Resultado lateral fuerte; no valida MAFPIN+LPH |
+| **B** (M4c) | Beyond-accuracy de la regularización boundary-aware | **Sí**, único brote de la fusión hoy |
+| **C** (densificar + constructo) | Si LPH puede operar con cobertura comunitaria decente | **Sí**, compuerta del paper de método |
 
-**A1. Multi-semilla.** Repetir el track zero-shot con semillas {42, 7, 123, 2024, 31337}. El split es determinista (todos los usuarios del grafo trust van a test), así que `--seed` solo cambia la inicialización del CMF — exactamente lo que queremos aislar. `--output-dir` reemplaza el **root** de `ColdStartPaths`: cada corrida escribe bajo `<output-dir>/zero_shot_trust/`, sin tocar el run congelado de `data/ciao/cold_start/zero_shot_trust/`:
+**B** y **C** son el hilo del paper (core experiment + LPH). **A** se consolida para no desperdiciarlo — sección auxiliar o paper corto aparte — **no** como el pegamento narrativo de la fusión. Reglas de higiene: las del [protocolo](route_b_protocol.md) §2 (pre-registro, artefactos congelados intactos, CIs bootstrap 1 000 remuestreos, Wilcoxon+Holm, todo se reporta).
+
+Semillas multi-seed (A1 y B1): `42 7 123 2024 31337 101 999 12345 271828 314159` (10; criterio ≥ 8/10). Cinco era poco para un claim publicable.
+
+### Frente A — Consolidar el positivo trust (lateral al paper LPH)
+
+**Qué NO es A.** No une el core experiment con LPH. El SHAP NetInf del core explica M2/M3 sobre la red **inferida**. M2_trust vive sobre el grafo **trust** y tres columnas ajenas a LPH. Mezclarlos en una sola historia es un error de framing.
+
+**A1. Multi-semilla (10).** El split es determinista (todos los usuarios del grafo trust van a test); `--seed` solo cambia la inicialización del CMF. `--output-dir` reemplaza el **root** de `ColdStartPaths`: cada corrida escribe bajo `<output-dir>/zero_shot_trust/`, sin tocar el run congelado de `data/ciao/cold_start/zero_shot_trust/`:
 
 ```bash
-for s in 42 7 123 2024 31337; do
+SEEDS="42 7 123 2024 31337 101 999 12345 271828 314159"
+for s in $SEEDS; do
   conda run --no-capture-output -n mafpin python -m recommender.experiment.cold_start \
     --dataset ciao --mode zero_shot_trust --variants M1 M2_trust M3_trust \
     --seed $s --output-dir data/ciao/route_b/trust_multiseed/seed_$s
 done
 ```
 
-Criterio: el signo de Δ(M2_trust−M1) estable en ≥ 4/5 semillas y CI per-user excluyendo 0 en cada una. Con la magnitud actual (+0.125) esto debería pasar sobrado; si no pasa, tenemos un problema mayor y mejor saberlo ya.
+Criterio: signo de Δ(M2_trust−M1) estable en **≥ 8/10** semillas y CI per-user excluyendo 0 en cada una. Reportar media ± SD del Δ entre semillas y el peor caso.
 
-**A2. Replicación en Epinions.** Verificado en el repo: `datasets/epinions/trust.txt` existe, `load_trust_graph` soporta `epinions`, y el track zero-shot no usa NetInf — no requiere ningún prerrequisito de la campaña core sobre Epinions. Mismo protocolo, mismas variantes, semilla 42 primero y multi-semilla si replica:
+**A2. Segundo dataset con trust — aparcado.** Epinions está cableado en el repo (`datasets/epinions/`, ~356 k aristas trust / ~922 k ratings) pero **queda fuera de alcance por ahora**: es un orden de magnitud más grande que Ciao (~57 k / ~36 k) y el cómputo de baseline + zero-shot + multi-semilla no vale el costo en esta fase. Foco actual: **Ciao + MovieLens**. Si más adelante hace falta réplica cross-dataset del positivo trust, buscar un dataset con grafo explícito de tamaño comparable a Ciao (o un poco mayor), no a escala Epinions. Hasta entonces A2 no bloquea nada.
 
-```bash
-conda run --no-capture-output -n mafpin python -m recommender.experiment.cold_start \
-  --dataset epinions --mode zero_shot_trust --variants M1 M2_trust M3_trust --seed 42
-```
+**A3. Ablación de features trust (opcional; solo si A se publica aparte).** M2_trust usa exactamente **tres** features (`networks/social.py::compute_trust_features`): `trust_in_degree`, `trust_out_degree`, `trust_pagerank`. M3_trust añade `trust_community_size` y `trust_boundary_frac` (modularidad greedy sobre el trust no dirigido — no DEMON ni LPH). Con tres features la ablación directa es más simple y más fuerte que SHAP:
 
-Criterio de replicación: Δ(M2_trust−M1) > 0 con CI limpio. No exigimos la misma magnitud, solo el mismo fenómeno.
+- **Leave-one-out** (3 fits) + **single-feature** (3 fits) + M2_trust completo → 7 fits por semilla.
+- RMSE estrato 0 con delta pareado per-user y CI bootstrap vs M2_trust completo.
+- Spearman entre las tres features: si `trust_pagerank` ≈ `trust_in_degree`, la historia es "número de seguidores" y se dice explícitamente.
 
-**A3. Ablación de las features trust (opcional pero barato).** *(Corregido: la versión anterior hablaba de betweenness/eigenvector/closeness, que son features del core sobre la red inferida y no existen en este track.)* M2_trust usa exactamente **tres** features (`networks/social.py::compute_trust_features`): `trust_in_degree`, `trust_out_degree` y `trust_pagerank`; M3_trust añade `trust_community_size` y `trust_boundary_frac` (modularidad greedy sobre el grafo trust no dirigido — no DEMON ni LPH). Con solo tres features no hace falta SHAP: la ablación directa es más simple y más fuerte:
+Implementación: script `scripts/route_b_trust_ablation.py` que reutilice el split zero-shot y `build_trust_attribute_tables`, filtre columnas y entrene el mismo CMF por subset. **Si el paper es core+LPH, A3 se omite** — no aporta al argumento de la fusión.
 
-- **Leave-one-out:** re-entrenar M2_trust quitando una feature a la vez (3 fits) y **single-feature:** cada feature sola (3 fits), más el M2_trust completo. Siete fits por semilla — barato.
-- Comparar RMSE en estrato 0 con delta pareado per-user y CI bootstrap vs el M2_trust completo.
-- Reportar la correlación de Spearman entre las tres features sobre los usuarios del grafo trust: si `trust_pagerank` ≈ `trust_in_degree` (lo esperable), la historia interpretable es "número de seguidores", y eso se dice explícitamente.
+**Alcance (no negociable):**
 
-Implementación: hoy **no hay CLI para subsets de features**. Camino mínimo: script `scripts/route_b_trust_ablation.py` que reutilice el split zero-shot de `recommender/experiment/cold_start/splits.py` y `build_trust_attribute_tables` de `recommender/experiment/cold_start/trust_variants.py`, filtre columnas de la tabla de atributos de M2_trust y entrene el mismo CMF por subset. Nada más que eso.
+1. El SHAP de `shap_results.json` es del enhanced NetInf del core; **no** interpreta M2_trust.
+2. A3 no reemplaza el trabajo sobre la red inferida (B/C).
 
-**Dos aclaraciones de alcance que conviene dejar escritas:**
-
-1. **El SHAP existente no aplica aquí.** `shap_results.json` (2026-05-20) se calculó sobre el modelo enhanced del core — red inferida, otras features, otro modelo. No responde nada sobre la interpretabilidad del positivo 1; la interpretabilidad de M2_trust sale de la ablación A3, no de ese SHAP.
-2. **A3 no reemplaza el trabajo sobre la red inferida.** El análisis de features del core (SHAP incluido, si se refresca) sigue viviendo en los frentes B y C. Son dos modelos distintos con dos preguntas distintas: A3 pregunta *qué ancla a un usuario sin ratings vía grafo explícito*; B/C preguntan *si la señal comunitaria de la red inferida aporta algo*.
-
-**Salida A:** `docs/experiments/findings/route_b/trust_consolidation_findings.md` con las tablas multi-semilla, la replicación, la ablación y veredicto. Si A1+A2 pasan, este resultado queda listo como claim central o como paper corto independiente.
+**Salida A:** `trust_consolidation_findings.md` (A1; A3 solo si paper corto trust; A2 aparcado). En el paper de fusión, trust entra como *auxiliar* o manuscript separado.
 
 ### Frente B — Afinar el positivo M4c (verificar antes de celebrar)
 
-**B1. Multi-semilla en MovieLens.** Re-correr `final_eval --beyond-accuracy` para M1, M2, M3 y M4c con las cinco semillas (redes e HP congelados del manifest; solo cambia `--seed`). Dos comportamientos verificados en `recommender/experiment/final_eval.py` que condicionan el loop:
+**B1. Multi-semilla en MovieLens (10).** Re-correr `final_eval --beyond-accuracy` para M1, M2, M3 y M4c (redes e HP congelados; solo cambia `--seed`). Comportamientos en `recommender/experiment/final_eval.py` que condicionan el loop:
 
-- `append_core_results` dedupea `core_experiment_results.csv` por `(dataset, model_variant)` quedándose con la **última** fila → cada semilla pisa la anterior, y además pisaría las filas canónicas de la campaña core. Lo mismo aplica a `data/<ds>/route_b/beyond_accuracy_results.csv` y al parquet per-user. Obligatorio: respaldar el CSV core antes del loop y archivar los artefactos por semilla.
-- `apply_final_eval_deltas` calcula `rmse_delta_vs_baseline` contra la fila M1 **de la misma sesión** → M1 debe correrse en cada semilla, no solo M4c.
+- `append_core_results` dedupea `core_experiment_results.csv` por `(dataset, model_variant)` quedándose con la **última** fila → cada semilla pisa la anterior y las filas canónicas del core. Obligatorio: backup del CSV core y archivar por semilla.
+- Beyond-accuracy ahora hace **upsert** (`upsert_beyond_accuracy_results` / per-user) por `(dataset, model_variant)` — antes un `to_csv` overwrite dejaba solo la última variante (bug B1). Con el fix, el loop por variante acumula M1–M4c en el CSV antes de archivar.
+- `apply_final_eval_deltas` calcula `rmse_delta_vs_baseline` contra M1 **de la misma sesión** → M1 debe correrse en cada semilla.
 
 ```bash
+SEEDS="42 7 123 2024 31337 101 999 12345 271828 314159"
 cp data/movielens/core_experiment_results.csv data/movielens/core_experiment_results.pre_b1_backup.csv
-for s in 42 7 123 2024 31337; do
+for s in $SEEDS; do
   for v in M1 M2 M3 M4c; do
     conda run --no-capture-output -n mafpin python pipeline.py \
       --steps final_eval --model-variant $v --beyond-accuracy \
@@ -115,28 +123,27 @@ for s in 42 7 123 2024 31337; do
      data/movielens/route_b/beyond_accuracy_per_user.parquet \
      data/movielens/route_b/multiseed/seed_$s/
 done
-# restaurar la sesión canónica del core en el path estándar:
 cp data/movielens/core_experiment_results.pre_b1_backup.csv data/movielens/core_experiment_results.csv
 ```
 
-Criterio: NDCG@10(M4c) > NDCG@10(M1) y cobertura(M4c) > cobertura(M1) en ≥ 4/5 semillas, con RMSE siempre dentro de guardia.
+Criterio: NDCG@10(M4c) > NDCG@10(M1) y cobertura(M4c) > cobertura(M1) en **≥ 8/10** semillas, con RMSE siempre dentro de guardia.
 
-**B2. Chequeo de mecanismo.** Dos piezas; ambas requieren cambios nuevos (hoy no existe ninguna de las dos):
+**B2. Chequeo de mecanismo.** Dos piezas nuevas:
 
-1. **Instrumentar el regularizador** (`recommender/enhanced/social_regularization.py`): loguear por corrida (i) fracción de aristas con al menos un extremo con comunidad, (ii) fracción de aristas efectivamente des-ponderadas por `boundary_downweight`, (iii) distribución de `w_uv` antes/después. Con 40 % de cobertura comunitaria en MovieLens (WP3), si (i) es baja, el mecanismo "boundary-aware" opera sobre una minoría de aristas y eso cambia la historia.
-2. **Correlación per-user con lo que ya se exporta.** Hoy **no hay NDCG per-user**: `compute_ranking_metrics` (`recommender/data.py`) calcula los scores por usuario internamente pero devuelve solo promedios. Opciones en orden: (a) usar lo disponible — RMSE per-user desde `data/<ds>/route_b/predictions/<variant>.parquet` (ya lo consume `recommender/experiment/route_b/boundary_strata.py`) y `cce_at_k`/`n_communities` per-user del parquet beyond-accuracy — y correlacionar Δ(M4c−M1) per-user con `n_communities`; (b) si se quiere NDCG per-user, exponer el vector desde `compute_ranking_metrics` (ya se calcula en el loop; es devolverlo, no recalcular).
+1. **Instrumentar el regularizador** (`recommender/enhanced/social_regularization.py`): loguear por corrida (i) fracción de aristas con ≥ 1 extremo con comunidad, (ii) fracción efectivamente des-ponderadas por `boundary_downweight`, (iii) distribución de `w_uv` antes/después. Con 40 % de cobertura en MovieLens (WP3), si (i) es baja, "boundary-aware" opera sobre una minoría de aristas.
+2. **Correlación per-user.** Hoy no hay NDCG per-user exportado. En orden: (a) Δ RMSE per-user desde `route_b/predictions/<variant>.parquet` y `cce_at_k`/`n_communities` del parquet beyond-accuracy → correlacionar Δ(M4c−M1) con `n_communities`; (b) si se quiere NDCG per-user, exponer el vector que `compute_ranking_metrics` ya calcula en el loop.
 
-Si la mejora de M4c viene de usuarios *sin* información comunitaria, el mecanismo no es el que contamos y toca renombrar la historia (regularización selectiva, no "boundary-aware").
+Si la mejora viene de usuarios *sin* información comunitaria → renombrar a regularización selectiva, no "boundary-aware".
 
-**B3. Segundo terreno con ranking sano.** Ciao no sirve como réplica de ranking. Dos opciones, en orden de preferencia: (a) esperar a las redes densificadas del Frente C y re-evaluar ahí mismo; (b) si C se retrasa, evaluar en Epinions cuando el ladder core exista. No inventar un protocolo de candidatos nuevo solo para esto: cambiaría la métrica y no sería comparable.
+**B3. Segundo terreno con ranking sano.** Ciao no sirve (NDCG degenerado). Por ahora la réplica es **MovieLens densificado (Frente C)** — mismo dataset, mejor sustrato comunitario. Un tercer dataset (trust/ranking) solo si aparece uno de tamaño Ciao-like; Epinions queda aparcado. No inventar protocolo de candidatos nuevo.
 
-**Salida B:** `route_b_m4c_verification_findings.md`. GO si B1 y B2 confirman (efecto estable + mecanismo real); en ese caso M4c pasa de anécdota a resultado defendible.
+**Salida B:** `route_b_m4c_verification_findings.md`. GO si B1 y B2 confirman (efecto estable + mecanismo real).
 
 ### Frente C — La compuerta: ¿el positivo de la fusión se puede obtener de forma segura?
 
-WP3 identificó la causa raíz de casi todos los nulos: con presupuesto de aristas k = 2N, las redes NetInf tienen transitividad bajísima y DEMON deja sin comunidad al 60–80 % de los usuarios. La señal LPH nunca tuvo sustrato. Antes de escribir "la fusión no funciona", hay que darle una prueba justa — y antes de dársela, fijar la vara.
+WP3: con k = 2N, transitividad baja y DEMON deja sin comunidad al 60–80 %. La señal LPH nunca tuvo sustrato. Antes de escribir "la fusión no funciona", prueba justa — y antes, vara fija.
 
-**C1. Densificación.** Regenerar redes con `--k-avg-degree 4` y `--k-avg-degree 6` en ambos datasets. `cascades.txt` y los deltas ya existen y no dependen de k, así que basta `--steps inference centrality communities`. **Operativo, importante:** esos steps escriben en `data/<ds>/inferred_networks/`, `data/<ds>/centrality_metrics/` y `data/<ds>/communities/` — exactamente los paths congelados del core (`DatasetPaths` no tiene override de salida). Snapshot antes de tocar nada; restaurar para volver a reproducir el core:
+**C1. Densificación.** Regenerar con `--k-avg-degree 4` y `6` en ambos datasets. `cascades.txt`/deltas no dependen de k → basta `--steps inference centrality communities`. Esos steps escriben en paths congelados del core (`DatasetPaths` sin override). Snapshot antes; restaurar para reproducir el core:
 
 ```bash
 for d in inferred_networks centrality_metrics communities; do
@@ -149,29 +156,30 @@ conda run --no-capture-output -n mafpin python pipeline.py \
   --log-file data/movielens/logs/route_b/c1_density_k4.log
 ```
 
-Regenerar in-place (con snapshot) tiene un beneficio concreto: los comandos existentes de WP1/WP2 ([route_b_commands.md](route_b_commands.md)) corren sin modificación sobre las redes densas.
+In-place + snapshot: los comandos de WP1/WP2 ([route_b_commands.md](route_b_commands.md)) corren sin cambio sobre redes densas.
 
-**C2. Corrección del constructo frontera** (lo que WP2 dejó mandado):
-- Estrato frontera exige `num_communities ≥ 2` y los usuarios con 0 comunidades quedan **fuera** de los percentiles de $\tilde{h}_v$ (elimina la masa degenerada en λ: 53 % de Ciao, 27 % de MovieLens). Punto de aplicación mínimo: la estratificación en `recommender/experiment/route_b/boundary_strata.py` — no hace falta tocar `networks/communities/lph.py`; el CSV puede seguir trayendo λ y la exclusión se hace al estratificar, dejándolo declarado en el findings.
-- DEMON siempre con `seed=42` (ya cableado: `Defaults.COMMUNITY_SEED`, `detect_overlapping_communities(..., seed=...)`).
+**C2. Corrección del constructo frontera:**
 
-**C3. La compuerta (pre-registrar antes de correr C1, con umbrales inamovibles):**
+- Estrato frontera exige `num_communities ≥ 2`; usuarios con 0 comunidades **fuera** de los percentiles de $\tilde{h}_v$ (elimina la masa en λ: 53 % Ciao, 27 % MovieLens). Aplicar en `boundary_strata.py` al estratificar; el CSV puede seguir trayendo λ.
+- DEMON con `seed=42` (ya cableado: `Defaults.COMMUNITY_SEED`).
+
+**C3. Compuerta (pre-registrar antes de C1):**
 
 | Condición | Umbral |
 |---|---|
-| Cobertura comunitaria | ≥ 60 % de usuarios con ≥ 1 comunidad, en ≥ 1 dataset |
-| Población frontera | estrato B25 (con `num_communities ≥ 2`) con N ≥ 30 en ese dataset |
-| Estabilidad (WP3 rápido sobre la densidad elegida) | ρ Spearman α-vecinos ≥ 0.7 y Jaccard(B10) ≥ 0.5 |
+| Cobertura comunitaria | ≥ 60 % usuarios con ≥ 1 comunidad, en ≥ 1 dataset |
+| Población frontera | B25 con `num_communities ≥ 2` y N ≥ 30 |
+| Estabilidad (WP3 rápido) | ρ Spearman α-vecinos ≥ 0.7 y Jaccard(B10) ≥ 0.5 |
 
-- **Si la compuerta NO pasa** con k=4 ni k=6: se cierra la vía. El artículo es el diagnóstico ("las señales de frontera comunitaria no son obtenibles de forma segura sobre redes de difusión inferidas dispersas, y este es el mecanismo"), que con WP1–WP3 ya está al 80 %.
-- **Si la compuerta pasa:** los artefactos congelados del core dejan de aplicar sobre las redes densas — los índices α de `experiment_manifest.json` y `network_selection_results.json` pertenecen al grid k=2. El flujo mínimo válido es la escalera core reducida a M2, M3 y M4c: Etapa A `hypertune` (50 trials enhanced / 200 social — mismo presupuesto que recibió el core), Etapa B `recommend --all-networks`, `network_selection`, y entonces WP1 + WP2 con el constructo corregido. `canonical_baseline.json` (M1) no depende de la red y se reutiliza. Criterios idénticos a los del protocolo (§4.5 y §5.5). Si aparecen los efectos → paper de método, y solo entonces WP4 completo (baselines externos, Epinions, multi-semilla global).
+- **Gate NO pasa** en k=4 ni k=6 → artículo diagnóstico (señales de frontera no obtenibles de forma segura sobre redes NetInf dispersas).
+- **Gate pasa** → HP/índices α del core (k=2) no aplican. Escalera reducida M2/M3/M4c: hypertune (50 enhanced / 200 social) → `recommend --all-networks` → `network_selection` → WP1+WP2 con constructo corregido. M1 (`canonical_baseline.json`) se reutiliza. Criterios del protocolo §4.5 / §5.5. Efectos → paper de método. WP4 (baselines externos, dataset grande tipo Epinions) queda **después** y fuera de esta fase.
 
-**Salida C:** `route_b_gate_findings.md` con el veredicto de compuerta, y `route_b_dense_wp1_wp2_findings.md` si se cruza.
+**Salida C:** `route_b_gate_findings.md`; si se cruza, `route_b_dense_wp1_wp2_findings.md`.
 
 ## Orden y punto de decisión
 
-1. **A1, A2 y B1, B2 primero** (baratos, paralelizables). El positivo trust queda blindado o herido; M4c queda confirmado o degradado a nota al pie.
-2. **C1–C3 después** (o en paralelo si hay cómputo), con el pre-registro de la compuerta commiteado **antes** del primer run.
-3. **Sesión de decisión al cierre:** con A, B y el veredicto de compuerta sobre la mesa, se elige el artículo — método (fusión bajo precondición de cobertura) o diagnóstico (por qué la fusión no es obtenible en redes dispersas + qué sí funciona). En ambos, el positivo trust entra como resultado central o coprotagonista, y ninguna cifra titular se publica sin su multi-semilla.
+1. **Si el paper es core+LPH: B1/B2 y C1–C3 primero** (MovieLens + Ciao). Ahí está el hilo de la fusión. A1 (10 semillas Ciao) en paralelo como seguro barato del resultado auxiliar; A3 se omite; A2 aparcado.
+2. **Si además se quiere paper corto trust:** A1 (+ A3); réplica cross-dataset solo con un corpus Ciao-like, no Epinions.
+3. **Sesión de decisión al cierre:** con B, el veredicto de compuerta C, y (opcional) A1 sobre la mesa → paper de método o de diagnóstico. El positivo trust **no** carga la tesis LPH: auxiliar o manuscript separado. Ninguna cifra titular sin su multi-semilla (10). Scope de esta fase: **Ciao + MovieLens**.
 
 La regla de oro no cambia: los umbrales se fijan antes de mirar, todo se reporta, y los artefactos congelados de la campaña core no se tocan.
