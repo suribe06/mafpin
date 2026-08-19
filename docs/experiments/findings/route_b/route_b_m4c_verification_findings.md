@@ -1,6 +1,7 @@
 # WP / Frente B — Verificación M4c (hallazgos)
 
 **Fecha:** 2026-08-06  
+**Narrativa:** el claim “único limpio M4c multi-métrica” quedó **reformulado** en WP1 per-user (2026-08-07) y en el [plan reconciliado](route_b_positives_and_refinement_plan.md). Este archivo documenta el multi-seed bajo el **criterio viejo** (NDCG∧cov); el FAIL sigue válido para *ese* umbral, no para el titular CCE-M3 / cov-M4c del WP1 nuevo.  
 **Scope:** **B1 + B2 completados** (MovieLens). B3 pendiente (Frente C).  
 **Fuentes:** `data/movielens/route_b/multiseed/` · `data/movielens/route_b/m4c_mechanism/` · `scripts/route_b_m4c_mechanism.py`  
 **Criterio B1:** NDCG@10(M4c) > NDCG@10(M1) **y** cobertura(M4c) > cobertura(M1) en ≥ 8/10 semillas, RMSE en guardia.  
