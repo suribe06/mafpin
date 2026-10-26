@@ -53,4 +53,4 @@ Bootstrap CCE (pareado, N=281, Holm):
 
 ## Ciao
 
-Sin re-run en este pase. Hallazgos 2026-08-05 siguen como referencia provisional bajo cutoff global.
+**Actualizado 2026-10-08 (per-user):** ver [route_b_next_steps_findings.md](route_b_next_steps_findings.md). Resumen: CCE≈flat (no replica M3↑CCE); cobertura máxima en **M3**; M4c/M4d ganan RMSE pero no BA. Bootstrap CCE vacío (sin M2 fresco).

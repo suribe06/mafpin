@@ -67,4 +67,4 @@ Controlled leave-k, `--skip-rebuild`, variantes M1/M2/M3/M3_soft:
 
 ## Ciao
 
-Sin re-run en este pase.
+**Actualizado 2026-10-08 (per-user):** ver [route_b_next_steps_findings.md](route_b_next_steps_findings.md). Estratos B10/B25 poblados; bootstrap frontera **nulo** (CIs cruzan 0). Cross-community sin ventaja social.

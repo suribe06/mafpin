@@ -21,7 +21,7 @@ Estático (misma partición): mean comunidades/usuario ≈ **1.04**; frac. front
 
 ## Ciao
 
-Sin re-run. Referencia 2026-08-05 (cutoff global): ρ media ≈ 0.977 — no actualizar hasta prereqs per-user.
+**Actualizado 2026-10-08 (per-user, k=2 restaurado):** ρ media α-vecinos ≈ **0.985**, Jaccard B10 ≈ **0.715** → interpretable. Detalle + densify k=4/6: [route_b_next_steps_findings.md](route_b_next_steps_findings.md).
 
 ## Veredicto
 
