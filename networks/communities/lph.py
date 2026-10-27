@@ -83,9 +83,9 @@ def _compute_network_homophily(G: nx.Graph, s: dict[int, int]) -> float:
 
     Uses the edge-based Pearson form (equivalent form, SI Eq. 12):
 
-        h = Σ_{(i,j)∈E} (s(i) − µq)(s(j) − µq)
-            ─────────────────────────────────────
-            Σ_{(i,j)∈E} (s(i) − µq)²
+        h =       Σ_{(i,j)∈E} (s(i) − µq)(s(j) − µq)
+            ─────────────────────────────────────────────
+            ½ Σ_{(i,j)∈E} [(s(i) − µq)² + (s(j) − µq)²]
 
     where µq = (1/2M) Σ_{(i,j)∈E} (s(i) + s(j)).
 
@@ -98,7 +98,12 @@ def _compute_network_homophily(G: nx.Graph, s: dict[int, int]) -> float:
     M = len(edges)
     mu_q = sum(s.get(u, 0) + s.get(v, 0) for u, v in edges) / (2 * M)
     numerator = sum((s.get(u, 0) - mu_q) * (s.get(v, 0) - mu_q) for u, v in edges)
-    denominator = sum((s.get(u, 0) - mu_q) ** 2 for u, v in edges)
+    # Both endpoints belong to the same marginal distribution in an undirected
+    # graph; including both makes h invariant to edge/node insertion order.
+    denominator = 0.5 * sum(
+        (s.get(u, 0) - mu_q) ** 2 + (s.get(v, 0) - mu_q) ** 2
+        for u, v in edges
+    )
 
     if denominator == 0.0:
         return 0.0

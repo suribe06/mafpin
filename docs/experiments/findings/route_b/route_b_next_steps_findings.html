@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"/>
+<title>Route B next steps — hallazgos</title>
+<style>
+body{font-family:Georgia,'Times New Roman',serif;font-size:11.5pt;line-height:1.35;color:#111;max-width:900px;margin:24px auto;padding:0 16px}
+h1,h2,h3{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.2}
+h1{font-size:1.55rem}h2{font-size:1.2rem;margin-top:1.4em}h3{font-size:1.05rem}
+table{border-collapse:collapse;width:100%;font-size:10pt;margin:.8em 0}
+th,td{border:1px solid #ccc;padding:4px 7px;vertical-align:top}
+th{background:#f3f3f3;text-align:left}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5pt}
+pre{background:#f7f7f7;padding:10px;overflow-x:auto}
+a{color:#0645ad;text-decoration:none}
+hr{border:none;border-top:1px solid #ddd;margin:1.4em 0}
+</style></head><body><h1 id="route-b-next-steps-hallazgos-ciao-per-user-frente-c-densificacion">Route B next steps — hallazgos (Ciao per-user + Frente C densificación)</h1>
+<p><strong>Fecha:</strong> 2026-10-08<br />
+<strong>Script:</strong> <code>scripts/run_route_b_next_steps.sh all</code><br />
+<strong>Log:</strong> <code>data/logs/route_b_next_steps.nohup.log</code><br />
+<strong>Wall-clock:</strong> 13:27 → 15:31 (~2 h 4 min)<br />
+<strong>Stamp:</strong> <code>20261008_132748</code><br />
+<strong>Split:</strong> per-user leave-last (canónico post-auditoría)<br />
+<strong>Plan:</strong> <a href="route_b_positives_and_refinement_plan.md">route_b_positives_and_refinement_plan.md</a></p>
+<p><strong>Alcance de esta corrida:</strong> Ciao Route B WP1–3 + densificar k=4/6 (ML+Ciao) + gate + <strong>restaurar redes k=2</strong>.<br />
+<strong>No incluido:</strong> retune ladder densa (<code>RUN_RETUNE</code>), WP4, multi-seed BA nuevo.</p>
+<hr />
+<h2 id="veredicto-ejecutivo">Veredicto ejecutivo</h2>
+<table>
+<thead>
+<tr>
+<th>Pregunta</th>
+<th>Respuesta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>¿Terminó limpio?</td>
+<td><strong>Sí</strong> (<code>FINISHED mode=all</code> 15:31:23); k=2 restaurado en ambos datasets</td>
+</tr>
+<tr>
+<td>¿Gate cobertura (≥60 % usuarios con ≥1 comunidad en ≥1 dataset)?</td>
+<td><strong>PASS</strong> vía <strong>MovieLens</strong> (k4 75 %, k6 90 %)</td>
+</tr>
+<tr>
+<td>¿Ciao llega a 60 %?</td>
+<td><strong>No</strong> (k4 40 %, k6 <strong>58 %</strong> — cerca, no cruza)</td>
+</tr>
+<tr>
+<td>¿Pool frontera (<code>num_communities≥2</code>, N≥30)?</td>
+<td><strong>PASS</strong> en las 4 celdas densas</td>
+</tr>
+<tr>
+<td>¿Estabilidad α-vecinos (ρ≥0.7, Jaccard B10≥0.5)?</td>
+<td><strong>Ciao densa: fuerte PASS</strong>; <strong>ML k4: PASS</strong>; <strong>ML k6: mixto</strong> (ρ media ~0.74 pero un vecino &lt;0.7; Jaccard media ~0.49)</td>
+</tr>
+<tr>
+<td>¿Ciao replica el patrón BA de ML (M3↑CCE, M4c↑cov)?</td>
+<td><strong>No.</strong> CCE ≈ flat; cobertura máxima en <strong>M3</strong>, no M4c</td>
+</tr>
+<tr>
+<td>¿WP2 frontera Ciao GO?</td>
+<td><strong>No</strong> — deltas M4*/M3 vs M1 con CI que cruzan 0</td>
+</tr>
+<tr>
+<td>¿Disparar retune denso overnight?</td>
+<td><strong>Condicional:</strong> sí solo en <strong>MovieLens k=4</strong> (cobertura+estabilidad más limpias). Ciao densificado <strong>no</strong> abre por sí solo el claim de fusión</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Lectura paper:</strong> densificar <strong>sí</strong> recupera sustrato comunitario usable en MovieLens. En Ciao la cobertura se acerca pero no cumple el umbral pre-registrado. El beyond-accuracy “M3=CCE / M4c=cobertura” <strong>no se replica</strong> en Ciao per-user → el hilo fusión sigue <strong>débil cross-dataset</strong>; lo más fuerte sigue siendo <strong>RMSE social (core)</strong> + <strong>trust zero-shot (A1)</strong>.</p>
+<hr />
+<h2 id="1-ciao-route-b-per-user">1. Ciao Route B (per-user)</h2>
+<p>Variantes frescas: <strong>M1, M3, M4c, M4d</strong> (manifest actual). Filas M2/M4a/M4b en CSV BA/preds son <strong>stale</strong> (cutoff viejo / N_CCE=32) — <strong>ignorar</strong> para claims.</p>
+<h3 id="wp1-beyond-accuracy">WP1 — Beyond-accuracy</h3>
+<p>Fuente: <code>data/ciao/route_b/beyond_accuracy_results.csv</code></p>
+<table>
+<thead>
+<tr>
+<th>Var</th>
+<th style="text-align: right;">RMSE</th>
+<th style="text-align: right;">NDCG@10</th>
+<th style="text-align: right;">CCE@10</th>
+<th style="text-align: right;">Coverage</th>
+<th style="text-align: right;">N ranked</th>
+<th style="text-align: right;">N CCE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>M1</td>
+<td style="text-align: right;">0.9190</td>
+<td style="text-align: right;">0.0036</td>
+<td style="text-align: right;">0.439</td>
+<td style="text-align: right;">0.0023</td>
+<td style="text-align: right;">2248</td>
+<td style="text-align: right;">464</td>
+</tr>
+<tr>
+<td>M3</td>
+<td style="text-align: right;">0.9196</td>
+<td style="text-align: right;">0.0022</td>
+<td style="text-align: right;">0.437</td>
+<td style="text-align: right;"><strong>0.0047</strong></td>
+<td style="text-align: right;">2248</td>
+<td style="text-align: right;">464</td>
+</tr>
+<tr>
+<td>M4c</td>
+<td style="text-align: right;">0.9163</td>
+<td style="text-align: right;">0.0012</td>
+<td style="text-align: right;">0.436</td>
+<td style="text-align: right;">0.0011</td>
+<td style="text-align: right;">2248</td>
+<td style="text-align: right;">464</td>
+</tr>
+<tr>
+<td>M4d</td>
+<td style="text-align: right;"><strong>0.9156</strong></td>
+<td style="text-align: right;">0.0013</td>
+<td style="text-align: right;"><strong>0.443</strong></td>
+<td style="text-align: right;">0.0009</td>
+<td style="text-align: right;">2248</td>
+<td style="text-align: right;">464</td>
+</tr>
+</tbody>
+</table>
+<p>Bootstrap pareado CCE/ILD/novelty: <strong>vacío</strong> (<code>n_users=0</code>) porque las comparaciones pre-registradas incluyen M2, ausente en el ladder fresco.</p>
+<p><strong>Lectura:</strong> NDCG sigue degenerado. CCE no separa M3 de M1. Cobertura: <strong>M3 gana</strong>, M4c/M4d pierden vs M1. Accuracy social (RMSE) sí favorece M4d/M4c — coherente con core Ciao, no con el titular BA de ML.</p>
+<h3 id="wp2-estratos-cross-community">WP2 — Estratos + cross-community</h3>
+<p>Fuente: <code>boundary_strata_*.csv</code>, <code>cross_community_items_results.csv</code></p>
+<p>Estratos poblados (M1/M3/M4c/M4d): B10=47, B25=70, MID=231, E75=116 ✅ (≥30).</p>
+<p>Bootstrap (mean Δ; + ⇒ primera variante mejor en RMSE según convención del CSV):</p>
+<table>
+<thead>
+<tr>
+<th>Estrato</th>
+<th>M3−M1</th>
+<th>M4c−M3</th>
+<th>M4d−M3</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B10</td>
+<td>CI cruza 0</td>
+<td>cruza 0</td>
+<td>cruza 0</td>
+</tr>
+<tr>
+<td>B25</td>
+<td>cruza 0</td>
+<td>cruza 0</td>
+<td>cruza 0</td>
+</tr>
+<tr>
+<td>MID</td>
+<td>~−0.007 (borde)</td>
+<td>cruza 0</td>
+<td>cruza 0</td>
+</tr>
+<tr>
+<td>E75</td>
+<td>cruza 0</td>
+<td>borde</td>
+<td>borde</td>
+</tr>
+</tbody>
+</table>
+<p>Cross-community (n=273 ratings frescos): M1 0.944 &lt; M4c 0.947 &lt; M4d 0.949 &lt; M3 0.953 — <strong>sin ventaja social</strong> en ese nicho (contraste con ML per-user).</p>
+<p><strong>Veredicto WP2 Ciao:</strong> <strong>NO-GO / nulo</strong> para concentración frontera.</p>
+<h3 id="wp3-estabilidad-k2-restaurado">WP3 — Estabilidad (k=2 restaurado)</h3>
+<p>Fuente: <code>data/ciao/route_b/community_stability.csv</code> (re-corrido post-restore)</p>
+<table>
+<thead>
+<tr>
+<th>Eje</th>
+<th style="text-align: right;">ρ media</th>
+<th style="text-align: right;">Jaccard B10 media</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>α vecinos (DEMON)</td>
+<td style="text-align: right;"><strong>0.985</strong></td>
+<td style="text-align: right;"><strong>0.715</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>SOPORTADA</strong> (muy por encima del umbral). Estático: mean <code>#comunidades</code> ≈ 0.72; frac. frontera ≈ 0.21.</p>
+<hr />
+<h2 id="2-frente-c-densificacion-y-gate">2. Frente C — densificación y gate</h2>
+<p>Snapshot k=2: <code>data/&lt;ds&gt;/route_b/dense_gate/k2_frozen_20261008_132748/</code><br />
+Métricas por k: <code>data/&lt;ds&gt;/route_b/dense_gate/k{4,6}/</code><br />
+Resumen: <code>data/route_b_dense_gate_summary_20261008_132748.csv</code><br />
+Redes canónicas <strong>restauradas a k=2</strong> al final.</p>
+<h3 id="cobertura-comunitaria-red-m3-congelada-del-core">Cobertura comunitaria (red M3 congelada del core)</h3>
+<table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th style="text-align: right;">k</th>
+<th style="text-align: right;">Frac. ≥1 com.</th>
+<th style="text-align: right;">Frac. ≥2 com.</th>
+<th style="text-align: right;">N≥2</th>
+<th>Cobertura≥60 %</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MovieLens</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;"><strong>0.750</strong></td>
+<td style="text-align: right;">0.683</td>
+<td style="text-align: right;">458</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td>MovieLens</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;"><strong>0.902</strong></td>
+<td style="text-align: right;">0.854</td>
+<td style="text-align: right;">573</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td>Ciao</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0.403</td>
+<td style="text-align: right;">0.377</td>
+<td style="text-align: right;">847</td>
+<td>FAIL</td>
+</tr>
+<tr>
+<td>Ciao</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;"><strong>0.581</strong></td>
+<td style="text-align: right;">0.567</td>
+<td style="text-align: right;">1275</td>
+<td>FAIL (cerca)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="estabilidad-wp3-sobre-redes-densas">Estabilidad WP3 sobre redes densas</h3>
+<table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th style="text-align: right;">k</th>
+<th style="text-align: right;">ρ media α-vecinos</th>
+<th style="text-align: right;">Jaccard B10 media</th>
+<th>Lectura</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ML</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0.863</td>
+<td style="text-align: right;">0.554</td>
+<td>interpretable</td>
+</tr>
+<tr>
+<td>ML</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0.735</td>
+<td style="text-align: right;">0.492</td>
+<td>ρ OK en media; Jaccard bajo el umbral 0.5</td>
+</tr>
+<tr>
+<td>Ciao</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0.961</td>
+<td style="text-align: right;">0.733</td>
+<td>fuerte</td>
+</tr>
+<tr>
+<td>Ciao</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0.935</td>
+<td style="text-align: right;">0.744</td>
+<td>fuerte</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gate-pre-registrado-plan">Gate pre-registrado (plan)</h3>
+<table>
+<thead>
+<tr>
+<th>Condición</th>
+<th>Umbral</th>
+<th>Resultado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cobertura</td>
+<td>≥60 % en ≥1 dataset</td>
+<td><strong>PASS (ML)</strong></td>
+</tr>
+<tr>
+<td>Pool frontera</td>
+<td>N(<code>num_communities≥2</code>)≥30</td>
+<td><strong>PASS</strong> (todas)</td>
+</tr>
+<tr>
+<td>Estabilidad</td>
+<td>ρ≥0.7 y Jaccard(B10)≥0.5</td>
+<td><strong>PASS Ciao</strong>; <strong>PASS ML k4</strong>; <strong>parcial ML k6</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Veredicto gate:</strong> <strong>PASS condicional en MovieLens densificado (preferir k=4 por estabilidad)</strong>. Ciao densificado mejora cobertura (40→58 %) pero <strong>no</strong> abre el umbral; no usar Ciao k=6 como terreno “justo” para titular fusión aún.</p>
+<hr />
+<h2 id="3-implicaciones-y-siguientes-pasos">3. Implicaciones y siguientes pasos</h2>
+<ol>
+<li><strong>No WP4</strong> todavía (BA no limpio cross-dataset).</li>
+<li><strong>Retune denso (opcional, overnight):</strong> solo si se decide perseguir el paper de método en ML:
+   <code>bash
+   RUN_RETUNE=1 RETUNE_DATASET=movielens RETUNE_K=4 \
+     ./scripts/run_route_b_next_steps.sh retune-dense</code>
+   Luego: <code>import_manifest</code> (M2+M3+M4c juntos) → <code>network_selection</code> → WP1+WP2 sobre redes densas → <code>route_b_dense_wp1_wp2_findings.md</code>.</li>
+<li><strong>Si no se retunea:</strong> narrativa candidata = paper <strong>empírico / diagnóstico</strong>:</li>
+<li>social RMSE revive bajo leave-last (core);</li>
+<li>trust zero-shot fuerte (A1);</li>
+<li>densificar desbloquea cobertura en ML pero <strong>no</strong> garantiza win BA de fusión en Ciao;</li>
+<li>señales frontera / BA siguen débiles o dataset-específicas.</li>
+<li>Actualizar a mano (si se quiere alinear docs antiguos): secciones Ciao en <code>route_b_wp{1,2,3}_findings.md</code> → apuntar aquí.</li>
+</ol>
+<hr />
+<h2 id="4-artefactos-clave">4. Artefactos clave</h2>
+<table>
+<thead>
+<tr>
+<th>Artefacto</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Log corrida</td>
+<td><code>data/logs/route_b_next_steps.nohup.log</code></td>
+</tr>
+<tr>
+<td>Gate summary</td>
+<td><code>data/route_b_dense_gate_summary_20261008_132748.csv</code></td>
+</tr>
+<tr>
+<td>Ciao BA / strata / WP3</td>
+<td><code>data/ciao/route_b/</code></td>
+</tr>
+<tr>
+<td>Dense archives</td>
+<td><code>data/&lt;ds&gt;/route_b/dense_gate/k{4,6}/</code></td>
+</tr>
+<tr>
+<td>Backup pre-run</td>
+<td><code>data/ciao/route_b_backup_before_next_steps_20261008_132748/</code></td>
+</tr>
+<tr>
+<td>Core CSV backup</td>
+<td><code>data/*/core_experiment_results.pre_next_steps_20261008_132748.csv</code></td>
+</tr>
+</tbody>
+</table></body></html>
