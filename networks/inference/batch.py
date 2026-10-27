@@ -18,6 +18,7 @@ def infer_networks_all_models(
     name_output: str = "inferred-network",
     r: float = Defaults.RANGE_R,
     networks_dir: Path | None = None,
+    n_jobs: int = 1,
 ) -> dict[str, bool]:
     """
     Run network inference for all three diffusion models.
@@ -33,6 +34,7 @@ def infer_networks_all_models(
         r:              Range factor for the log alpha grid.
         networks_dir:   Root directory for output networks.  Defaults to
             ``DatasetPaths(Datasets.DEFAULT).NETWORKS``.
+        n_jobs:         Parallel NetInf workers per model sweep.
 
     Returns:
         Dict mapping model name → success flag.
@@ -51,5 +53,6 @@ def infer_networks_all_models(
             name_output=name_output,
             r=r,
             networks_dir=networks_dir,
+            n_jobs=n_jobs,
         )
     return results

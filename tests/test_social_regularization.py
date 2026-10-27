@@ -91,6 +91,35 @@ class SocialEdgeNormalizationTests(unittest.TestCase):
                 normalization="bad",  # type: ignore[arg-type]
             )
 
+    def test_boundary_mechanism_stats_detects_downweight(self) -> None:
+        # Users 1-2 share a community; user 2 is a strong boundary → edge downweighted.
+        community_frame = pd.DataFrame(
+            {
+                "UserId": [1, 2, 3],
+                "community_ids": ["1", "1", ""],
+                "lph_score": [1.0, -5.0, 1.0],
+            }
+        ).set_index("UserId")
+        fake_graph = _FakeGraph([(1, 2), (1, 3)])
+
+        with (
+            patch.object(sr, "load_community_frame", return_value=community_frame),
+            patch.object(sr, "load_as_networkx", return_value=(fake_graph, None)),
+            patch.object(sr, "directed_to_undirected", return_value=fake_graph),
+        ):
+            stats = sr.compute_boundary_mechanism_stats(
+                dataset="movielens",
+                model_name="exponential",
+                network_index=0,
+                user_index=[1, 2, 3],
+                beta=1.0,
+            )
+
+        self.assertEqual(stats["n_edges"], 2)
+        self.assertGreater(float(stats["frac_endpoint_has_community"]), 0.0)
+        self.assertGreaterEqual(float(stats["frac_downweighted_given_jaccard"]), 1.0)
+        self.assertEqual(int(stats["n_jaccard_positive"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

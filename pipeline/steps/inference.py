@@ -6,6 +6,7 @@ import argparse
 
 from config import Defaults
 from pipeline._artifacts import _check_artifact_manifest
+from pipeline._cpu import _resolve_n_jobs
 
 
 def run_inference(args: argparse.Namespace) -> None:
@@ -22,6 +23,8 @@ def run_inference(args: argparse.Namespace) -> None:
     )
     _check_artifact_manifest(args.dataset, context="network inference")
     model = args.model
+    n_jobs = _resolve_n_jobs(args)
+    print(f"NetInf parallel workers: {n_jobs}")
     model_index_map = {"exponential": 0, "powerlaw": 1, "rayleigh": 2}
     if model:
         _ = compute_median_delta(dp.CASCADES)  # kept for reference
@@ -36,6 +39,7 @@ def run_inference(args: argparse.Namespace) -> None:
             name_output=str(dp.NETWORKS / model),
             r=Defaults.RANGE_R,
             networks_dir=dp.NETWORKS,
+            n_jobs=n_jobs,
         )
     else:
         infer_networks_all_models(
@@ -44,6 +48,7 @@ def run_inference(args: argparse.Namespace) -> None:
             k_avg_degree=args.k_avg_degree if args.k_avg_degree > 0 else None,
             networks_dir=dp.NETWORKS,
             cascades_file=dp.CASCADES,
+            n_jobs=n_jobs,
         )
 
     from visualization.model_plots import plot_alpha_edges

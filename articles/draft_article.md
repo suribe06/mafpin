@@ -24,7 +24,7 @@ One elegant response to this problem is to build, or rather infer, the social ne
 
 But MAFPIN's characterization of users, while richer than raw ratings, is still fundamentally a description of *where* a user sits in the network in terms of reachability, influence, and structural importance. It does not capture *what kind of position* that user occupies relative to the community structure of the network. A highly central user in a dense community and a moderately connected user who sits precisely at the interface between two communities can have very similar centrality scores and yet play structurally different roles. The second user is what the social network analysis literature calls a boundary-spanner or a broker [26]: someone whose value in the system comes not from accumulating connections within a single group, but from bridging groups that would otherwise not interact. In recommendation, this distinction is not merely academic. A boundary-spanning user is more likely to appreciate items that cross community lines, and their rating history may contain the very signal needed to produce recommendations that expand beyond the echo chambers that most collaborative filtering systems naturally reinforce.
 
-It is at this point that a recent contribution from the network analysis side becomes directly relevant. Barraza, Ravetti, and Sánchez-Cambronero [2] introduced Local Pluralistic Homophily ($\tilde{h}_v$), a metric designed specifically for the case of *overlapping* community structures. The core idea is to ask, for each node $v$: how much of its community identity appears represented in its immediate neighborhood? If most of $v$'s neighbors share all of $v$'s community memberships, then $v$ is well embedded within its communities and $\tilde{h}_v$ is high. If, on the contrary, $v$'s community membership is systematically misaligned with its neighbors — meaning its neighbors belong to communities that $v$ does not belong to, and vice versa — then $\tilde{h}_v$ is low (or negative), signaling that $v$ occupies a structurally heterogeneous position, an interface between communities. The authors show that $\tilde{h}_v$ is largely orthogonal to standard centrality measures and identifies structurally distinct node populations in empirical networks from platforms as varied as DBLP, Twitch, GitHub, and Amazon [2].
+It is at this point that a recent contribution from the network analysis side becomes directly relevant. Barraza, Ramírez-Ovalle, Álvarez, and Fernández [2] introduced Local Pluralistic Homophily ($\tilde{h}_v$), a metric designed specifically for the case of *overlapping* community structures. The core idea is to ask, for each node $v$: how much of its community identity appears represented in its immediate neighborhood? If most of $v$'s neighbors share all of $v$'s community memberships, then $v$ is well embedded within its communities and $\tilde{h}_v$ is high. If, on the contrary, $v$'s community membership is systematically misaligned with its neighbors — meaning its neighbors belong to communities that $v$ does not belong to, and vice versa — then $\tilde{h}_v$ is low (or negative), signaling that $v$ occupies a structurally heterogeneous position, an interface between communities. The authors show that $\tilde{h}_v$ is largely orthogonal to standard centrality measures and identifies structurally distinct node populations in empirical networks from platforms as varied as DBLP, Twitch, GitHub, and Amazon [2].
 
 The fusion proposed in this article is, at its most fundamental level, about adding this second kind of information to the first. MAFPIN already tells the recommender how *central* each user is. The extension we propose tells it how *boundary-spanning* each user is. These two things are different, and both matter. A user who is central but deeply embedded within a single community is useful for predicting preferences within that community. A user who is less central but bridges communities is useful for predicting preferences that cross community lines — and potentially for achieving recommendation diversity without sacrificing relevance. Putting both types of information into the attribute matrix of the CMF, and then allowing boundary information to also modulate how strongly the model regularizes adjacent users' latent factors toward each other, constitutes the complete methodology we describe here.
 
@@ -104,9 +104,11 @@ $$\delta_v = \frac{1}{d_v} \sum_{i \in N(v)} |s(v) - s(i)|$$
 
 where $d_v = |N(v)|$ is the degree of $v$. A small $\delta_v$ indicates that $v$'s structural position is similar to that of its neighbors; a large $\delta_v$ indicates that $v$ occupies an atypical position in its local context.
 
-**Step 3 — Network-level reference.** Compute a reference level $\lambda$ that captures the average structural context across the entire network:
+**Step 3 — Network-level reference.** Compute the global assortativity coefficient
+$h$ from Equation 1 of Barraza et al. using the same scalar attribute $s(\cdot)$,
+then define:
 
-$$\bar{h} = \frac{1}{|V|}\sum_{v \in V} s(v), \qquad \lambda = \frac{\bar{h} + \sum_{v \in V} \delta_v}{|V|}$$
+$$\lambda = \frac{h + \sum_{v \in V} \delta_v}{|V|}$$
 
 **Step 4 — Final score.** Assign the local pluralistic homophily score:
 
@@ -128,14 +130,16 @@ where $\mathcal{L}$ is the CMF objective from Section 3.2. The weight $w_{uv}$ e
 
 $$w_{uv} = J\bigl(C(u), C(v)\bigr) \cdot \bigl(1 - \beta \cdot \max(b_u, b_v)\bigr)$$
 
-where $J(C(u), C(v)) = |C(u) \cap C(v)| / |C(u) \cup C(v)|$ is the Jaccard similarity of community memberships, $b_u \in \{0, 1\}$ is the binary boundary indicator of user $u$ (1 if $\tilde{h}_u$ falls below a threshold, 0 otherwise), and $\beta \in [0, 1]$ controls how much the boundary status reduces the regularization weight.
+where $J(C(u), C(v)) = |C(u) \cap C(v)| / |C(u) \cup C(v)|$ is the Jaccard similarity of community memberships, $b_u \in [0,1]$ is the implementation's continuous boundary intensity derived from negative $\tilde{h}_u$, and $\beta \in [0, 1]$ controls how much the boundary intensity reduces the regularization weight.
 
 The intuition is this: when two users share many communities and neither is a boundary-spanner, their latent factors should be pulled close. When at least one of them is a boundary-spanner, the pull should be weaker, because the structural value of that user lies precisely in the heterogeneity of their latent representation. Uniform social regularization would average away this heterogeneity; adaptive weighting preserves it.
 
 We also consider three alternative weight schemes for comparison:
 - **uniform**: $w_{uv} = 1$ for all edges (standard social regularization)
 - **community\_jaccard**: $w_{uv} = J(C(u), C(v))$ (community-weighted, boundary-unaware)
-- **bridge\_preserve**: $w_{uv} = J(C(u), C(v)) + \gamma \cdot \max(b_u, b_v)$ (boundary users receive *higher* weights, not lower, to signal that their latent position matters most)
+- **bridge\_preserve**:
+  $w_{uv} = \sigma\!\left(\gamma J(C(u), C(v))-\beta\max(b_u,b_v)\right)$,
+  a sigmoid balance between shared-community agreement and boundary tension.
 
 ---
 
@@ -461,7 +465,7 @@ The theoretical contribution of this work is, at its most condensed: it is not e
 
 [1] S. Uribe, C.E. Ramirez, and J. Finke, "Recommender Systems Based on Matrix Factorization and the Properties of Inferred Social Networks," *Discrete Mathematics, Algorithms and Applications*, World Scientific Publishing Company, 2023.
 
-[2] R. Barraza, M. Ravetti, and S. Sánchez-Cambronero, "Local Pluralistic Homophily for Boundary-Spanning Node Detection in Overlapping Community Networks," *Applied Sciences*, 2025.
+[2] F. Barraza, C. Ramírez-Ovalle, A. Álvarez, and A. Fernández, "Local Pluralistic Homophily for Boundary-Spanning Node Detection in Overlapping Community Networks," *Applied Sciences*, 2025.
 
 [3] Y. Koren, R. Bell, and C. Volinsky, "Matrix Factorization Techniques for Recommender Systems," *IEEE Computer*, vol. 42, no. 8, pp. 30–37, 2009.
 

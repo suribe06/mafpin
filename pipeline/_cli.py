@@ -203,8 +203,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         dest="n_jobs",
         help=(
-            "Number of parallel worker processes for the recommend step. "
-            "1 = sequential (default). -1 = CPU cap from --cpu-fraction."
+            "Number of parallel worker processes for recommend network eval "
+            "and NetInf alpha sweeps. 1 = sequential (default). "
+            "-1 = floor(cpu_count * --cpu-fraction) (~60% with --cpu-fraction 0.6)."
         ),
     )
     parser.add_argument(

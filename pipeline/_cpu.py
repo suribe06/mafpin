@@ -12,6 +12,17 @@ def _cpu_thread_limit(cpu_fraction: float) -> int:
     return max(1, int(cpu_count * safe_fraction))
 
 
+def _resolve_n_jobs(args: argparse.Namespace) -> int:
+    """Parallel workers for NetInf alpha sweep / network eval.
+
+    ``--n-jobs -1`` (or unset default handled by caller) → floor(cpu_fraction * cores).
+    """
+    n_jobs = int(getattr(args, "n_jobs", 1))
+    if n_jobs == -1:
+        return _cpu_thread_limit(float(getattr(args, "cpu_fraction", 0.6)))
+    return max(1, n_jobs)
+
+
 def _resolve_cmf_nthreads(args: argparse.Namespace) -> int:
     explicit = getattr(args, "cmf_nthreads", 0)
     if explicit and explicit > 0:

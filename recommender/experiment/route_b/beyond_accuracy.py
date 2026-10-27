@@ -108,20 +108,22 @@ def cce_at_k(
     user_coms: set[int],
     item_dominant: dict[int, set[int]],
 ) -> float:
+    """Cross-community exposure @K: (1/K) Σ 1[D(i) ∩ C(u) = ∅].
+
+    Items without a known train dominant community contribute 0 (not counted
+    as cross-community). Users without communities return NaN.
+    """
     if not top_items or not user_coms:
         return float("nan")
+    k = len(top_items)
     hits = 0
-    counted = 0
     for iid in top_items:
         d = item_dominant.get(int(iid))
         if d is None:
             continue
-        counted += 1
         if d.isdisjoint(user_coms):
             hits += 1
-    if counted == 0:
-        return float("nan")
-    return float(hits / counted)
+    return float(hits / k)
 
 
 def extract_item_factors(model) -> tuple[np.ndarray | None, dict[int, int]]:

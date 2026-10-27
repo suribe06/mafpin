@@ -2,9 +2,11 @@
 
 ---
 
-## Definition
+## Jaccard Neighborhood Community Overlap (Legacy Proxy)
 
-**Local Pluralistic Homophily (LPH)** measures how similar a node's community memberships are to those of its immediate neighbours.  
+The repository historically called the following Jaccard overlap proxy
+**Local Pluralistic Homophily**. It measures how similar a node's community
+memberships are to those of its immediate neighbours:
 It quantifies the degree to which nodes that are linked to each other also belong to the same overlapping communities.
 
 Formally, for a node $v$ in graph $G = (V, E)$:
@@ -20,6 +22,10 @@ where:
 $$J(A, B) = \frac{|A \cap B|}{|A \cup B|}$$
 
 $\text{LPH}(v) \in [0, 1]$ for all $v$.
+
+This proxy is **not** the normalized $\tilde h_v$ metric defined by Equations
+(3)–(6) of Barraza et al. (2025). The paper metric is specified separately
+below and is the value stored in `lph_score`.
 
 ---
 
@@ -74,7 +80,7 @@ ASLPAw is faster and produces softer, probabilistic community assignments. It is
 
 ## Implementation
 
-LPH is computed in `networks/communities.py`:
+The Jaccard proxy is computed in `networks/communities/lph.py`:
 
 ```python
 from networks.communities import compute_local_pluralistic_homophily
@@ -117,12 +123,15 @@ among its immediate neighbors. No weighting is applied.
 
 #### Step 2 — Network-level pluralistic homophily h
 
-Compute the Pearson-style edge assortativity using s(·) as node attribute
-(equivalent form, Supplementary S1):
+Compute the undirected Pearson edge assortativity using s(·) as node attribute
+(Equation 1, with the scalar attribute defined by Equation 3):
 
-$$h = \frac{\sum_{(i,j)\in E}(s(i)-\mu_q)(s(j)-\mu_q)}{\sum_{(i,j)\in E}(s(i)-\mu_q)^2}$$
+$$h = \frac{\sum_{(i,j)\in E}(s(i)-\mu_q)(s(j)-\mu_q)}
+{\tfrac12\sum_{(i,j)\in E}\left[(s(i)-\mu_q)^2+(s(j)-\mu_q)^2\right]}$$
 
 where $\mu_q = \tfrac{1}{2M}\sum_{(i,j)\in E}(s(i)+s(j))$ is the degree-weighted mean.
+Both edge endpoints must contribute to the marginal variance; otherwise the
+result depends on the arbitrary orientation returned for an undirected edge.
 
 #### Step 3 — Local dissimilarity δv
 
@@ -130,6 +139,10 @@ $$\delta_v = \frac{1}{d_v}\sum_{i \in N(v)} |s(v) - s(i)|, \qquad \delta_v = 0 \
 
 This is the mean absolute difference between v's alignment score and those of its
 neighbors.
+
+Repository convention for an isolated node ($d_v=0$): $\delta_v=0$. The
+provided paper excerpt does not specify this edge case, so it must be reported
+as an implementation convention rather than a literature requirement.
 
 #### Step 4 — Scaling factor λ
 
@@ -167,31 +180,32 @@ random removal while preserving global connectivity.
 | Range | [0, 1] | $(-\infty, \lambda]$ |
 | Global reference | None | Network-level assortativity h |
 | Boundary signal | Low value | Strongly negative value |
-| Degree bias | Present | Corrected via δv and λ |
+| Degree dependence | Direct neighborhood average | Reduced by local averaging; not proven degree-independent |
 
 ---
 
 ## Implementation of h̃v
 
-`compute_lph_paper(G, membership)` in `networks/communities.py` implements Algorithm 1
-and returns a `dict[node_id, float]` of h̃v scores. The result is stored in the
+`compute_lph_paper(G, membership)` in `networks/communities/lph.py` implements
+Equations (3)–(6) and returns a tuple of dictionaries
+`(h_tilde, s_values, delta_values)`. The h̃v result is stored in the
 `lph_score` column of the communities CSV and loaded into the user-side attribute
-matrix by `recommender/enhanced.py`.
+matrix by `recommender/enhanced/features.py`.
 
 ```python
 from networks.communities import compute_lph_paper
 
 G = ...            # networkx graph
 membership = ...   # dict[node_id, set[int]]  — community-index sets per node
-htilde = compute_lph_paper(G, membership)
-# htilde: dict[node_id, float]  — boundary score; most negative = strongest boundary
+htilde, s_values, delta_values = compute_lph_paper(G, membership)
+# htilde: dict[node_id, float] — lower = stronger local misalignment
 ```
 
 ---
 
 ## Visualisation
 
-Community-level and LPH plots are available in `visualization/community_plots.py`:
+Community-level and LPH plots are available under `visualization/community_plots/`.
 
 - `plot_lph_distribution` — histogram of LPH values across nodes and models.
 - `plot_alpha_vs_lph` — how mean LPH evolves across the alpha grid.

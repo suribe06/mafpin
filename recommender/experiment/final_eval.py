@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,7 @@ from recommender.data import (
     evaluate_ranking,
     evaluate_single_split,
     metrics_are_reasonable,
+    warm_test_slice,
 )
 from recommender.enhanced.features import load_network_features
 from recommender.enhanced.model import fit_enhanced_cmf
@@ -212,6 +213,20 @@ def evaluate_variant_global_test(
 
     metrics = evaluate_single_split(model, test_df)
     ranking = evaluate_ranking(model, train_df, test_df, k=ranking_k)
+    warm = warm_test_slice(train_df, test_df)
+    if len(warm) > 0:
+        warm_metrics = evaluate_single_split(model, warm)
+        warm_ranking = evaluate_ranking(model, train_df, warm, k=ranking_k)
+    else:
+        warm_metrics = {"rmse": float("nan"), "mae": float("nan"), "r2": float("nan")}
+        warm_ranking = {
+            "ndcg_at_k": float("nan"),
+            "precision_at_k": float("nan"),
+            "recall_at_k": float("nan"),
+            "mrr": float("nan"),
+        }
+    train_users = list(train_df["UserId"].unique())
+    n_cold_user = int((~test_df["UserId"].isin(train_users)).sum())
     reasonable = metrics_are_reasonable(metrics, pd.Series(test_df["Rating"]))
     if not reasonable:
         print(
@@ -227,6 +242,14 @@ def evaluate_variant_global_test(
             "precision_at_10": ranking["precision_at_k"],
             "recall_at_10": ranking["recall_at_k"],
             "mrr": ranking["mrr"],
+            "rmse_warm": warm_metrics["rmse"],
+            "mae_warm": warm_metrics["mae"],
+            "r2_warm": warm_metrics["r2"],
+            "ndcg_at_10_warm": warm_ranking["ndcg_at_k"],
+            "n_test": int(len(test_df)),
+            "n_warm_test": int(len(warm)),
+            "n_cold_user_test": n_cold_user,
+            "warm_test_frac": float(len(warm) / len(test_df)) if len(test_df) else 0.0,
             "valid_metric_row": reasonable,
         }
     )
@@ -307,13 +330,56 @@ def append_core_results(rows: list[dict[str, Any]], path: Path) -> None:
     df_new = pd.DataFrame(rows)
     if path.exists():
         df_old = pd.read_csv(path)
-        df_new = pd.concat([df_old, df_new], ignore_index=True)
+        df_new = cast(pd.DataFrame, pd.concat([df_old, df_new], ignore_index=True))
         df_new = df_new.drop_duplicates(subset=["dataset", "model_variant"], keep="last")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     df_new.to_csv(tmp, index=False)
     tmp.replace(path)
     print(f"Core experiment results → {path}")
+
+
+def upsert_beyond_accuracy_results(rows: list[dict[str, Any]], path: Path) -> None:
+    """Merge beyond-accuracy rows by (dataset, model_variant); keep last.
+
+    ``final_eval`` is often called once per variant in a multi-seed loop. A plain
+    ``to_csv`` overwrite left only the last variant on disk (B1 archival bug).
+    """
+    df_new = pd.DataFrame(rows)
+    if path.exists() and path.stat().st_size > 0:
+        df_old = pd.read_csv(path)
+        df_new = cast(pd.DataFrame, pd.concat([df_old, df_new], ignore_index=True))
+        df_new = df_new.drop_duplicates(subset=["dataset", "model_variant"], keep="last")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    df_new.to_csv(tmp, index=False)
+    tmp.replace(path)
+    print(f"Beyond-accuracy → {path}")
+
+
+def upsert_beyond_accuracy_per_user(frame: pd.DataFrame, path: Path) -> None:
+    """Replace per-user beyond-accuracy rows for the variants present in *frame*."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    variants = list({str(v) for v in frame["model_variant"].tolist()})
+    if path.exists() and path.stat().st_size > 0:
+        try:
+            old = pd.read_parquet(path)
+        except Exception:
+            csv_fallback = path.with_suffix(".csv")
+            old = (
+                pd.read_csv(csv_fallback) if csv_fallback.exists() else pd.DataFrame()
+            )
+        if not old.empty and "model_variant" in old.columns:
+            keep = ~old["model_variant"].astype(str).isin(variants)
+            old = cast(pd.DataFrame, old.loc[keep])
+            frame = cast(pd.DataFrame, pd.concat([old, frame], ignore_index=True))
+    try:
+        frame.to_parquet(path, index=False)
+        print(f"Beyond-accuracy per-user → {path}")
+    except Exception:
+        csv_path = path.with_suffix(".csv")
+        frame.to_csv(csv_path, index=False)
+        print(f"Beyond-accuracy per-user → {csv_path}")
 
 
 def run_final_eval(
@@ -418,8 +484,9 @@ def run_final_eval(
                     ba_per_user_frames.append(tmp)
                 rows.append(row)
                 print(
-                    f"  Global test — RMSE: {row['rmse']:.4f}  "
-                    f"MAE: {row['mae']:.4f}  R²: {row['r2']:.4f}  "
+                    f"  Test — RMSE: {row['rmse']:.4f}  "
+                    f"warm RMSE: {row['rmse_warm']:.4f}  "
+                    f"(warm {row['n_warm_test']}/{row['n_test']})  "
                     f"NDCG@10: {row['ndcg_at_10']:.4f}",
                     flush=True,
                 )
@@ -428,9 +495,15 @@ def run_final_eval(
                     "mae": row["mae"],
                     "r2": row["r2"],
                     "ndcg_at_10": row["ndcg_at_10"],
+                    "rmse_warm": float(row["rmse_warm"]),
+                    "n_warm_test": float(row["n_warm_test"]),
+                    "warm_test_frac": float(row["warm_test_frac"]),
                 }
                 if beyond_accuracy and "ba_cce_at_k_mean" in row:
                     metrics_log["cce_at_10"] = float(row["ba_cce_at_k_mean"])
+                    metrics_log["n_users_with_cce"] = float(
+                        row.get("ba_n_users_with_cce", float("nan"))
+                    )
                 mlflow.log_metrics(metrics_log)
 
     apply_final_eval_deltas(
@@ -450,20 +523,23 @@ def run_final_eval(
                     "ndcg_at_10": row.get("ndcg_at_10"),
                 }
             )
-        pd.DataFrame(ba_rows).to_csv(route_paths.BEYOND_ACCURACY, index=False)
-        print(f"Beyond-accuracy → {route_paths.BEYOND_ACCURACY}")
+        upsert_beyond_accuracy_results(ba_rows, route_paths.BEYOND_ACCURACY)
         if ba_per_user_frames:
-            per_user_all = pd.concat(ba_per_user_frames, ignore_index=True)
-            try:
-                per_user_all.to_parquet(
-                    route_paths.BEYOND_ACCURACY_PER_USER, index=False
-                )
-            except Exception:
-                per_user_all.to_csv(
-                    route_paths.BEYOND_ACCURACY_PER_USER.with_suffix(".csv"),
-                    index=False,
-                )
-            print(f"Beyond-accuracy per-user → {route_paths.BEYOND_ACCURACY_PER_USER}")
+            per_user_all = cast(
+                pd.DataFrame, pd.concat(ba_per_user_frames, ignore_index=True)
+            )
+            upsert_beyond_accuracy_per_user(
+                per_user_all, route_paths.BEYOND_ACCURACY_PER_USER
+            )
+            from recommender.experiment.route_b.beyond_accuracy_stats import (
+                write_beyond_accuracy_bootstrap,
+            )
+
+            write_beyond_accuracy_bootstrap(
+                per_user_all,
+                route_paths.BEYOND_ACCURACY_BOOTSTRAP,
+                seed=random_state,
+            )
 
     # Keep core CSV free of Route B-only columns.
     core_rows = [
@@ -581,6 +657,6 @@ def run_canonical_baseline(
             }
         )
 
-    save_search_results(search, path=dest)
-    print(f"Canonical baseline saved → {dest}")
-    return search
+        save_search_results(search, path=dest)
+        print(f"Canonical baseline saved → {dest}")
+        return search

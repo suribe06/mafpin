@@ -130,15 +130,22 @@ def load_and_split_dataset(
     data = load_dataset(dataset=dataset, filename=filename)
 
     strategy = getattr(Split, "STRATEGY", "random")
-    if strategy == "temporal":
+    if strategy in ("temporal", "temporal_global"):
         if "timestamp" not in data.columns:
             raise ValueError(
                 "Temporal split requires a 'timestamp' column in the dataset. "
                 "Load the dataset with timestamp support or set Split.STRATEGY='random'."
             )
-        train_df, test_df = split_data_temporal(data, test_size=Split.TEST_SIZE)
+        if strategy == "temporal_global":
+            train_df, test_df = split_data_temporal_global(
+                data, test_size=Split.TEST_SIZE
+            )
+            label = "temporal_global"
+        else:
+            train_df, test_df = split_data_temporal(data, test_size=Split.TEST_SIZE)
+            label = "temporal_per_user"
         print(
-            f"Global split (temporal, test_size={Split.TEST_SIZE}): "
+            f"Split ({label}, test_size={Split.TEST_SIZE}): "
             f"{len(train_df)} train / {len(test_df)} test ratings"
         )
     else:
@@ -146,7 +153,7 @@ def load_and_split_dataset(
             data, test_size=Split.TEST_SIZE, random_state=Split.RANDOM_STATE
         )
         print(
-            f"Global split (random, seed={Split.RANDOM_STATE}): "
+            f"Split (random, seed={Split.RANDOM_STATE}): "
             f"{len(train_df)} train / {len(test_df)} test ratings"
         )
     return data, train_df, test_df
@@ -176,29 +183,73 @@ def split_data_single(
     return train_test_split(data, test_size=test_size, random_state=random_state)  # type: ignore[return-value]
 
 
+def split_data_temporal_global(
+    data: pd.DataFrame,
+    test_size: float = 0.2,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Legacy global chronological cutoff (last *test_size* of all rows)."""
+    data_sorted = data.sort_values("timestamp").reset_index(drop=True)
+    cutoff = int(len(data_sorted) * (1 - test_size))
+    return data_sorted.iloc[:cutoff].copy(), data_sorted.iloc[cutoff:].copy()
+
+
 def split_data_temporal(
     data: pd.DataFrame,
     test_size: float = 0.2,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Perform a temporal train/test split.
+    Per-user chronological leave-last split.
 
-    Rows are sorted globally by ``timestamp`` and the last *test_size* fraction
-    is held out as the test set.  This guarantees that every test interaction
-    occurred *after* every training interaction in the cascade timeline,
-    eliminating the temporal-leakage issue that arises with a random shuffle.
+    For each user, sort by ``(timestamp, row_order)`` and hold out the last
+    ``max(1, ceil(test_size * N))`` ratings.  Test ratings are always later
+    than that user's train ratings; users with train history stay warm so
+    graph / social features can transfer (unlike a global time cutoff).
 
-    Args:
-        data:      Full ratings DataFrame.  Must contain a ``timestamp`` column.
-        test_size: Fraction of rows to hold out (taken from the *end* of the
-                   sorted sequence).
-
-    Returns:
-        Tuple of (train_df, test_df), both sorted by timestamp.
+    Users with a single rating go entirely to test (no train history).
     """
-    data_sorted = data.sort_values("timestamp").reset_index(drop=True)
-    cutoff = int(len(data_sorted) * (1 - test_size))
-    return data_sorted.iloc[:cutoff].copy(), data_sorted.iloc[cutoff:].copy()
+    import math
+
+    if "timestamp" not in data.columns:
+        raise ValueError("split_data_temporal requires a timestamp column")
+    if not 0.0 < test_size < 1.0:
+        raise ValueError(f"test_size must be in (0, 1), got {test_size}")
+
+    ordered = data.copy()
+    ordered["_ord"] = np.arange(len(ordered), dtype=np.int64)
+    train_parts: list[pd.DataFrame] = []
+    test_parts: list[pd.DataFrame] = []
+    for _, group in ordered.groupby("UserId", sort=False):
+        g = group.sort_values(["timestamp", "_ord"], kind="mergesort")
+        n = len(g)
+        n_test = max(1, int(math.ceil(test_size * n)))
+        if n_test >= n:
+            test_parts.append(g)
+            continue
+        test_parts.append(g.iloc[-n_test:])
+        train_parts.append(g.iloc[:-n_test])
+
+    def _concat(parts: list[pd.DataFrame]) -> pd.DataFrame:
+        if not parts:
+            out = data.iloc[0:0].copy()
+        else:
+            out = pd.concat(parts, ignore_index=False)
+        if "_ord" in out.columns:
+            out = out.drop(columns=["_ord"])
+        return out.sort_values("timestamp").reset_index(drop=True)
+
+    return _concat(train_parts), _concat(test_parts)
+
+
+def warm_test_slice(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Test rows whose user *and* item both appear in train (fair social eval)."""
+    train_users = set(train_df["UserId"].unique())
+    train_items = set(train_df["ItemId"].unique())
+    return test_df.loc[
+        test_df["UserId"].isin(train_users) & test_df["ItemId"].isin(train_items)
+    ].copy()
 
 
 # ---------------------------------------------------------------------------
